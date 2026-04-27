@@ -1,0 +1,16 @@
+{
+  "courseNoteList": [
+    {
+      "id": 887764,
+      "course_id": 129006,
+      "course_name": "API设计与实现",
+      "content": "<p><strong>作业要求</strong> 完成接口设计文档并提交录屏。</p>",
+      "title": "Offer Show微信公众号后台系统",
+      "end_time": "2026-04-30 23:59",
+      "open_date": "2026-04-09 00:00",
+      "subStatus": "未提交"
+    }
+  ],
+  "STATUS": "0",
+  "message": "成功"
+}

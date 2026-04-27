@@ -1,0 +1,19 @@
+{
+  "result": [
+    {
+      "xqId": "B58402C9CC9942339350410A4863F56E",
+      "xqCode": "2025202602",
+      "CNAME": "2025-2026第二学期",
+      "xqName": "2025-2026第二学期",
+      "currentFlag": 2
+    },
+    {
+      "xqId": "3878B486C8104A31ABB3A9EFD2F4E5BA",
+      "xqCode": "2025202601",
+      "CNAME": "2025-2026第一学期",
+      "xqName": "2025-2026第一学期",
+      "currentFlag": 1
+    }
+  ],
+  "STATUS": "0"
+}

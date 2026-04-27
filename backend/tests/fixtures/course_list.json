@@ -1,0 +1,16 @@
+{
+  "courseList": [
+    {
+      "id": 129006,
+      "name": "API设计与实现",
+      "course_num": "M410001B",
+      "teacher_id": 159966,
+      "teacher_name": "王戍",
+      "xq_code": "2025202602",
+      "fz_id": "2025-2026-2-2M410001B01"
+    }
+  ],
+  "STATUS": "0",
+  "message": "成功",
+  "total": 1
+}
