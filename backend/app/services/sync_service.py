@@ -12,7 +12,19 @@ from ..exceptions import SessionExpiredError, SyncAlreadyRunningError
 from ..locks import FileLock
 from ..providers.aa import AAProvider
 from ..providers.ve import VEProvider
-from ..schemas import CalendarData, CoverageLevel, EmptyRoomData, ExamData, HomeworkData, ModuleEnvelope, ScoreData, TimetableData
+from ..schemas import (
+    AcademicProgressData,
+    CalendarData,
+    CourseResourcesData,
+    CoverageLevel,
+    EmptyRoomData,
+    ExamData,
+    HomeworkData,
+    ModuleEnvelope,
+    ScoreData,
+    StudentProfileData,
+    TimetableData,
+)
 from ..session import SessionManager
 
 
@@ -49,12 +61,22 @@ class SyncService:
                 current_week = calendar.get("data", {}).get("current_week") if calendar else None
                 current_term = calendar.get("data", {}).get("current_term") if calendar else None
 
+                await self._fetch_and_store("profile", aa.fetch_student_profile, summary, error_parts)
                 await self._fetch_and_store("timetable", aa.fetch_timetable, summary, error_parts)
                 await self._fetch_and_store("exams", aa.fetch_exams, summary, error_parts)
                 await self._fetch_and_store("scores", aa.fetch_scores, summary, error_parts, ctype="lr")
+                await self._fetch_and_store("history_scores", aa.fetch_history_scores, summary, error_parts)
+                await self._fetch_and_store("academic_progress", aa.fetch_academic_progress, summary, error_parts)
                 await self._fetch_and_store(
                     "homework",
                     ve.fetch_homework,
+                    summary,
+                    error_parts,
+                    term=current_term,
+                )
+                await self._fetch_and_store(
+                    "course_resources",
+                    ve.fetch_course_resources,
                     summary,
                     error_parts,
                     term=current_term,
@@ -119,7 +141,21 @@ class SyncService:
             envelope: ModuleEnvelope = await fetcher(**kwargs)
             payload = envelope.model_copy(update={"synced_at": utcnow_iso()}).model_dump(mode="json")
             self.db.save_snapshot(module_key, payload)
-            item_count = len(payload.get("data", {}).get("items", payload.get("data", {}).get("entries", payload.get("data", {}).get("rooms", []))))
+            data = payload.get("data", {})
+            item_count = len(
+                data.get(
+                    "items",
+                    data.get(
+                        "entries",
+                        data.get(
+                            "rooms",
+                            data.get("resources", data.get("courses", data.get("fields", []))),
+                        ),
+                    ),
+                )
+            )
+            if not item_count and isinstance(data.get("buckets"), list):
+                item_count = len(data.get("buckets", []))
             summary[module_key] = {
                 "status": "success",
                 "coverage": payload.get("coverage"),
@@ -151,16 +187,29 @@ class SyncService:
             async with self.session_manager.get_authenticated_client() as client:
                 aa = AAProvider(client)
                 ve = VEProvider(client)
-                if module_key == "timetable":
+                if module_key == "profile":
+                    envelope = await aa.fetch_student_profile()
+                elif module_key == "timetable":
                     envelope = await aa.fetch_timetable()
                 elif module_key == "exams":
                     envelope = await aa.fetch_exams(term=params.get("term"))
                 elif module_key == "scores":
                     envelope = await aa.fetch_scores(term=params.get("term"), ctype=params.get("ctype"))
+                elif module_key == "history_scores":
+                    envelope = await aa.fetch_history_scores(term=params.get("term"))
+                elif module_key == "academic_progress":
+                    envelope = await aa.fetch_academic_progress()
                 elif module_key == "calendar":
                     envelope = await ve.fetch_calendar(month=params.get("month"))
                 elif module_key == "homework":
                     envelope = await ve.fetch_homework(term=params.get("term"))
+                elif module_key == "course_resources":
+                    envelope = await ve.fetch_course_resources(
+                        term=params.get("term"),
+                        course_id=params.get("course_id"),
+                        folder_id=params.get("folder_id") or "0",
+                        search=params.get("search"),
+                    )
                 elif module_key == "empty_rooms":
                     envelope = await aa.fetch_empty_rooms(
                         term=params.get("term"),
@@ -182,6 +231,14 @@ class SyncService:
             return fallback.model_copy(update={"synced_at": utcnow_iso()}).model_dump(mode="json")
 
     def _build_empty_fallback(self, module_key: str, params: dict[str, Any]) -> ModuleEnvelope:
+        if module_key == "profile":
+            return ModuleEnvelope(
+                module="profile",
+                source_system="ve",
+                coverage=CoverageLevel.PROVISIONAL,
+                source_params={"fallback_reason": params.get("fallback_reason")},
+                data=StudentProfileData(),
+            )
         if module_key == "timetable":
             return ModuleEnvelope(
                 module="timetable",
@@ -206,6 +263,22 @@ class SyncService:
                 source_params={"term": params.get("term"), "ctype": params.get("ctype")},
                 data=ScoreData(current_term=params.get("term")),
             )
+        if module_key == "history_scores":
+            return ModuleEnvelope(
+                module="history_scores",
+                source_system="aa",
+                coverage=CoverageLevel.PROVISIONAL,
+                source_params={"term": params.get("term"), "ctype": "ln"},
+                data=ScoreData(current_term=params.get("term")),
+            )
+        if module_key == "academic_progress":
+            return ModuleEnvelope(
+                module="academic_progress",
+                source_system="aa",
+                coverage=CoverageLevel.PROVISIONAL,
+                source_params={"fallback_reason": params.get("fallback_reason")},
+                data=AcademicProgressData(),
+            )
         if module_key == "calendar":
             return ModuleEnvelope(
                 module="calendar",
@@ -221,6 +294,23 @@ class SyncService:
                 coverage=CoverageLevel.PROVISIONAL,
                 source_params={"term": params.get("term"), "fallback_reason": params.get("fallback_reason")},
                 data=HomeworkData(current_term=params.get("term")),
+            )
+        if module_key == "course_resources":
+            return ModuleEnvelope(
+                module="course_resources",
+                source_system="ve",
+                coverage=CoverageLevel.PROVISIONAL,
+                source_params={
+                    "term": params.get("term"),
+                    "course_id": params.get("course_id"),
+                    "folder_id": params.get("folder_id") or "0",
+                    "search": params.get("search") or "",
+                    "fallback_reason": params.get("fallback_reason"),
+                },
+                data=CourseResourcesData(
+                    current_term=params.get("term"),
+                    folder_id=str(params.get("folder_id") or "0"),
+                ),
             )
         if module_key == "empty_rooms":
             return ModuleEnvelope(

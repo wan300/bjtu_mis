@@ -173,43 +173,48 @@ class SessionManager:
 
     async def fetch_inline_login_captcha(self) -> SessionCaptchaResponse:
         headers = {"User-Agent": self.settings.user_agent}
-        async with httpx.AsyncClient(
-            headers=headers,
-            follow_redirects=True,
-            timeout=self.settings.request_timeout,
-        ) as client:
-            login_page = await self._open_cas_login_page(client)
-            login_page_url = str(login_page.url)
-            if not self._is_cas_login_url(login_page_url):
-                raise SessionExpiredError("当前会话已处于登录状态，无需重复登录。")
+        try:
+            async with httpx.AsyncClient(
+                headers=headers,
+                follow_redirects=True,
+                timeout=self.settings.request_timeout,
+            ) as client:
+                login_page = await self._open_cas_login_page(client)
+                login_page_url = str(login_page.url)
+                if not self._is_cas_login_url(login_page_url):
+                    raise SessionExpiredError("当前会话已处于登录状态，无需重复登录。")
 
-            form_payload = self._parse_inline_login_page(login_page_url, login_page.text)
-            captcha_response = await client.get(
-                form_payload["captcha_url"],
-                headers={"Referer": login_page_url},
-            )
-            captcha_response.raise_for_status()
-            if not captcha_response.content:
-                raise SessionExpiredError("验证码加载失败，请刷新后重试。")
+                form_payload = self._parse_inline_login_page(login_page_url, login_page.text)
+                captcha_response = await client.get(
+                    form_payload["captcha_url"],
+                    headers={"Referer": login_page_url},
+                )
+                captcha_response.raise_for_status()
+                if not captcha_response.content:
+                    raise SessionExpiredError("验证码加载失败，请刷新后重试。")
 
-            mime_type = (captcha_response.headers.get("Content-Type") or "image/jpeg").split(";", 1)[0].strip()
-            encoded = base64.b64encode(captcha_response.content).decode("ascii")
-            image_data_url = f"data:{mime_type};base64,{encoded}"
-            fetched_at = self._now_iso()
+                mime_type = (captcha_response.headers.get("Content-Type") or "image/jpeg").split(";", 1)[0].strip()
+                encoded = base64.b64encode(captcha_response.content).decode("ascii")
+                image_data_url = f"data:{mime_type};base64,{encoded}"
+                fetched_at = self._now_iso()
 
-            self._save_inline_login_state(
-                {
-                    "login_url": form_payload["login_url"],
-                    "next": form_payload["next"],
-                    "csrfmiddlewaretoken": form_payload["csrfmiddlewaretoken"],
-                    "captcha_0": form_payload["captcha_0"],
-                    "referer": login_page_url,
-                    "cookies": self._serialize_client_cookies(client),
-                    "created_at": fetched_at,
-                }
-            )
+                self._save_inline_login_state(
+                    {
+                        "login_url": form_payload["login_url"],
+                        "next": form_payload["next"],
+                        "csrfmiddlewaretoken": form_payload["csrfmiddlewaretoken"],
+                        "captcha_0": form_payload["captcha_0"],
+                        "referer": login_page_url,
+                        "cookies": self._serialize_client_cookies(client),
+                        "created_at": fetched_at,
+                    }
+                )
 
-            return SessionCaptchaResponse(image_data_url=image_data_url, fetched_at=fetched_at)
+                return SessionCaptchaResponse(image_data_url=image_data_url, fetched_at=fetched_at)
+        except httpx.HTTPError as exc:
+            raise SessionExpiredError(f"验证码加载失败: {exc}") from exc
+        except Exception as exc:
+            raise SessionExpiredError(f"验证码加载失败: {exc}") from exc
 
     async def login_with_inline_form(self, loginname: str, password: str, captcha: str) -> SessionStatusResponse:
         inline_state = self._load_inline_login_state()

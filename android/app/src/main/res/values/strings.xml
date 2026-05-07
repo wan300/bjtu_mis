@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BJTU MIS</string>
+    <string name="login_title">BJTU MIS</string>
+    <string name="login_subtitle">校园信息本地采集与离线查看</string>
+    <string name="student_or_staff_id">学号 / 工号</string>
+    <string name="password">密码</string>
+    <string name="captcha">验证码</string>
+    <string name="login">登录</string>
+    <string name="refresh_captcha">刷新验证码</string>
+    <string name="sync_now">立即同步</string>
+    <string name="logout">退出登录</string>
+    <string name="offline_cache">本地缓存</string>
+    <string name="course_resources">课程资源</string>
+    <string name="download">下载</string>
+    <string name="search">搜索</string>
+    <string name="overview">总览</string>
+    <string name="profile">我的信息</string>
+    <string name="academic_progress">学业进度</string>
+    <string name="history_scores">历史成绩</string>
+    <string name="timetable">课表</string>
+    <string name="exams">考务</string>
+    <string name="scores">主修成绩</string>
+    <string name="calendar">学年日历</string>
+    <string name="homework">作业</string>
+    <string name="empty_rooms">空教室</string>
+</resources>

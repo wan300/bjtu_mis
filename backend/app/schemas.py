@@ -123,19 +123,150 @@ class HomeworkItem(BaseModel):
     homework_id: int | None = None
     course: str
     course_id: int
+    course_code: str | None = None
     title: str
     content_excerpt: str | None = None
     opened_at: str | None = None
     due_at: str | None = None
+    submitted_at: str | None = None
     status: str
     sub_type: int
     submission_status: str | None = None
+    can_submit: bool = True
+    content_type: int = 0
+    is_group: bool = False
+    return_num: int = 0
 
 
 class HomeworkData(BaseModel):
     current_term: str | None = None
     courses: list[CourseSummary] = Field(default_factory=list)
     items: list[HomeworkItem] = Field(default_factory=list)
+
+
+class HomeworkSubmitResponse(BaseModel):
+    status: str
+    message: str | None = None
+    homework_id: int
+    submitted_at: str | None = None
+    upstream: dict[str, Any] = Field(default_factory=dict)
+
+
+class CourseResourceFolder(BaseModel):
+    folder_id: str
+    name: str
+    parent_id: str | None = None
+
+
+class CourseResourceItem(BaseModel):
+    resource_id: str
+    rp_id: str
+    res_id: str | None = None
+    name: str
+    extension: str | None = None
+    size: str | None = None
+    uploaded_at: str | None = None
+    teacher_name: str | None = None
+    download_count: int | None = None
+    click_count: int | None = None
+    can_download: bool = False
+    folder_id: str = "0"
+
+
+class CourseResourcesData(BaseModel):
+    current_term: str | None = None
+    courses: list[CourseSummary] = Field(default_factory=list)
+    selected_course_id: int | None = None
+    folder_id: str = "0"
+    tree: list[CourseResourceFolder] = Field(default_factory=list)
+    folders: list[CourseResourceFolder] = Field(default_factory=list)
+    resources: list[CourseResourceItem] = Field(default_factory=list)
+
+
+class ProfileField(BaseModel):
+    label: str
+    value: str
+
+
+class ProfileSection(BaseModel):
+    title: str
+    fields: list[ProfileField] = Field(default_factory=list)
+
+
+class StudentProfileData(BaseModel):
+    name: str | None = None
+    student_id: str | None = None
+    account: str | None = None
+    gender: str | None = None
+    birthday: str | None = None
+    name_pinyin: str | None = None
+    english_name: str | None = None
+    ethnicity: str | None = None
+    political_status: str | None = None
+    nationality: str | None = None
+    is_international_student: str | None = None
+    college: str | None = None
+    major: str | None = None
+    class_name: str | None = None
+    grade: str | None = None
+    education_level: str | None = None
+    has_student_status: str | None = None
+    student_status: str | None = None
+    student_category: str | None = None
+    change_status: str | None = None
+    cultivation_method: str | None = None
+    is_auditor: str | None = None
+    study_language: str | None = None
+    campus: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    avatar_url: str | None = None
+    fields: list[ProfileField] = Field(default_factory=list)
+    sections: list[ProfileSection] = Field(default_factory=list)
+
+
+class CreditSummary(BaseModel):
+    course_count: int = 0
+    passed_course_count: int = 0
+    failed_course_count: int = 0
+    attempted_credits: float = 0
+    passed_credits: float = 0
+    failed_credits: float = 0
+    target_credits: float | None = None
+    completion_rate: float = 0
+
+
+class CreditBucket(BaseModel):
+    name: str
+    required_credits: float | None = None
+    earned_credits: float = 0
+    pending_credits: float | None = None
+    completion_rate: float | None = None
+    parent: str | None = None
+
+
+class AcademicProgressCourse(BaseModel):
+    term: str | None = None
+    course_code: str | None = None
+    course_name: str
+    credit: float | None = None
+    exam_date: str | None = None
+    score: str | None = None
+    status: str
+    detail: str | None = None
+    group_info: str | None = None
+    source: str = "scores"
+
+
+class AcademicProgressData(BaseModel):
+    current_term: str | None = None
+    summary: CreditSummary = Field(default_factory=CreditSummary)
+    buckets: list[CreditBucket] = Field(default_factory=list)
+    merged_buckets: list[CreditBucket] = Field(default_factory=list)
+    detail_buckets: list[CreditBucket] = Field(default_factory=list)
+    courses: list[AcademicProgressCourse] = Field(default_factory=list)
+    replace_courses: list[dict[str, Any]] = Field(default_factory=list)
+    fields: list[ProfileField] = Field(default_factory=list)
 
 
 class EmptyRoomSlotHeader(BaseModel):

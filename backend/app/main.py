@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Query, Request
+import httpx
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -10,18 +12,20 @@ from fastapi.staticfiles import StaticFiles
 from .config import Settings, get_settings
 from .db import Database
 from .exceptions import SessionExpiredError, SyncAlreadyRunningError
-from .schemas import InlineLoginRequest, SessionCaptchaResponse, SessionStatusResponse, SyncStatusResponse
+from .providers.ve import VEProvider
+from .schemas import HomeworkSubmitResponse, InlineLoginRequest, SessionCaptchaResponse, SessionStatusResponse, SyncStatusResponse
 from .services.sync_service import SyncService
 from .session import SessionManager
 
 
 def filter_homework_payload(payload: dict[str, Any], status: str) -> dict[str, Any]:
+    payload = dict(payload)
+    data = dict(payload.get("data", {}))
+    payload["data"] = data
     if status == "all":
         return payload
-    data = payload.get("data", {})
     items = data.get("items", [])
     data["items"] = [item for item in items if item.get("status") == status]
-    payload["data"] = data
     return payload
 
 
@@ -102,6 +106,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def sync_status(request: Request) -> SyncStatusResponse:
         return SyncStatusResponse(**request.app.state.sync_service.get_sync_status())
 
+    @app.get("/api/modules/profile")
+    async def get_profile(request: Request) -> dict[str, Any]:
+        payload = request.app.state.sync_service.get_snapshot("profile")
+        if payload is None:
+            try:
+                payload = await request.app.state.sync_service.fetch_live_module("profile")
+            except SessionExpiredError as exc:
+                raise HTTPException(status_code=401, detail={"code": "SESSION_EXPIRED", "message": str(exc)}) from exc
+        return payload
+
+    @app.get("/api/modules/academic-progress")
+    async def get_academic_progress(request: Request) -> dict[str, Any]:
+        payload = request.app.state.sync_service.get_snapshot("academic_progress")
+        if payload is None:
+            try:
+                payload = await request.app.state.sync_service.fetch_live_module("academic_progress")
+            except SessionExpiredError as exc:
+                raise HTTPException(status_code=401, detail={"code": "SESSION_EXPIRED", "message": str(exc)}) from exc
+        return payload
+
+    @app.get("/api/modules/history-scores")
+    async def get_history_scores(request: Request, term: str | None = None) -> dict[str, Any]:
+        payload = request.app.state.sync_service.get_snapshot("history_scores")
+        if payload is None or term:
+            try:
+                payload = await request.app.state.sync_service.fetch_live_module("history_scores", term=term)
+            except SessionExpiredError as exc:
+                raise HTTPException(status_code=401, detail={"code": "SESSION_EXPIRED", "message": str(exc)}) from exc
+        return payload
+
     @app.get("/api/modules/timetable")
     async def get_timetable(request: Request, term: str | None = None, week: str | None = None) -> dict[str, Any]:
         payload = request.app.state.sync_service.get_snapshot("timetable")
@@ -156,6 +190,85 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except SessionExpiredError as exc:
             raise HTTPException(status_code=401, detail={"code": "SESSION_EXPIRED", "message": str(exc)}) from exc
         return filter_homework_payload(payload, status)
+
+    @app.post("/api/modules/homework/{homework_id}/submit", response_model=HomeworkSubmitResponse)
+    async def submit_homework(
+        request: Request,
+        homework_id: int,
+        course_id: int = Form(...),
+        content: str = Form(default=""),
+        files: list[UploadFile] | None = File(default=None),
+    ) -> HomeworkSubmitResponse:
+        uploaded_files: list[tuple[str, bytes, str | None]] = []
+        for upload in files or []:
+            body = await upload.read()
+            if not upload.filename and not body:
+                continue
+            uploaded_files.append((upload.filename or "attachment", body, upload.content_type))
+
+        try:
+            async with request.app.state.session_manager.get_authenticated_client() as client:
+                result = await VEProvider(client).submit_homework(
+                    homework_id=homework_id,
+                    course_id=course_id,
+                    content=content,
+                    files=uploaded_files,
+                )
+        except SessionExpiredError as exc:
+            raise HTTPException(status_code=401, detail={"code": "SESSION_EXPIRED", "message": str(exc)}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail={"code": "HOMEWORK_NOT_FOUND", "message": str(exc)}) from exc
+        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"code": "HOMEWORK_SUBMIT_FAILED", "message": str(exc)},
+            ) from exc
+        return HomeworkSubmitResponse(**result)
+
+    @app.get("/api/modules/course-resources")
+    async def get_course_resources(
+        request: Request,
+        term: str | None = None,
+        course_id: str | None = None,
+        folder_id: str = "0",
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return await request.app.state.sync_service.fetch_live_module(
+                "course_resources",
+                term=term,
+                course_id=course_id,
+                folder_id=folder_id,
+                search=search,
+            )
+        except SessionExpiredError as exc:
+            raise HTTPException(status_code=401, detail={"code": "SESSION_EXPIRED", "message": str(exc)}) from exc
+
+    @app.get("/api/modules/course-resources/download/{rp_id}")
+    async def download_course_resource(
+        request: Request,
+        rp_id: str,
+        filename: str | None = None,
+    ) -> Response:
+        try:
+            async with request.app.state.session_manager.get_authenticated_client() as client:
+                content, content_type, upstream_disposition = await VEProvider(client).download_course_resource(rp_id)
+        except SessionExpiredError as exc:
+            raise HTTPException(status_code=401, detail={"code": "SESSION_EXPIRED", "message": str(exc)}) from exc
+        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"code": "COURSE_RESOURCE_DOWNLOAD_FAILED", "message": str(exc)},
+            ) from exc
+
+        headers: dict[str, str] = {}
+        if filename:
+            headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename, safe='')}"
+        elif upstream_disposition:
+            headers["Content-Disposition"] = upstream_disposition
+        else:
+            headers["Content-Disposition"] = "attachment"
+        return Response(content=content, media_type=content_type, headers=headers)
 
     @app.get("/api/modules/empty-rooms")
     async def get_empty_rooms(

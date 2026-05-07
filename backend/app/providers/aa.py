@@ -3,12 +3,22 @@ from __future__ import annotations
 import asyncio
 import re
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
 from ..exceptions import SessionExpiredError
-from ..parsers.aa import parse_empty_rooms, parse_exams, parse_scores, parse_select_options, parse_timetable
+from ..parsers.aa import (
+    parse_academic_progress,
+    parse_academic_progress_detail_path,
+    parse_empty_rooms,
+    parse_exams,
+    parse_scores,
+    parse_select_options,
+    parse_student_status_profile,
+    parse_timetable,
+)
 from ..schemas import CoverageLevel, ModuleEnvelope
 
 
@@ -159,6 +169,53 @@ class AAProvider:
             source_system="aa",
             coverage=CoverageLevel.VERIFIED,
             source_params={"term": term or parsed.current_term, "ctype": ctype},
+            data=parsed,
+        )
+
+    async def fetch_history_scores(self, term: str | None = None) -> ModuleEnvelope:
+        envelope = await self.fetch_scores(term=term, ctype="ln")
+        return envelope.model_copy(
+            update={
+                "module": "history_scores",
+                "source_params": {"term": term or envelope.data.current_term, "ctype": "ln"},
+            }
+        )
+
+    async def fetch_student_profile(self) -> ModuleEnvelope:
+        html = await self._get_text("/school_census/schoolcensus/stuview/")
+        profile = parse_student_status_profile(html)
+        if profile.avatar_url and not profile.avatar_url.startswith(("http://", "https://", "data:")):
+            profile = profile.model_copy(update={"avatar_url": urljoin("https://aa.bjtu.edu.cn/", profile.avatar_url)})
+        return ModuleEnvelope(
+            module="profile",
+            source_system="aa",
+            coverage=CoverageLevel.VERIFIED if profile.fields else CoverageLevel.PROVISIONAL,
+            source_params={},
+            data=profile,
+        )
+
+    async def fetch_academic_progress(self) -> ModuleEnvelope:
+        list_html = await self._get_text("/school_census/schooltraininfo/studylist/")
+        detail_path = parse_academic_progress_detail_path(list_html)
+        if not detail_path:
+            parsed = parse_academic_progress("")
+            coverage = CoverageLevel.PROVISIONAL
+            source_params = {"fallback_reason": "missing_academic_progress_detail_link"}
+        else:
+            detail_url = urljoin("https://aa.bjtu.edu.cn/", detail_path)
+            parsed_url = urlparse(detail_url)
+            detail_request_path = parsed_url.path
+            if parsed_url.query:
+                detail_request_path = f"{detail_request_path}?{parsed_url.query}"
+            detail_html = await self._get_text(detail_request_path)
+            parsed = parse_academic_progress(detail_html)
+            coverage = CoverageLevel.VERIFIED if parsed.buckets or parsed.courses else CoverageLevel.PROVISIONAL
+            source_params = {"detail_path": detail_path}
+        return ModuleEnvelope(
+            module="academic_progress",
+            source_system="aa",
+            coverage=coverage,
+            source_params=source_params,
             data=parsed,
         )
 
