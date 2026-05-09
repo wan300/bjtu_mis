@@ -12,7 +12,7 @@ class MainActivity : ComponentActivity() {
         val app = application as BjtuMisApplication
         setContent {
             BjtuMisTheme {
-                BjtuMisApp(app.container)
+                BjtuMisApp(app.container, onExit = { finish() })
             }
         }
     }

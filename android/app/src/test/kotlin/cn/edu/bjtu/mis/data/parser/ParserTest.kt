@@ -34,6 +34,36 @@ class ParserTest {
         assertEquals(4, data.slots.size)
         assertEquals(2, data.rooms.size)
         assertEquals(listOf(true, false, true, true), data.rooms[1].availability)
+        assertEquals(listOf("free", "busy", "free", "free"), data.rooms[1].cellStates)
+    }
+
+    @Test
+    fun parseEmptyRoomsCellStatesFromStyles() {
+        val html = """
+            <table class="table table-bordered">
+              <tr>
+                <th>星期</th>
+                <th colspan="3">星期一 05月04日</th>
+              </tr>
+              <tr>
+                <th>教室/节次</th>
+                <th>1</th>
+                <th>2</th>
+                <th>3</th>
+              </tr>
+              <tr>
+                <td>SY101 (90)</td>
+                <td style="background-color: #e46868"></td>
+                <td style="background-color: #fff"></td>
+                <td style="background-color: #ffff00"></td>
+              </tr>
+            </table>
+        """.trimIndent()
+
+        val data = parseEmptyRooms(html, mapOf("week" to "8"))
+
+        assertEquals(listOf(false, true, false), data.rooms.single().availability)
+        assertEquals(listOf("busy", "free", "notice"), data.rooms.single().cellStates)
     }
 
     @Test
@@ -48,6 +78,28 @@ class ParserTest {
         assertEquals(1, homework.size)
         assertEquals("open", homework.first().status)
         assertEquals("M410001B", homework.first().courseCode)
+    }
+
+    @Test
+    fun parseHomeworkStatusUsesSubmissionTime() {
+        val course = parseCourses(json("course_list.json")).first()
+        val payload = AppJson.parseToJsonElement(
+            """
+            {
+              "courseNoteList": [
+                {"id": 1, "title": "Open homework"},
+                {"id": 2, "title": "Submitted homework", "subTime": "2026-04-10 23:05:56", "subStatus": "submitted"}
+              ],
+              "STATUS": "0"
+            }
+            """.trimIndent()
+        ).jsonObject
+
+        val homework = parseHomeworkList(payload, course, 0)
+
+        assertEquals(listOf("open", "done"), homework.map { it.status })
+        assertEquals(null, homework[0].submittedAt)
+        assertEquals("2026-04-10 23:05:56", homework[1].submittedAt)
     }
 
     @Test

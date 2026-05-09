@@ -145,6 +145,7 @@ data class HomeworkItem(
     val contentExcerpt: String? = null,
     val openedAt: String? = null,
     val dueAt: String? = null,
+    val submittedAt: String? = null,
     val status: String,
     val subType: Int,
     val submissionStatus: String? = null,
@@ -296,6 +297,7 @@ data class EmptyRoomRow(
     val room: String,
     val seatLabel: String? = null,
     val availability: List<Boolean> = emptyList(),
+    val cellStates: List<String> = emptyList(),
 )
 
 @Serializable

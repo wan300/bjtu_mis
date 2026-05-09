@@ -254,13 +254,31 @@ class CourseResourceRepository(
     ): ModuleEnvelope<CourseResourcesData> =
         moduleRepository.courseResources(term, courseId, folderId, search)
 
-    suspend fun download(rpId: String, filename: String): File =
+    suspend fun download(rpId: String, filename: String, extension: String? = null): File =
         sessionManager.withAuthenticatedClient { client ->
-            val response = VeProvider(client).downloadCourseResource(rpId)
             val targetDir = File(context.filesDir, "downloads").apply { mkdirs() }
-            val safeName = filename.replace(Regex("""[\\/:*?"<>|]"""), "_").ifBlank { "resource-$rpId" }
-            File(targetDir, safeName).apply { writeBytes(response.body) }
+            val target = File(targetDir, safeDownloadFileName(filename, extension, rpId))
+            VeProvider(client).downloadCourseResource(rpId, target).file
         }
+
+    private fun safeDownloadFileName(filename: String, extension: String?, rpId: String): String {
+        val safeName = filename
+            .trim()
+            .replace(Regex("""[\\/:*?"<>|]"""), "_")
+            .ifBlank { "resource-$rpId" }
+        val safeExtension = extension
+            ?.trim()
+            ?.trimStart('.')
+            ?.replace(Regex("""[^A-Za-z0-9]+"""), "_")
+            ?.trim('_')
+            .orEmpty()
+
+        return if (safeExtension.isBlank() || safeName.endsWith(".$safeExtension", ignoreCase = true)) {
+            safeName
+        } else {
+            "$safeName.$safeExtension"
+        }
+    }
 }
 
 @PublishedApi

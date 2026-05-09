@@ -33,12 +33,10 @@ import androidx.core.content.FileProvider
 import cn.edu.bjtu.mis.data.repository.CourseResourceRepository
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.ModuleEnvelope
-import cn.edu.bjtu.mis.ui.components.CoverageChip
 import cn.edu.bjtu.mis.ui.components.InfoCard
 import cn.edu.bjtu.mis.ui.components.KeyValue
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
-import cn.edu.bjtu.mis.ui.components.SectionTitle
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -73,14 +71,6 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
     LaunchedEffect(Unit) { load() }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item {
-            val data = (state as? LoadState.Data)?.value?.data
-            SectionTitle(
-                title = "课程资源",
-                subtitle = data?.currentTerm ?: "电子课件",
-                trailing = { CoverageChip((state as? LoadState.Data)?.value?.coverage) },
-            )
-        }
         item {
             val data = (state as? LoadState.Data)?.value?.data
             CourseSelector(
@@ -123,9 +113,15 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
             is LoadState.Data -> {
                 val data = current.value.data
                 item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AssistChip(onClick = {}, label = { Text("${data.resources.size} 个文件") })
-                        AssistChip(onClick = {}, label = { Text("${data.folders.size} 个目录") })
+                    val currentTerm = data.currentTerm
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (!currentTerm.isNullOrBlank()) {
+                            AssistChip(onClick = {}, label = { Text(currentTerm) })
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AssistChip(onClick = {}, label = { Text("${data.resources.size} 个文件") })
+                            AssistChip(onClick = {}, label = { Text("${data.folders.size} 个目录") })
+                        }
                     }
                 }
                 items(data.folders, key = { it.folderId }) { folder ->
@@ -154,7 +150,7 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
                                 scope.launch {
                                     downloading = resource.rpId
                                     error = null
-                                    runCatching { repository.download(resource.rpId, resource.name) }
+                                    runCatching { repository.download(resource.rpId, resource.name, resource.extension) }
                                         .onSuccess { openFile(context, it) }
                                         .onFailure { error = it.message ?: "下载失败" }
                                     downloading = null

@@ -1,21 +1,24 @@
 package cn.edu.bjtu.mis.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
@@ -27,7 +30,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.di.AppContainer
 import cn.edu.bjtu.mis.model.ModuleKeys
 import cn.edu.bjtu.mis.model.SessionState
@@ -47,12 +52,13 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BjtuMisApp(container: AppContainer) {
+fun BjtuMisApp(container: AppContainer, onExit: () -> Unit) {
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     var current by remember { mutableStateOf("overview") }
     var ready by remember { mutableStateOf<Boolean?>(null) }
     var sessionDetail by remember { mutableStateOf("") }
+    var showExitDialog by remember { mutableStateOf(false) }
 
     fun refreshSession() {
         scope.launch {
@@ -69,8 +75,44 @@ fun BjtuMisApp(container: AppContainer) {
         false -> LoginScreen(container.sessionRepository) {
             ready = true
             current = "overview"
+            refreshSession()
         }
-        true -> ModalNavigationDrawer(
+        true -> {
+            BackHandler {
+                when {
+                    drawerState.isOpen -> scope.launch { drawerState.close() }
+                    current != "overview" -> {
+                        showExitDialog = false
+                        current = "overview"
+                    }
+                    else -> showExitDialog = true
+                }
+            }
+
+            if (showExitDialog) {
+                AlertDialog(
+                    onDismissRequest = { showExitDialog = false },
+                    title = { Text("退出应用") },
+                    text = { Text("确定要退出 BJTU MIS 吗？") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showExitDialog = false
+                                onExit()
+                            },
+                        ) {
+                            Text("是")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showExitDialog = false }) {
+                            Text("否")
+                        }
+                    },
+                )
+            }
+
+            ModalNavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
                 ModalDrawerSheet {
@@ -103,19 +145,22 @@ fun BjtuMisApp(container: AppContainer) {
                                 }
                             }
                         },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_menu_24),
+                                    contentDescription = "打开菜单",
+                                )
+                            }
+                        },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                         actions = {
-                            Button(
-                                contentPadding = PaddingValues(horizontal = 12.dp),
-                                onClick = { scope.launch { drawerState.open() } },
-                            ) { Text("菜单") }
-                            Button(
-                                contentPadding = PaddingValues(horizontal = 12.dp),
-                                onClick = {
-                                    container.sessionRepository.logout()
-                                    ready = false
-                                },
-                            ) { Text("退出") }
+                            IconButton(onClick = { current = ModuleKeys.Profile }) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_account_circle_24),
+                                    contentDescription = "我的信息",
+                                )
+                            }
                         },
                     )
                 },
@@ -132,7 +177,13 @@ fun BjtuMisApp(container: AppContainer) {
                             syncRepository = container.syncRepository,
                             onNavigate = { current = it },
                         )
-                        ModuleKeys.Profile -> ProfileScreen(container.moduleRepository)
+                        ModuleKeys.Profile -> ProfileScreen(
+                            repository = container.moduleRepository,
+                            onLogout = {
+                                container.sessionRepository.logout()
+                                ready = false
+                            },
+                        )
                         ModuleKeys.AcademicProgress -> AcademicProgressScreen(container.moduleRepository)
                         ModuleKeys.HistoryScores -> ScoresScreen(container.moduleRepository, history = true)
                         ModuleKeys.Timetable -> TimetableScreen(container.moduleRepository, container.courseResourceRepository)
@@ -144,6 +195,7 @@ fun BjtuMisApp(container: AppContainer) {
                         ModuleKeys.EmptyRooms -> EmptyRoomsScreen(container.moduleRepository)
                     }
                 }
+            }
             }
         }
     }

@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -17,7 +16,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import cn.edu.bjtu.mis.model.CoverageLevel
 
 sealed interface LoadState<out T> {
     data object Loading : LoadState<Nothing>
@@ -41,15 +39,6 @@ fun SectionTitle(title: String, subtitle: String? = null, trailing: @Composable 
         }
         trailing?.invoke()
     }
-}
-
-@Composable
-fun CoverageChip(coverage: CoverageLevel?) {
-    if (coverage == null) return
-    AssistChip(
-        onClick = {},
-        label = { Text(if (coverage == CoverageLevel.Verified) "已验证" else "临时覆盖") },
-    )
 }
 
 @Composable

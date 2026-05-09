@@ -23,6 +23,7 @@ from ..schemas import CoverageLevel, ModuleEnvelope
 
 
 MIS_AA_BRIDGE_URL = "https://mis.bjtu.edu.cn/module/module/10/"
+HISTORY_ALL_TERMS = "all"
 
 
 class AAProvider:
@@ -173,11 +174,55 @@ class AAProvider:
         )
 
     async def fetch_history_scores(self, term: str | None = None) -> ModuleEnvelope:
-        envelope = await self.fetch_scores(term=term, ctype="ln")
-        return envelope.model_copy(
+        requested_term = term.strip() if term else None
+        if requested_term == HISTORY_ALL_TERMS:
+            requested_term = None
+        if requested_term:
+            envelope = await self.fetch_scores(term=requested_term, ctype="ln")
+            return envelope.model_copy(
+                update={
+                    "module": "history_scores",
+                    "source_params": {"term": requested_term, "ctype": "ln"},
+                }
+            )
+
+        seed = await self.fetch_scores(ctype="ln")
+        available_terms = seed.data.available_terms
+        term_values = list(dict.fromkeys(item.value for item in available_terms if item.value))
+        seed_terms = {item.term for item in seed.data.items if item.term}
+        if not term_values or len(seed_terms) > 1:
+            data = seed.data.model_copy(update={"current_term": None})
+        else:
+            combined_items = []
+            seen = set()
+            for term_value in term_values:
+                term_envelope = await self.fetch_scores(term=term_value, ctype="ln")
+                for item in term_envelope.data.items:
+                    key = (
+                        item.term,
+                        item.course_name,
+                        item.credit,
+                        item.score,
+                        item.bonus_score,
+                        item.teacher,
+                        item.detail,
+                    )
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    combined_items.append(item)
+            data = seed.data.model_copy(
+                update={
+                    "current_term": None,
+                    "available_terms": available_terms,
+                    "items": combined_items,
+                }
+            )
+        return seed.model_copy(
             update={
                 "module": "history_scores",
-                "source_params": {"term": term or envelope.data.current_term, "ctype": "ln"},
+                "source_params": {"term": HISTORY_ALL_TERMS, "ctype": "ln"},
+                "data": data,
             }
         )
 

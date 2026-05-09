@@ -110,7 +110,7 @@ fun parseScores(html: String, requestedTerm: String? = null): ScoreData {
     val items = rows.drop(1).mapNotNull { cells ->
         if (cells.size < 7) return@mapNotNull null
         ScoreItem(
-            term = requestedTerm ?: currentTerm ?: cells.getOrNull(1),
+            term = requestedTerm ?: cells.getOrNull(1) ?: currentTerm,
             courseName = cells.getOrElse(2) { cells.getOrElse(1) { "" } },
             credit = cells.getOrNull(3),
             score = cells.getOrNull(4),
@@ -364,18 +364,17 @@ fun parseEmptyRooms(html: String, requestedQuery: Map<String, String?> = emptyMa
         val roomText = normalizeSpace(cells.first().text())
         if (roomText.isBlank()) return@mapNotNull null
         val seat = Regex("""\(([^)]+)\)""").find(roomText)?.groupValues?.get(1)
-        val availability = cells.drop(1).map { cell ->
+        val cellStates = cells.drop(1).map { cell ->
             val style = cell.attr("style").lowercase()
             val text = normalizeSpace(cell.text())
-            when {
-                style.contains("#fff") || style.contains("white") -> true
-                style.isNotBlank() -> false
-                listOf("occupied", "busy", "unavailable").any { text.contains(it, ignoreCase = true) } -> false
-                listOf("free", "available").any { text.contains(it, ignoreCase = true) } -> true
-                else -> text.isBlank()
-            }
+            classifyEmptyRoomCell(style, text)
         }
-        EmptyRoomRow(room = roomText.substringBefore(" "), seatLabel = seat, availability = availability)
+        EmptyRoomRow(
+            room = roomText.substringBefore(" "),
+            seatLabel = seat,
+            availability = cellStates.map { it == EmptyRoomCellFree },
+            cellStates = cellStates,
+        )
     }
 
     val query = requestedQuery.ifEmpty {
@@ -391,6 +390,41 @@ fun parseEmptyRooms(html: String, requestedQuery: Map<String, String?> = emptyMa
         .distinct()
     return EmptyRoomData(query = query, days = days, periods = periods.toList(), slots = slots, rooms = rooms)
 }
+
+private const val EmptyRoomCellFree = "free"
+private const val EmptyRoomCellBusy = "busy"
+private const val EmptyRoomCellNotice = "notice"
+
+private fun classifyEmptyRoomCell(style: String, text: String): String {
+    val normalizedStyle = style.replace(Regex("""\s+"""), "")
+    return when {
+        isWhiteCellStyle(normalizedStyle) -> EmptyRoomCellFree
+        isNoticeCellStyle(normalizedStyle) -> EmptyRoomCellNotice
+        isBusyCellStyle(normalizedStyle) -> EmptyRoomCellBusy
+        normalizedStyle.isNotBlank() -> EmptyRoomCellNotice
+        listOf("occupied", "busy", "unavailable", "占用", "有课", "不可").any { text.contains(it, ignoreCase = true) } -> EmptyRoomCellBusy
+        listOf("free", "available", "空闲", "无课", "可用").any { text.contains(it, ignoreCase = true) } -> EmptyRoomCellFree
+        else -> if (text.isBlank()) EmptyRoomCellFree else EmptyRoomCellBusy
+    }
+}
+
+private fun isWhiteCellStyle(style: String): Boolean =
+    style.contains("white") ||
+        style.contains("rgb(255,255,255)") ||
+        containsHexColor(style, "#fff") ||
+        containsHexColor(style, "#ffffff")
+
+private fun isNoticeCellStyle(style: String): Boolean =
+    style.contains("yellow") || containsHexColor(style, "#ff0") || containsHexColor(style, "#ffff00")
+
+private fun isBusyCellStyle(style: String): Boolean =
+    style.contains("red") ||
+        containsHexColor(style, "#f99") ||
+        containsHexColor(style, "#ff9999") ||
+        containsHexColor(style, "#e46868")
+
+private fun containsHexColor(style: String, color: String): Boolean =
+    Regex("""${Regex.escape(color)}(?![0-9a-f])""").containsMatchIn(style)
 
 fun parseScorecardProgress(scorecardHtml: String, scores: ScoreData? = null): AcademicProgressData {
     val courses = scores?.items.orEmpty().map(::scoreToProgressCourse)

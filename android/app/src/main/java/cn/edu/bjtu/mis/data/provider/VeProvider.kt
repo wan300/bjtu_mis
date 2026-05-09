@@ -1,7 +1,8 @@
 package cn.edu.bjtu.mis.data.provider
 
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
-import cn.edu.bjtu.mis.data.network.BytesResponse
+import cn.edu.bjtu.mis.data.network.FileResponse
+import cn.edu.bjtu.mis.data.network.TextResponse
 import cn.edu.bjtu.mis.data.parser.buildCourseResourcesData
 import cn.edu.bjtu.mis.data.parser.buildHomeworkData
 import cn.edu.bjtu.mis.data.parser.parseCalendar
@@ -23,7 +24,11 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.coroutines.delay
+import java.io.File
+import java.io.IOException
 import java.time.LocalDate
+import java.net.URI
 
 class VeProvider(private val client: BjtuHttpClient) {
     private var sessionId: String? = null
@@ -31,6 +36,8 @@ class VeProvider(private val client: BjtuHttpClient) {
     private var coursePlatformIndexReferer: String = ProviderConstants.VE_COURSE_PLATFORM_BASE_URL
     private var coursePlatformReferer: String = ProviderConstants.VE_COURSE_PLATFORM_BASE_URL
     private var strictFlowReady: Boolean = false
+    private var strictFlowStep: String = "init"
+    private var lastBootstrapError: String? = null
 
     suspend fun fetchCalendar(month: String? = null): ModuleEnvelope<CalendarData> {
         ensureStrictFlow("calendar")
@@ -95,6 +102,14 @@ class VeProvider(private val client: BjtuHttpClient) {
                     }
                 }
         }
+        val dedupedItems = linkedMapOf<String, cn.edu.bjtu.mis.model.HomeworkItem>()
+        items.forEach { item ->
+            val key = item.homeworkId?.let { "id:$it" } ?: "course:${item.courseId}:title:${item.title}:due:${item.dueAt.orEmpty()}"
+            val previous = dedupedItems[key]
+            if (previous == null || (!item.submittedAt.isNullOrBlank() && previous.submittedAt.isNullOrBlank())) {
+                dedupedItems[key] = item
+            }
+        }
 
         return ModuleEnvelope(
             module = "homework",
@@ -104,7 +119,7 @@ class VeProvider(private val client: BjtuHttpClient) {
                 put("term", currentTerm)
                 if (errors.isNotEmpty()) put("partial_error_count", errors.size)
             },
-            data = buildHomeworkData(currentTerm, courses, items),
+            data = buildHomeworkData(currentTerm, courses, dedupedItems.values.toList()),
         )
     }
 
@@ -210,7 +225,7 @@ class VeProvider(private val client: BjtuHttpClient) {
         }
     }
 
-    suspend fun downloadCourseResource(rpId: String): BytesResponse {
+    suspend fun downloadCourseResource(rpId: String, target: File): FileResponse {
         ensureStrictFlow("download")
         val payload = postJsonObject(
             "/ve/back/resourceSpace.shtml",
@@ -219,41 +234,93 @@ class VeProvider(private val client: BjtuHttpClient) {
         )
         val rpUrl = payload.text("rpUrl") ?: payload.text("url") ?: throw IllegalStateException("资源下载地址缺失。")
         val downloadUrl = if (rpUrl.startsWith("http")) rpUrl else "${ProviderConstants.VE_BASE_URL}/ve/${rpUrl.trimStart('/')}"
-        return client.getBytes(downloadUrl, headers = mapOf("Referer" to coursePlatformReferer))
+        return client.downloadToFile(downloadUrl, target, headers = mapOf("Referer" to coursePlatformReferer))
     }
 
     private suspend fun ensureStrictFlow(reason: String) {
         if (strictFlowReady && coursePlatformIndexReferer != ProviderConstants.VE_COURSE_PLATFORM_BASE_URL) return
         val ok = bootstrapVeSession()
-        if (!ok) throw IllegalStateException("VE 会话初始化失败：$reason")
+        if (!ok) {
+            val detail = lastBootstrapError?.let { "（$it）" }.orEmpty()
+            throw IllegalStateException("VE 会话初始化失败：$reason$detail")
+        }
     }
 
-    private suspend fun bootstrapVeSession(): Boolean = runCatching {
-        val misEntry = client.getText(
-            ProviderConstants.MIS_VE_BRIDGE_URL,
-            headers = mapOf("Referer" to ProviderConstants.MIS_HOME_URL),
-        )
-        rememberSession(misEntry.url, misEntry.body, misEntry.headers["Location"])
+    private suspend fun bootstrapVeSession(): Boolean {
+        resetCoursePlatformContext()
+        lastBootstrapError = null
+        return runCatching {
+            strictFlowStep = "mis_module_104_entered"
+            val misEntry = getTextWithRetry(
+                ProviderConstants.MIS_VE_BRIDGE_URL,
+                headers = mapOf("Referer" to ProviderConstants.MIS_HOME_URL),
+            )
+            rememberSession(misEntry)
+            requireExpectedLanding(misEntry.url, "bksy_landing_reached")
 
-        val gateway = client.getText(
-            ProviderConstants.BKSY_VE_BRIDGE_URL,
-            headers = mapOf("Referer" to misEntry.url),
-        )
-        rememberSession(gateway.url, gateway.body, gateway.headers["Location"])
+            strictFlowStep = "bksycenter_gateway_entered"
+            val gateway = getTextWithRetry(
+                ProviderConstants.BKSY_VE_BRIDGE_URL,
+                headers = mapOf("Referer" to misEntry.url),
+            )
+            rememberSession(gateway)
+            if (gateway.url.contains("Timeout.jsp", ignoreCase = true)) {
+                throw IllegalStateException("bksycenter gateway timeout")
+            }
 
-        val index = client.getText(
+            strictFlowStep = "ve_course_platform_index_ready"
+            val index = openCoursePlatformIndex(gateway)
+            rememberSession(index)
+            if (!index.url.contains("123.121.147.7") || !index.url.contains("coursePlatform.shtml")) {
+                throw IllegalStateException("unexpected VE index url ${index.url}")
+            }
+            if (coursePlatformIndexReferer == ProviderConstants.VE_COURSE_PLATFORM_BASE_URL) {
+                throw IllegalStateException("course platform index referer not initialized")
+            }
+            strictFlowReady = true
+            true
+        }.getOrElse { error ->
+            strictFlowReady = false
+            lastBootstrapError = "step=$strictFlowStep ${error.message.orEmpty()}".trim()
+            false
+        }
+    }
+
+    private fun resetCoursePlatformContext() {
+        sessionId = null
+        hasAjaxSession = false
+        coursePlatformIndexReferer = ProviderConstants.VE_COURSE_PLATFORM_BASE_URL
+        coursePlatformReferer = ProviderConstants.VE_COURSE_PLATFORM_BASE_URL
+        strictFlowReady = false
+        strictFlowStep = "init"
+    }
+
+    private suspend fun getTextWithRetry(
+        url: String,
+        params: Map<String, String?> = emptyMap(),
+        headers: Map<String, String> = emptyMap(),
+        attempts: Int = 3,
+    ): TextResponse {
+        var lastError: Throwable? = null
+        repeat(attempts) { attempt ->
+            try {
+                return client.getText(url, params, headers)
+            } catch (error: Throwable) {
+                lastError = error
+                if (attempt == attempts - 1) throw error
+                delay(400L * (attempt + 1))
+            }
+        }
+        throw lastError ?: IOException("request failed without error")
+    }
+
+    private suspend fun openCoursePlatformIndex(gateway: TextResponse): TextResponse {
+        return getTextWithRetry(
             ProviderConstants.VE_COURSE_PLATFORM_BASE_URL,
             params = mapOf("method" to "toCoursePlatformIndex"),
             headers = mapOf("Referer" to gateway.url),
         )
-        rememberSession(index.url, index.body, index.headers["Location"])
-        if (index.url.contains("coursePlatform.shtml")) {
-            coursePlatformIndexReferer = index.url
-            coursePlatformReferer = index.url
-        }
-        strictFlowReady = true
-        true
-    }.getOrDefault(false)
+    }
 
     private suspend fun warmupAjaxSession() {
         if (sessionId != null && hasAjaxSession) return
@@ -326,21 +393,45 @@ class VeProvider(private val client: BjtuHttpClient) {
     }
 
     private suspend fun getJsonObject(path: String, params: Map<String, String?>): JsonObject {
-        if (path.startsWith("/ve/back/coursePlatform/") && !strictFlowReady) ensureStrictFlow(path)
-        if (shouldSendSessionHeader(path, params)) warmupAjaxSession()
-        val response = client.getText(
-            ProviderConstants.VE_BASE_URL + path,
-            params = params,
-            headers = jsonHeaders(path, params),
-        )
-        rememberSession(response.url, response.body, response.headers["Location"])
-        val payload = cn.edu.bjtu.mis.data.AppJson.parseToJsonElement(response.body).jsonObject
-        ensurePayloadSuccess(payload)
-        payload.text("sessionId")?.let {
-            sessionId = it
-            hasAjaxSession = true
+        val isVeApi = path.startsWith("/ve/back/")
+        var bootstrapRetried = false
+        var lastError: Throwable? = null
+        var attempt = 0
+        while (attempt < 4) {
+            try {
+                if (isVeApi && (!strictFlowReady || coursePlatformIndexReferer == ProviderConstants.VE_COURSE_PLATFORM_BASE_URL)) {
+                    ensureStrictFlow(path)
+                }
+                if (shouldSendSessionHeader(path, params)) warmupAjaxSession()
+                val response = client.getText(
+                    ProviderConstants.VE_BASE_URL + path,
+                    params = params,
+                    headers = jsonHeaders(path, params),
+                )
+                rememberSession(response)
+                val payload = parseJsonObjectResponse(response, path)
+                ensurePayloadSuccess(payload, path, params)
+                payload.text("sessionId")?.let {
+                    sessionId = it
+                    hasAjaxSession = true
+                }
+                return payload
+            } catch (error: Throwable) {
+                lastError = error
+                if (isVeApi && !bootstrapRetried && shouldRebootstrapAfter(error)) {
+                    bootstrapRetried = true
+                    resetCoursePlatformContext()
+                    if (bootstrapVeSession()) {
+                        attempt += 1
+                        continue
+                    }
+                }
+                if (attempt == 3 || !isRetryableVeRequest(error)) throw error
+                delay(600L * (attempt + 1))
+                attempt += 1
+            }
         }
-        return payload
+        throw lastError ?: IOException("VE request failed: $path")
     }
 
     private suspend fun postJsonObject(
@@ -360,8 +451,9 @@ class VeProvider(private val client: BjtuHttpClient) {
                 "Referer" to referer,
             ) + sessionHeader(),
         )
-        val payload = cn.edu.bjtu.mis.data.AppJson.parseToJsonElement(response.body).jsonObject
-        ensurePayloadSuccess(payload)
+        rememberSession(response)
+        val payload = parseJsonObjectResponse(response, path)
+        ensurePayloadSuccess(payload, path, params)
         return payload
     }
 
@@ -395,25 +487,80 @@ class VeProvider(private val client: BjtuHttpClient) {
         }
     }
 
-    private fun ensurePayloadSuccess(payload: JsonObject) {
-        val status = payload.text("STATUS")?.lowercase() ?: return
-        if (status in setOf("0", "ok", "success", "true", "2")) return
-        throw IllegalStateException("VE payload STATUS=${payload.text("STATUS")} ERRMSG=${payload.text("ERRMSG") ?: payload.text("message").orEmpty()}")
+    private fun parseJsonObjectResponse(response: TextResponse, path: String): JsonObject {
+        val body = response.body.trimStart()
+        if (body.startsWith("<")) {
+            throw IOException(
+                "VE returned HTML instead of JSON for $path: ${extractHtmlTitle(response.body) ?: response.url}"
+            )
+        }
+        return runCatching {
+            cn.edu.bjtu.mis.data.AppJson.parseToJsonElement(response.body).jsonObject
+        }.getOrElse { error ->
+            throw IOException("VE JSON parse failed for $path: ${error.message}", error)
+        }
     }
 
-    private fun rememberSession(url: String, body: String, location: String?) {
+    private fun extractHtmlTitle(html: String): String? =
+        Regex("""<title[^>]*>(.*?)</title>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            .find(html)
+            ?.groupValues
+            ?.get(1)
+            ?.replace(Regex("""\s+"""), " ")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+
+    private fun shouldRebootstrapAfter(error: Throwable): Boolean {
+        val message = error.message.orEmpty()
+        return message.contains("HTTP 401") ||
+            message.contains("HTTP 403") ||
+            message.contains("HTTP 5") ||
+            message.contains("Expected JSON", ignoreCase = true) ||
+            message.contains("Json", ignoreCase = true) ||
+            message.contains("returned HTML", ignoreCase = true) ||
+            message.contains("会话结束")
+    }
+
+    private fun isRetryableVeRequest(error: Throwable): Boolean {
+        val message = error.message.orEmpty()
+        return error is IOException || message.contains("HTTP 5")
+    }
+
+    private fun ensurePayloadSuccess(payload: JsonObject, path: String, params: Map<String, String?>) {
+        val status = payload.text("STATUS")?.lowercase() ?: return
+        if (status in setOf("0", "ok", "success", "true")) return
+        val method = params["method"].orEmpty()
+        if (
+            status == "2" &&
+            method in setOf("getHomeWorkList", "stuQueryCourseResourceBag", "stuQueryUploadResourceForCourseList")
+        ) {
+            return
+        }
+        throw IllegalStateException("VE payload $path STATUS=${payload.text("STATUS")} ERRMSG=${payload.text("ERRMSG") ?: payload.text("message").orEmpty()}")
+    }
+
+    private fun rememberSession(response: TextResponse) {
+        rememberSession(
+            response.url,
+            response.body,
+            response.headers["Location"],
+            response.headers.values("Set-Cookie").joinToString("; "),
+        )
+    }
+
+    private fun rememberSession(url: String, body: String, location: String?, setCookie: String = "") {
         rememberCoursePlatformContext(url, body)
-        listOf(url, body, location.orEmpty()).forEach { value ->
+        listOf(url, body, location.orEmpty(), setCookie).forEach { value ->
             extractSessionId(value)?.let { if (sessionId == null) sessionId = it }
         }
     }
 
     private fun rememberCoursePlatformContext(url: String, body: String) {
-        extractSessionId(body)?.let {
+        extractSessionIdFromHtml(body)?.let {
             sessionId = it
             hasAjaxSession = true
         }
-        extractSessionId(url)?.let { if (sessionId == null) sessionId = it }
+        extractSessionIdFromUrl(url)?.let { if (sessionId == null) sessionId = it }
         if (url.contains("coursePlatform.shtml")) {
             if (url.contains("method=toCoursePlatformIndex")) coursePlatformIndexReferer = url
             coursePlatformReferer = url
@@ -421,16 +568,42 @@ class VeProvider(private val client: BjtuHttpClient) {
     }
 
     private fun extractSessionId(value: String): String? =
-        Regex("""(?:sessionId=|name=["']sessionId["'][^>]*value=["'])([A-Za-z0-9_-]+)""", RegexOption.IGNORE_CASE)
+        extractSessionIdFromUrl(value)
+            ?: extractSessionIdFromCookie(value)
+            ?: extractSessionIdFromHtml(value)
+
+    private fun extractSessionIdFromUrl(value: String): String? =
+        Regex("""[?&]sessionId=([^&#"'\s]+)""", RegexOption.IGNORE_CASE)
             .find(value)
             ?.groupValues
             ?.get(1)
 
-    private fun extractInputValue(html: String, fieldName: String): String? =
-        Regex("""(?:name|id)=["']$fieldName["'][^>]*value=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
-            .find(html)
+    private fun extractSessionIdFromCookie(value: String): String? =
+        Regex("""(?:^|[;,\s])sessionId=([^;,\s]+)""", RegexOption.IGNORE_CASE)
+            .find(value)
             ?.groupValues
             ?.get(1)
+
+    private fun extractSessionIdFromHtml(html: String): String? =
+        extractInputValue(html, "sessionId")
+            ?: Regex("""(?:var\s+)?sessionId\s*[:=]\s*["']([A-Za-z0-9_-]+)["']""", RegexOption.IGNORE_CASE)
+                .find(html)
+                ?.groupValues
+                ?.get(1)
+
+    private fun extractInputValue(html: String, fieldName: String): String? =
+        listOf(
+            Regex("""(?:name|id)=["']${Regex.escape(fieldName)}["'][^>]*value=["']([^"']*)["']""", RegexOption.IGNORE_CASE),
+            Regex("""value=["']([^"']*)["'][^>]*(?:name|id)=["']${Regex.escape(fieldName)}["']""", RegexOption.IGNORE_CASE),
+        ).firstNotNullOfOrNull { pattern ->
+            pattern.find(html)?.groupValues?.get(1)
+        }?.trim()?.takeIf { it.isNotBlank() }
+
+    private fun requireExpectedLanding(url: String, step: String) {
+        val host = runCatching { URI(url).host.orEmpty() }.getOrDefault("")
+        if (host in setOf("bksy.bjtu.edu.cn", "bksycenter.bjtu.edu.cn", "123.121.147.7")) return
+        throw IllegalStateException("$step expected VE landing, got $url")
+    }
 
     private fun extractJsStringValue(html: String, fieldName: String): String? =
         Regex("""\b(?:var\s+)?$fieldName\s*=\s*["']([^"']*)["']""", RegexOption.IGNORE_CASE)

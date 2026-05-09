@@ -11,6 +11,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -28,6 +29,14 @@ data class BytesResponse(
     val code: Int,
     val body: ByteArray,
     val headers: Headers,
+)
+
+data class FileResponse(
+    val url: String,
+    val code: Int,
+    val file: File,
+    val headers: Headers,
+    val bytesWritten: Long,
 )
 
 class BjtuHttpClient(
@@ -117,6 +126,63 @@ class BjtuHttpClient(
                 code = it.code,
                 body = it.body?.bytes() ?: ByteArray(0),
                 headers = it.headers,
+            )
+        }
+    }
+
+    suspend fun downloadToFile(
+        url: String,
+        target: File,
+        params: Map<String, String?> = emptyMap(),
+        headers: Map<String, String> = emptyMap(),
+    ): FileResponse = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(buildUrl(url, params))
+            .headers(headers.toHeaders())
+            .get()
+            .build()
+        val response = executeCall(request)
+        response.use {
+            if (!it.isSuccessful) throw IOException("HTTP ${it.code} for ${it.request.url}")
+            val body = it.body ?: throw IOException("Empty response body for ${it.request.url}")
+            target.parentFile?.mkdirs()
+
+            val partial = File(target.absolutePath + ".part")
+            if (partial.exists() && !partial.delete()) {
+                throw IOException("Cannot replace partial download ${partial.absolutePath}")
+            }
+
+            var completed = false
+            var replacementStarted = false
+            val bytesWritten = try {
+                body.byteStream().use { input ->
+                    partial.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }.also {
+                    if (target.exists() && !target.delete()) {
+                        throw IOException("Cannot replace existing file ${target.absolutePath}")
+                    }
+                    replacementStarted = true
+                    if (!partial.renameTo(target)) {
+                        partial.copyTo(target, overwrite = true)
+                        if (!partial.delete()) partial.deleteOnExit()
+                    }
+                    completed = true
+                }
+            } finally {
+                if (!completed) {
+                    partial.delete()
+                    if (replacementStarted) target.delete()
+                }
+            }
+
+            FileResponse(
+                url = it.request.url.toString(),
+                code = it.code,
+                file = target,
+                headers = it.headers,
+                bytesWritten = bytesWritten,
             )
         }
     }

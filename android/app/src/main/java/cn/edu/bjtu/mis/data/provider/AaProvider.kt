@@ -19,6 +19,8 @@ import cn.edu.bjtu.mis.model.TimetableData
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
+private const val HISTORY_ALL_TERMS = "all"
+
 class AaProvider(private val client: BjtuHttpClient) {
     suspend fun fetchTimetable(term: String? = null, week: String? = null): ModuleEnvelope<TimetableData> {
         val html = getText("/course_selection/courseselect/stuschedule/")
@@ -47,9 +49,23 @@ class AaProvider(private val client: BjtuHttpClient) {
     }
 
     suspend fun fetchScores(term: String? = null, ctype: String? = null): ModuleEnvelope<ScoreData> {
-        val params = mapOf("zxjxjhh" to term, "ctype" to ctype)
+        val requestedTerm = term?.takeIf { it.isNotBlank() }
+        val params = mapOf("zxjxjhh" to requestedTerm, "ctype" to ctype)
         val html = getText("/score/scores/stu/view/", params)
-        val parsed = parseScores(html, term)
+        var parsed = parseScores(html, requestedTerm)
+        if (parsed.items.isEmpty() && requestedTerm == null && parsed.availableTerms.isNotEmpty()) {
+            for (option in parsed.availableTerms.take(10)) {
+                val candidate = option.value
+                if (candidate.isBlank() || candidate == parsed.currentTerm) continue
+                val retryParams = mapOf("zxjxjhh" to candidate, "ctype" to ctype)
+                val retryHtml = getText("/score/scores/stu/view/", retryParams)
+                val retryParsed = parseScores(retryHtml, candidate)
+                if (retryParsed.items.isNotEmpty()) {
+                    parsed = retryParsed
+                    break
+                }
+            }
+        }
         return ModuleEnvelope(
             module = "scores",
             sourceSystem = "aa",
@@ -62,14 +78,55 @@ class AaProvider(private val client: BjtuHttpClient) {
         )
     }
 
-    suspend fun fetchHistoryScores(term: String? = null): ModuleEnvelope<ScoreData> =
-        fetchScores(term = term, ctype = "ln").copy(
+    suspend fun fetchHistoryScores(term: String? = null): ModuleEnvelope<ScoreData> {
+        val requestedTerm = term?.takeIf { it.isNotBlank() && it != HISTORY_ALL_TERMS }
+        if (requestedTerm != null) {
+            return fetchScores(term = requestedTerm, ctype = "ln").let { envelope ->
+                envelope.copy(
+                    module = "history_scores",
+                    sourceParams = buildJsonObject {
+                        put("term", requestedTerm)
+                        put("ctype", "ln")
+                    },
+                )
+            }
+        }
+
+        val seed = fetchScores(ctype = "ln")
+        val availableTerms = seed.data.availableTerms
+        val termValues = availableTerms.map { it.value }.filter { it.isNotBlank() }.distinct()
+        val seedTermCount = seed.data.items
+            .mapNotNull { item -> item.term?.takeIf { value -> value.isNotBlank() } }
+            .distinct()
+            .size
+        val allData = if (termValues.isEmpty() || seedTermCount > 1) {
+            seed.data.copy(currentTerm = null)
+        } else {
+            val combinedItems = termValues
+                .flatMap { termValue -> fetchScores(term = termValue, ctype = "ln").data.items }
+                .distinctBy { item ->
+                    listOf(
+                        item.term,
+                        item.courseName,
+                        item.credit,
+                        item.score,
+                        item.bonusScore,
+                        item.teacher,
+                        item.detail,
+                    )
+                        .joinToString("|")
+                }
+            seed.data.copy(currentTerm = null, availableTerms = availableTerms, items = combinedItems)
+        }
+        return seed.copy(
             module = "history_scores",
             sourceParams = buildJsonObject {
-                term?.let { put("term", it) }
+                put("term", HISTORY_ALL_TERMS)
                 put("ctype", "ln")
             },
+            data = allData,
         )
+    }
 
     suspend fun fetchStudentProfile(): ModuleEnvelope<StudentProfileData> {
         val html = getText("/school_census/schoolcensus/stuview/")

@@ -304,7 +304,7 @@ def parse_scores(html: str, requested_term: str | None = None) -> ScoreData:
                 continue
             items.append(
                 ScoreItem(
-                    term=requested_term or current_term or cells[1],
+                    term=requested_term or cells[1] or current_term,
                     course_name=cells[2],
                     credit=cells[3],
                     score=cells[4],

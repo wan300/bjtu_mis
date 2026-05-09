@@ -1,13 +1,24 @@
 <script setup>
-import { onMounted, ref } from 'vue'
-import { NH2, NP, NTag, NInput, NButton, NDataTable, NAlert, NSpace } from 'naive-ui'
+import { computed, onMounted, ref } from 'vue'
+import { NH2, NP, NTag, NSelect, NButton, NDataTable, NAlert, NSpace } from 'naive-ui'
 import { useModuleData } from '../composables/useModuleData'
 import { useSession } from '../composables/useSession'
 
 const { payloads, moduleErrors, loadHistoryScores } = useModuleData()
 const { isSessionReady } = useSession()
 
-const term = ref('')
+const ALL_TERMS_VALUE = 'all'
+const term = ref(ALL_TERMS_VALUE)
+const termOptions = computed(() => {
+  const terms = payloads.historyScores?.data?.available_terms || []
+  return [
+    { label: '全部学期', value: ALL_TERMS_VALUE },
+    ...terms.map((item) => ({
+      label: item.label || item.value,
+      value: item.value
+    }))
+  ]
+})
 
 const columns = [
   { title: '学期', key: 'term', width: 140, ellipsis: { tooltip: true } },
@@ -20,12 +31,18 @@ const columns = [
 ]
 
 async function handleLoad() {
+  await loadHistoryScores(term.value || ALL_TERMS_VALUE)
+}
+
+async function handleTermChange(value) {
+  term.value = value || ALL_TERMS_VALUE
   await loadHistoryScores(term.value)
 }
 
 onMounted(async () => {
-  if (isSessionReady.value && !payloads.historyScores?.data) {
-    await loadHistoryScores()
+  const loadedTerm = payloads.historyScores?.source_params?.term
+  if (isSessionReady.value && (!payloads.historyScores?.data || loadedTerm !== ALL_TERMS_VALUE)) {
+    await loadHistoryScores(ALL_TERMS_VALUE)
   }
 })
 </script>
@@ -43,8 +60,14 @@ onMounted(async () => {
     </div>
 
     <NSpace class="module-toolbar">
-      <NInput v-model:value="term" placeholder="学期值，例如 2025-2026-2-2" style="width: 240px" />
-      <NButton @click="handleLoad">按学期刷新</NButton>
+      <NSelect
+        v-model:value="term"
+        :options="termOptions"
+        placeholder="选择学期"
+        style="width: 240px"
+        @update:value="handleTermChange"
+      />
+      <NButton @click="handleLoad">刷新</NButton>
     </NSpace>
 
     <NAlert v-if="moduleErrors.historyScores" type="error" :title="moduleErrors.historyScores" />

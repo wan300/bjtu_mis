@@ -87,8 +87,14 @@ class SessionManager(
             when {
                 isCasLoginUrl(response.url) -> SessionStatus(SessionState.Expired, "会话已过期，请重新登录。")
                 !aaReady.first -> SessionStatus(SessionState.Expired, aaReady.second)
-                aaReady.second != null -> SessionStatus(SessionState.Ready, "会话可用：${aaReady.second}")
-                else -> SessionStatus(SessionState.Ready, "会话可用。")
+                aaReady.second != null -> {
+                    cookieStore.save(cookieJar.encodeSnapshot())
+                    SessionStatus(SessionState.Ready, "会话可用：${aaReady.second}")
+                }
+                else -> {
+                    cookieStore.save(cookieJar.encodeSnapshot())
+                    SessionStatus(SessionState.Ready, "会话可用。")
+                }
             }
         }.getOrElse { error ->
             SessionStatus(SessionState.Expired, "会话校验失败：${error.message}")
@@ -100,7 +106,9 @@ class SessionManager(
         if (status.state != SessionState.Ready) {
             throw SessionExpiredException(status.detail ?: "会话未准备好。")
         }
-        return block(httpClient)
+        return block(httpClient).also {
+            cookieStore.save(cookieJar.encodeSnapshot())
+        }
     }
 
     fun logout() {

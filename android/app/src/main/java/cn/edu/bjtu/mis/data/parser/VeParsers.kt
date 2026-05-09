@@ -82,6 +82,7 @@ fun parseHomeworkList(payload: JsonObject, course: CourseSummary, subType: Int):
         val homeworkId = obj.int("id")
         val title = obj.text("title") ?: homeworkId?.let { "作业#$it" }.orEmpty()
         if (title.isBlank()) return@mapNotNull null
+        val submittedAt = obj.text("subTime")
         HomeworkItem(
             homeworkId = homeworkId,
             course = obj.text("course_name") ?: course.courseName,
@@ -91,7 +92,8 @@ fun parseHomeworkList(payload: JsonObject, course: CourseSummary, subType: Int):
             contentExcerpt = stripHtmlExcerpt(obj.text("content")),
             openedAt = obj.text("open_date"),
             dueAt = obj.text("end_time"),
-            status = if (subType == 2) "done" else "open",
+            submittedAt = submittedAt,
+            status = if (submittedAt.isNullOrBlank()) "open" else "done",
             subType = subType,
             submissionStatus = obj.text("subStatus"),
         )
