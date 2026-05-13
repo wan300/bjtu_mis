@@ -5,22 +5,24 @@ import org.junit.Test
 
 class VeProviderTest {
     @Test
-    fun courseReplayUserIdCandidatesPreferFreshContextId() {
+    fun courseReplayUserIdCandidatesPreferReplayDetailId() {
         val candidates = courseReplayUserIdCandidates(
-            contextUserId = " fresh-user ",
-            preferredUserId = " stale-user ",
+            detailUserId = " detail-user ",
+            contextUserId = " platform-user ",
+            preferredUserId = " cached-user ",
             listenUserId = " listen-user ",
         )
 
-        assertEquals(listOf("fresh-user", "stale-user", "listen-user"), candidates)
+        assertEquals(listOf("detail-user", "platform-user", "cached-user", "listen-user"), candidates)
     }
 
     @Test
     fun courseReplayUserIdCandidatesTrimAndDeduplicate() {
         val candidates = courseReplayUserIdCandidates(
+            detailUserId = " ",
             contextUserId = " 1001 ",
             preferredUserId = "1001",
-            listenUserId = " ",
+            listenUserId = "1001",
         )
 
         assertEquals(listOf("1001"), candidates)

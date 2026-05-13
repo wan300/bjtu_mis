@@ -856,10 +856,9 @@ Set-Location d:\code\project\bjtu_web\android
 .\gradlew.bat test
 
 Set-Location d:\code\project\bjtu_web
-.\.venv\Scripts\python.exe -m pytest backend\tests
-
-Set-Location d:\code\project\bjtu_web\frontend
-npm run build
+Set-Location d:\code\project\bjtu_web\android
+.\gradlew.bat test
+.\gradlew.bat assembleDebug
 ```
 
 ## 16. 验收标准

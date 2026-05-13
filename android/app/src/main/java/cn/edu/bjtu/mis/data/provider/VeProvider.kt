@@ -471,7 +471,7 @@ class VeProvider(private val client: BjtuHttpClient) {
                 currentTerm,
                 courses,
                 selected,
-                context.userId,
+                context.detailUserId ?: context.platformUserId,
                 context.listenUserId,
                 parseCourseReplayLessons(payload),
             ),
@@ -499,12 +499,13 @@ class VeProvider(private val client: BjtuHttpClient) {
             ?: throw IllegalStateException("Course not found: ${courseId.orEmpty()}")
         val context = openCourseReplayContext(selected)
         val userIdCandidates = courseReplayUserIdCandidates(
-            contextUserId = context.userId,
+            detailUserId = context.detailUserId,
+            contextUserId = context.platformUserId,
             preferredUserId = userId,
             listenUserId = context.listenUserId,
         )
         if (userIdCandidates.isEmpty()) {
-            throw IllegalStateException("Cannot resolve VE platform user ID")
+            throw IllegalStateException("无法获取课程回放播放身份，请刷新课程回放后重试")
         }
         val (payload, platformUserId) = getCourseReplayDetailPayload(courseSchedId, userIdCandidates)
         return parseCourseReplayPlayback(
@@ -539,6 +540,9 @@ class VeProvider(private val client: BjtuHttpClient) {
                 lastError = error
                 if (!isCourseReplayUserIdRejected(error)) throw error
             }
+        }
+        if (lastError?.let(::isCourseReplayUserIdRejected) == true) {
+            throw IllegalStateException("课程回放播放身份已失效，请刷新课程回放后重试")
         }
         throw lastError ?: IllegalStateException("VE course replay detail request failed")
     }
@@ -744,6 +748,7 @@ class VeProvider(private val client: BjtuHttpClient) {
         )
         rememberCoursePlatformContext(replayPage.url, replayPage.body)
 
+        val detailUserId = extractJsStringValue(replayPage.body, "uId")
         val listenUserId = extractInputValue(replayPage.body, "userId")
             ?: extractJsStringValue(replayPage.body, "cpersonid")
         val (platformUserId, userInfoLoginId) = runCatching {
@@ -756,7 +761,8 @@ class VeProvider(private val client: BjtuHttpClient) {
         }.getOrDefault(null to null)
 
         return CourseReplayContext(
-            userId = platformUserId,
+            detailUserId = detailUserId,
+            platformUserId = platformUserId,
             listenUserId = listenUserId ?: userInfoLoginId,
             referer = coursePlatformReferer,
         )
@@ -772,7 +778,8 @@ class VeProvider(private val client: BjtuHttpClient) {
     }
 
     private data class CourseReplayContext(
-        val userId: String?,
+        val detailUserId: String?,
+        val platformUserId: String?,
         val listenUserId: String?,
         val referer: String,
     )
@@ -1117,11 +1124,12 @@ class VeProvider(private val client: BjtuHttpClient) {
 }
 
 internal fun courseReplayUserIdCandidates(
+    detailUserId: String?,
     contextUserId: String?,
     preferredUserId: String?,
     listenUserId: String?,
 ): List<String> =
-    listOf(contextUserId, preferredUserId, listenUserId)
+    listOf(detailUserId, contextUserId, preferredUserId, listenUserId)
         .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
         .distinct()
 

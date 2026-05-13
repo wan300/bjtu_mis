@@ -1,1 +1,0 @@
-"""BJTU MIS backend package."""

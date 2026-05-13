@@ -277,7 +277,9 @@ fun parseCourseReplayLessons(payload: JsonObject): List<CourseReplayLesson> =
         val obj = item as? JsonObject ?: return@mapNotNull null
         val courseSchedId = obj.firstText("id", "courseSchedId", "course_sched_id") ?: return@mapNotNull null
         val uuid = obj.firstText("uuid", "timeTableId", "timetableId", "time_table_id")
+        val params = obj.obj("params")
         val videoId = obj.firstText("videoId", "video_id")
+            ?: params?.firstText("videoId", "video_id")
         CourseReplayLesson(
             courseSchedId = courseSchedId,
             timeTableId = uuid,

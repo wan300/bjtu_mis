@@ -44,11 +44,6 @@ android {
         jvmTarget = "17"
     }
 
-    sourceSets {
-        getByName("main") {
-            assets.srcDirs("src/main/assets", "../../models")
-        }
-    }
 }
 
 ksp {

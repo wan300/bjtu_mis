@@ -8,15 +8,8 @@ import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 
 class AaProviderTest {
-    private val fixtures = sequenceOf(
-        File("../../backend/tests/fixtures"),
-        File("../../../backend/tests/fixtures"),
-        File("backend/tests/fixtures"),
-    ).first { it.exists() }
-
     @Test
     fun fetchCourseSelectionReadsCourses() = runBlocking {
         MockWebServer().use { server ->
@@ -194,7 +187,11 @@ class AaProviderTest {
         return AaProvider(BjtuHttpClient(AppCookieJar()), aaBaseUrl = baseUrl)
     }
 
-    private fun text(name: String): String = File(fixtures, name).readText(Charsets.UTF_8)
+    private fun text(name: String): String {
+        val resource = javaClass.getResource("/fixtures/$name")
+            ?: error("Missing test fixture: $name")
+        return resource.openStream().bufferedReader(Charsets.UTF_8).use { it.readText() }
+    }
 
     private fun captchaHtml(id: String): String = """
         <html><body>

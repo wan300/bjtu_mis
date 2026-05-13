@@ -5,15 +5,8 @@ import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 
 class ParserTest {
-    private val fixtures = sequenceOf(
-        File("../../backend/tests/fixtures"),
-        File("../../../backend/tests/fixtures"),
-        File("backend/tests/fixtures"),
-    ).first { it.exists() }
-
     @Test
     fun parseTimetableFixture() {
         val data = parseTimetable(text("timetable.html"))
@@ -228,7 +221,9 @@ class ParserTest {
             {
               "courseSchedList": [
                 {
-                  "videoId": "9E2657F72D5E450FAB4CDF1E6725F15E",
+                  "params": {
+                    "videoId": "9E2657F72D5E450FAB4CDF1E6725F15E"
+                  },
                   "id": 1774113,
                   "classRoom": "思源楼",
                   "courseId": 129006,
@@ -251,6 +246,7 @@ class ParserTest {
 
         assertEquals("1774113", lessons.first().courseSchedId)
         assertEquals("559F6748116A43D399DE404B5ED28ED6", lessons.first().timeTableId)
+        assertEquals("9E2657F72D5E450FAB4CDF1E6725F15E", lessons.first().videoId)
         assertEquals("M410001B", lessons.first().courseCode)
         assertTrue(lessons.first().hasVideo)
     }
@@ -297,7 +293,11 @@ class ParserTest {
         assertEquals(0, playback.streams.size)
     }
 
-    private fun text(name: String): String = File(fixtures, name).readText(Charsets.UTF_8)
+    private fun text(name: String): String {
+        val resource = javaClass.getResource("/fixtures/$name")
+            ?: error("Missing test fixture: $name")
+        return resource.openStream().bufferedReader(Charsets.UTF_8).use { it.readText() }
+    }
 
     private fun json(name: String) = AppJson.parseToJsonElement(text(name)).jsonObject
 }
