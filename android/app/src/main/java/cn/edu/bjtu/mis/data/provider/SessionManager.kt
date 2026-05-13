@@ -1,28 +1,84 @@
 package cn.edu.bjtu.mis.data.provider
 
 import android.util.Base64
+import cn.edu.bjtu.mis.data.captcha.CaptchaAnswerSolver
+import cn.edu.bjtu.mis.data.captcha.CaptchaSolveException
 import cn.edu.bjtu.mis.data.network.AppCookieJar
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.data.parser.normalizeSpace
+import cn.edu.bjtu.mis.data.perf.PerfTrace
+import cn.edu.bjtu.mis.data.security.LoginCredentials
+import cn.edu.bjtu.mis.data.security.SecureCredentialStore
 import cn.edu.bjtu.mis.data.security.SecureCookieStore
+import cn.edu.bjtu.mis.model.AutoLoginResult
+import cn.edu.bjtu.mis.model.AutoLoginStatus
 import cn.edu.bjtu.mis.model.SessionCaptcha
 import cn.edu.bjtu.mis.model.SessionState
 import cn.edu.bjtu.mis.model.SessionStatus
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.util.concurrent.TimeUnit
+
+enum class SessionValidationPolicy {
+    Fresh,
+    UseRecentOrValidate,
+}
+
+internal data class SessionValidationRecord(
+    val status: SessionStatus,
+    val savedAtMillis: Long,
+)
+
+internal class SessionValidationCache(
+    private val ttlMillis: Long,
+    private val nowMillis: () -> Long,
+) {
+    private var record: SessionValidationRecord? = null
+
+    @Synchronized
+    fun getFresh(): SessionStatus? {
+        val current = record ?: return null
+        if (nowMillis() - current.savedAtMillis > ttlMillis) return null
+        return current.status
+    }
+
+    @Synchronized
+    fun remember(status: SessionStatus) {
+        if (status.state == SessionState.Ready) {
+            record = SessionValidationRecord(status, nowMillis())
+        } else {
+            clear()
+        }
+    }
+
+    @Synchronized
+    fun clear() {
+        record = null
+    }
+}
 
 class SessionManager(
     private val cookieStore: SecureCookieStore,
+    private val credentialStore: SecureCredentialStore,
     private val cookieJar: AppCookieJar,
     private val httpClient: BjtuHttpClient,
+    private val captchaSolver: CaptchaAnswerSolver,
 ) {
     private val mutex = Mutex()
+    private val validationMutex = Mutex()
+    private val validationCache = SessionValidationCache(
+        ttlMillis = TimeUnit.MINUTES.toMillis(5),
+        nowMillis = { PerfTrace.nowMillis() },
+    )
     private var inlineLoginState: InlineLoginState? = null
 
     suspend fun fetchInlineLoginCaptcha(): SessionCaptcha = mutex.withLock {
+        validationCache.clear()
         cookieJar.clear()
         val loginPage = httpClient.getText(ProviderConstants.MIS_HOME_URL)
         if (!isCasLoginUrl(loginPage.url)) {
@@ -36,12 +92,22 @@ class SessionManager(
         )
         val mimeType = captcha.headers["Content-Type"]?.substringBefore(";")?.trim().orEmpty()
             .ifBlank { "image/jpeg" }
-        val dataUrl = "data:$mimeType;base64," + Base64.encodeToString(captcha.body, Base64.NO_WRAP)
-        inlineLoginState = state.copy(cookiesJson = cookieJar.encodeSnapshot())
+        val encoded = Base64.encodeToString(captcha.body, Base64.NO_WRAP)
+        val dataUrl = "data:$mimeType;base64,$encoded"
+        inlineLoginState = state.copy(
+            cookiesJson = cookieJar.encodeSnapshot(),
+            captchaImageBase64 = encoded,
+            captchaMimeType = mimeType,
+        )
         SessionCaptcha(imageDataUrl = dataUrl, fetchedAt = nowIso())
     }
 
-    suspend fun loginInline(loginName: String, password: String, captcha: String): SessionStatus = mutex.withLock {
+    suspend fun loginInline(
+        loginName: String,
+        password: String,
+        captcha: String,
+        persistCredentials: Boolean = true,
+    ): SessionStatus = mutex.withLock {
         val state = inlineLoginState ?: throw SessionExpiredException("验证码已失效，请刷新后重试。")
         cookieJar.restoreFromJson(state.cookiesJson)
         val response = httpClient.postForm(
@@ -73,11 +139,106 @@ class SessionManager(
 
         bootstrapVeSessionBestEffort()
         cookieStore.save(cookieJar.encodeSnapshot())
+        if (persistCredentials) {
+            credentialStore.save(LoginCredentials(loginName.trim(), password))
+        }
         inlineLoginState = null
         validateSession()
     }
 
-    suspend fun validateSession(): SessionStatus {
+    suspend fun loginAuto(loginName: String? = null, password: String? = null): AutoLoginResult {
+        val explicitCredentials = !loginName.isNullOrBlank() && !password.isNullOrBlank()
+        val credentials = if (explicitCredentials) {
+            LoginCredentials(loginName = loginName!!.trim(), password = password!!)
+        } else {
+            credentialStore.load()
+        } ?: return AutoLoginResult(
+            status = AutoLoginStatus.AutoFailed,
+            message = "未保存登录凭据，请手动输入学号和密码。",
+        )
+
+        val maxAttempts = if (explicitCredentials) 2 else 3
+        var lastMessage = ""
+        repeat(maxAttempts) { index ->
+            try {
+                fetchInlineLoginCaptcha()
+                val captchaBytes = currentCaptchaBytes()
+                val solved = withContext(Dispatchers.Default) { captchaSolver.solve(captchaBytes) }
+                val status = loginInline(
+                    credentials.loginName,
+                    credentials.password,
+                    solved.answer,
+                    persistCredentials = true,
+                )
+                return AutoLoginResult(
+                    status = AutoLoginStatus.Ready,
+                    message = "已自动识别验证码算式 ${solved.expression} 并完成登录。",
+                    attempts = index + 1,
+                    session = status,
+                )
+            } catch (error: CaptchaSolveException) {
+                lastMessage = error.message.orEmpty()
+                inlineLoginState = null
+            } catch (error: SessionExpiredException) {
+                lastMessage = error.message.orEmpty()
+            }
+        }
+
+        if (explicitCredentials) {
+            val captcha = runCatching { fetchInlineLoginCaptcha() }.getOrNull()
+            return AutoLoginResult(
+                status = AutoLoginStatus.ManualRequired,
+                message = "自动识别连续失败，请手动输入验证码。$lastMessage",
+                attempts = maxAttempts,
+                captcha = captcha,
+            )
+        }
+
+        return AutoLoginResult(
+            status = AutoLoginStatus.AutoFailed,
+            message = "自动登录连续失败 $maxAttempts 次：${lastMessage.ifBlank { "未知错误" }}",
+            attempts = maxAttempts,
+        )
+    }
+
+    private fun currentCaptchaBytes(): ByteArray {
+        val encoded = inlineLoginState?.captchaImageBase64
+            ?: throw CaptchaSolveException("验证码图片上下文缺失。")
+        return runCatching { Base64.decode(encoded, Base64.DEFAULT) }
+            .getOrElse { throw CaptchaSolveException("验证码图片上下文损坏。", it) }
+    }
+
+    fun cachedSessionStatus(): SessionStatus {
+        val payload = cookieStore.load()
+            ?: return SessionStatus(SessionState.WaitingForLogin, "No saved local session.")
+        cookieJar.restoreFromJson(payload)
+        return SessionStatus(SessionState.Ready, "Using cached local session while validating in background.")
+    }
+
+    suspend fun validateSession(
+        policy: SessionValidationPolicy = SessionValidationPolicy.Fresh,
+    ): SessionStatus {
+        if (policy == SessionValidationPolicy.UseRecentOrValidate) {
+            validationCache.getFresh()?.let {
+                PerfTrace.mark("Session.validate", "cache_hit")
+                return it
+            }
+        }
+
+        return validationMutex.withLock {
+            if (policy == SessionValidationPolicy.UseRecentOrValidate) {
+                validationCache.getFresh()?.let {
+                    PerfTrace.mark("Session.validate", "cache_hit_after_lock")
+                    return@withLock it
+                }
+            }
+            PerfTrace.measureSuspend("Session.validate") {
+                validateSessionFresh().also { validationCache.remember(it) }
+            }
+        }
+    }
+
+    private suspend fun validateSessionFresh(): SessionStatus {
         val payload = cookieStore.load()
             ?: return SessionStatus(SessionState.WaitingForLogin, "未找到可用会话，请先登录。")
         cookieJar.restoreFromJson(payload)
@@ -101,8 +262,11 @@ class SessionManager(
         }
     }
 
-    suspend fun <T> withAuthenticatedClient(block: suspend (BjtuHttpClient) -> T): T {
-        val status = validateSession()
+    suspend fun <T> withAuthenticatedClient(
+        policy: SessionValidationPolicy = SessionValidationPolicy.UseRecentOrValidate,
+        block: suspend (BjtuHttpClient) -> T,
+    ): T {
+        val status = validateSession(policy)
         if (status.state != SessionState.Ready) {
             throw SessionExpiredException(status.detail ?: "会话未准备好。")
         }
@@ -113,8 +277,10 @@ class SessionManager(
 
     fun logout() {
         inlineLoginState = null
+        validationCache.clear()
         cookieJar.clear()
         cookieStore.clear()
+        credentialStore.clear()
     }
 
     private suspend fun ensureAaSessionReady(): Pair<Boolean, String?> {
@@ -184,6 +350,8 @@ class SessionManager(
             captcha0 = inputValue("captcha_0"),
             referer = pageUrl,
             cookiesJson = cookieJar.encodeSnapshot(),
+            captchaImageBase64 = "",
+            captchaMimeType = "image/jpeg",
         )
     }
 
@@ -217,5 +385,7 @@ class SessionManager(
         val captcha0: String,
         val referer: String,
         val cookiesJson: String,
+        val captchaImageBase64: String,
+        val captchaMimeType: String,
     )
 }

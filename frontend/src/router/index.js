@@ -48,6 +48,12 @@ const routes = [
         meta: { requiresSession: true }
       },
       {
+        path: 'course-selection',
+        name: 'CourseSelection',
+        component: () => import('../views/CourseSelectionView.vue'),
+        meta: { requiresSession: true }
+      },
+      {
         path: 'exams',
         name: 'Exams',
         component: () => import('../views/ExamsView.vue'),
@@ -110,11 +116,18 @@ function loginLocation(redirect) {
 
 let authRedirectPending = false
 
-function handleAuthRequired() {
+async function handleAuthRequired() {
   if (authRedirectPending) return
 
   const currentRoute = router.currentRoute.value
   if (currentRoute.path === '/login') return
+
+  const { isSessionReady, attemptSavedAutoLogin } = useSession()
+  if (!isSessionReady.value) {
+    const result = await attemptSavedAutoLogin({ showFailureDialog: true })
+    if (result.success) return
+    if ((result.result?.attempts || 0) > 0) return
+  }
 
   authRedirectPending = true
   router
@@ -139,8 +152,12 @@ router.beforeEach(async (to, from) => {
   }
 
   if (to.meta.requiresSession || to.matched.some(r => r.meta.requiresSession)) {
+    const { attemptSavedAutoLogin } = useSession()
     await loadSessionStatus({ redirectOnInvalid: false })
     if (!isSessionReady.value) {
+      const autoLogin = await attemptSavedAutoLogin({ showFailureDialog: true })
+      if (autoLogin.success) return true
+      if ((autoLogin.result?.attempts || 0) > 0) return true
       return loginLocation(to.fullPath)
     }
   }

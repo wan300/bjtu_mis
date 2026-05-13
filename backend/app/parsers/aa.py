@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Tag
 
@@ -11,6 +13,8 @@ from ..schemas import (
     CreditBucket,
     CreditSummary,
     CourseEntry,
+    CourseSelectionCourse,
+    CourseSelectionData,
     EmptyRoomData,
     EmptyRoomRow,
     EmptyRoomSlotHeader,
@@ -19,6 +23,9 @@ from ..schemas import (
     ProfileField,
     ProfileSection,
     ScoreData,
+    ScoreDetailData,
+    ScoreDetailField,
+    ScoreDetailTable,
     ScoreItem,
     StudentProfileData,
     TermOption,
@@ -66,6 +73,276 @@ def parse_input_value(soup: BeautifulSoup, field_name: str) -> str | None:
         return None
     value = element.get("value")
     return normalize_space(value) if value is not None else None
+
+
+@dataclass(frozen=True)
+class CourseSelectionAction:
+    action_url: str
+    method: str
+    fields: dict[str, str]
+
+
+@dataclass(frozen=True)
+class ParsedCourseSelectionPage:
+    data: CourseSelectionData
+    actions: dict[str, CourseSelectionAction]
+    drop_actions: dict[str, CourseSelectionAction]
+
+
+def _course_selection_key(course_name: str) -> tuple[str, str | None, str | None]:
+    text = normalize_space(course_name)
+    code_match = re.match(r"^([A-Za-z]\d+[A-Za-z]?)", text)
+    course_code = code_match.group(1) if code_match else None
+    section_match = re.search(r"\s(\d{2})(?:\s|$)", text)
+    section = section_match.group(1) if section_match else None
+    if course_code and section:
+        return f"{course_code}_{section}", course_code, section
+    if course_code:
+        return course_code, course_code, section
+    return text, course_code, section
+
+
+def _parse_remaining(value: str) -> int | None:
+    match = re.search(r"-?\d+", normalize_space(value))
+    return int(match.group(0)) if match else None
+
+
+def _form_fields(form: Tag | None) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    if not isinstance(form, Tag):
+        return fields
+    for input_node in form.find_all("input"):
+        if not isinstance(input_node, Tag):
+            continue
+        name = normalize_space(str(input_node.get("name") or ""))
+        if not name:
+            continue
+        input_type = normalize_space(str(input_node.get("type") or "")).lower()
+        if input_type in {"checkbox", "radio", "submit", "button", "image", "file"}:
+            continue
+        fields[name] = str(input_node.get("value") or "")
+    return fields
+
+
+def _submit_action(soup: BeautifulSoup, page_url: str) -> tuple[str | None, str, dict[str, str], str | None]:
+    submit = (
+        soup.select_one("a.btn-primary")
+        or soup.select_one("button.btn-primary")
+        or soup.select_one("input[type=submit]")
+    )
+    form = submit.find_parent("form") if isinstance(submit, Tag) else None
+    if form is None:
+        form = soup.find("form")
+
+    method = normalize_space(str(form.get("method") if isinstance(form, Tag) else "")).lower() or "post"
+    fields = _form_fields(form if isinstance(form, Tag) else None)
+
+    candidates: list[str] = []
+    if isinstance(submit, Tag):
+        for attr in ("data-url", "data-href", "data-action", "formaction", "href"):
+            value = normalize_space(str(submit.get(attr) or ""))
+            if value and value != "#" and not value.lower().startswith("javascript:"):
+                candidates.append(value)
+    if isinstance(form, Tag):
+        action = normalize_space(str(form.get("action") or ""))
+        candidates.append(action or page_url)
+
+    for candidate in candidates:
+        if candidate:
+            return urljoin(page_url, candidate), method, fields, None
+    return None, method, fields, "无法解析选课提交入口：页面没有暴露 form/action/data-url。"
+
+
+def _checkbox_payload(cell: Tag) -> tuple[str | None, str | None]:
+    checkbox = cell.select_one("input[type=checkbox]")
+    if not isinstance(checkbox, Tag):
+        return None, None
+    name = normalize_space(str(checkbox.get("name") or ""))
+    value = str(checkbox.get("value") or "on")
+    if not name:
+        return None, None
+    return name, value
+
+
+def _onclick_action_candidate(value: str) -> str | None:
+    for match in re.finditer(r"""["']([^"']*(?:delete|courseselecttask)[^"']*)["']""", value, flags=re.IGNORECASE):
+        candidate = normalize_space(match.group(1))
+        if candidate and not candidate.lower().startswith("javascript:"):
+            return candidate
+    return None
+
+
+def _drop_action(cell: Tag | None, page_url: str, base_fields: dict[str, str]) -> CourseSelectionAction | None:
+    if not isinstance(cell, Tag):
+        return None
+    trigger = (
+        cell.select_one(".select-delete-btn")
+        or cell.select_one("[data-pk]")
+        or cell.select_one("[data-url], [data-href], [data-action], [formaction]")
+        or cell.find(["a", "button", "input"])
+    )
+    if not isinstance(trigger, Tag):
+        return None
+
+    data_pk = normalize_space(str(trigger.get("data-pk") or trigger.get("pk") or trigger.get("value") or ""))
+    candidates: list[str] = []
+    for attr in ("href", "data-url", "data-href", "data-action", "formaction"):
+        value = normalize_space(str(trigger.get(attr) or ""))
+        if value and value != "#" and not value.lower().startswith("javascript:"):
+            candidates.append(value)
+
+    onclick = normalize_space(str(trigger.get("onclick") or ""))
+    onclick_candidate = _onclick_action_candidate(onclick)
+    if onclick_candidate:
+        candidates.append(onclick_candidate)
+
+    if not candidates and data_pk:
+        candidates.append("/course_selection/courseselecttask/delete/")
+
+    action_url = next((urljoin(page_url, candidate) for candidate in candidates if candidate), None)
+    if not action_url:
+        return None
+
+    method = normalize_space(str(trigger.get("data-method") or trigger.get("method") or "post")).lower() or "post"
+    fields = dict(base_fields)
+    if data_pk:
+        fields["pk"] = data_pk
+    return CourseSelectionAction(action_url=action_url, method=method, fields=fields)
+
+
+def _course_from_cells(cells: list[Tag], *, selected: bool, index: int) -> CourseSelectionCourse | None:
+    texts = [normalize_space(cell.get_text(" ", strip=True)) for cell in cells]
+    if len(texts) < 2:
+        return None
+    name = texts[1]
+    if not name:
+        return None
+    key, course_code, section = _course_selection_key(name)
+    status = texts[0] if texts[0] else ("selected" if selected else "available")
+    remaining_text = texts[2] if len(texts) > 2 and texts[2] else None
+    return CourseSelectionCourse(
+        key=key or f"course_{index}",
+        status=status,
+        selected=selected or any(marker in status for marker in ("已选", "selected", "Selected")),
+        course_name=name,
+        course_code=course_code,
+        section=section,
+        remaining=_parse_remaining(remaining_text or ""),
+        remaining_text=remaining_text,
+        credit=texts[3] if len(texts) > 3 and texts[3] else None,
+        course_type=texts[4] if len(texts) > 4 and texts[4] else None,
+        exam_type=texts[5] if len(texts) > 5 and texts[5] else None,
+        teacher=texts[6] if len(texts) > 6 and texts[6] else None,
+        time_location=texts[7] if len(texts) > 7 and texts[7] else None,
+        note=texts[8] if len(texts) > 8 and texts[8] else None,
+    )
+
+
+def _direct_table_rows(table: Tag | None) -> list[list[Tag]]:
+    if not isinstance(table, Tag):
+        return []
+    rows: list[list[Tag]] = []
+    for row in table.find_all("tr"):
+        cells = [cell for cell in row.find_all(["th", "td"], recursive=False) if isinstance(cell, Tag)]
+        if cells:
+            rows.append(cells)
+    return rows
+
+
+def parse_course_selection_page(
+    html: str,
+    page_url: str = "https://aa.bjtu.edu.cn/course_selection/courseselecttask/selects/",
+) -> ParsedCourseSelectionPage:
+    soup = BeautifulSoup(html, "html.parser")
+    selected_courses: list[CourseSelectionCourse] = []
+    available_courses: list[CourseSelectionCourse] = []
+    actions: dict[str, CourseSelectionAction] = {}
+    drop_actions: dict[str, CourseSelectionAction] = {}
+    submit_url, method, base_fields, submit_error = _submit_action(soup, page_url)
+    can_submit = submit_url is not None
+
+    selected_container = soup.select_one("#selected-container")
+    selected_table = selected_container.find("table") if isinstance(selected_container, Tag) else None
+    for index, cells in enumerate(_direct_table_rows(selected_table)[1:]):
+        course = _course_from_cells(cells, selected=True, index=index)
+        if course:
+            selected_courses.append(course)
+            action = _drop_action(cells[0] if cells else None, page_url, base_fields)
+            if action is not None:
+                drop_actions[course.key] = action
+
+    candidate_tables = soup.select("table.table-bordered") or soup.find_all("table")
+    tables = [
+        table
+        for table in candidate_tables
+        if isinstance(table, Tag) and table.find_parent(id="selected-container") is None
+    ]
+    available_table = tables[1] if len(tables) > 1 else (tables[0] if tables else None)
+
+    for index, cells in enumerate(_direct_table_rows(available_table)[1:]):
+        course = _course_from_cells(cells, selected=False, index=index)
+        if not course:
+            continue
+        available_courses.append(course)
+        checkbox_name, checkbox_value = _checkbox_payload(cells[0])
+        if submit_url and checkbox_name:
+            fields = dict(base_fields)
+            fields[checkbox_name] = checkbox_value or "on"
+            actions[course.key] = CourseSelectionAction(
+                action_url=submit_url,
+                method=method,
+                fields=fields,
+            )
+        elif checkbox_name is None:
+            can_submit = False
+            submit_error = submit_error or "无法解析选课提交入口：目标课程行没有 checkbox name。"
+
+    return ParsedCourseSelectionPage(
+        data=CourseSelectionData(
+            selected_courses=selected_courses,
+            available_courses=available_courses,
+            can_submit=can_submit,
+            submit_error=submit_error,
+        ),
+        actions=actions,
+        drop_actions=drop_actions,
+    )
+
+
+def parse_course_selection_captcha(
+    html: str,
+    page_url: str,
+) -> tuple[str | None, str | None, dict[str, str], str | None]:
+    soup = BeautifulSoup(html, "html.parser")
+    modal = next(
+        (
+            node
+            for node in soup.select(".modal, .bootbox")
+            if isinstance(node, Tag) and node.find("img") is not None
+        ),
+        soup,
+    )
+    image = modal.find("img") if isinstance(modal, Tag) else soup.find("img")
+    image_url = urljoin(page_url, normalize_space(str(image.get("src") or ""))) if isinstance(image, Tag) else None
+    form = image.find_parent("form") if isinstance(image, Tag) else None
+    if form is None:
+        form = soup.find("form")
+    action = urljoin(page_url, normalize_space(str(form.get("action") or "")) or page_url) if isinstance(form, Tag) else page_url
+    fields = _form_fields(form if isinstance(form, Tag) else None)
+    input_name = None
+    inputs = form.find_all("input") if isinstance(form, Tag) else soup.find_all("input")
+    for input_node in inputs:
+        if not isinstance(input_node, Tag):
+            continue
+        input_type = normalize_space(str(input_node.get("type") or "text")).lower()
+        name = normalize_space(str(input_node.get("name") or ""))
+        if name and input_type not in {"hidden", "submit", "button", "checkbox", "radio"}:
+            input_name = name
+            break
+    prompt = normalize_space(modal.get_text(" ", strip=True) if isinstance(modal, Tag) else soup.get_text(" ", strip=True))
+    if action:
+        fields["__action__"] = action
+    return image_url, input_name, fields, prompt or None
 
 
 def _clean_table_cell_text(cell: Tag) -> str:
@@ -297,11 +574,13 @@ def parse_scores(html: str, requested_term: str | None = None) -> ScoreData:
     table = soup.find("table", class_="table")
     items: list[ScoreItem] = []
     if isinstance(table, Tag):
-        rows = table.find_all("tr", recursive=False)
+        rows = table.find_all("tr")
         for row in rows[1:]:
-            cells = [normalize_space(cell.get_text(" ", strip=True)) for cell in row.find_all(["th", "td"], recursive=False)]
+            cell_nodes = row.find_all(["th", "td"], recursive=False)
+            cells = [normalize_space(cell.get_text(" ", strip=True)) for cell in cell_nodes]
             if len(cells) < 8:
                 continue
+            detail_cell = cell_nodes[7] if len(cell_nodes) > 7 else None
             items.append(
                 ScoreItem(
                     term=requested_term or cells[1] or current_term,
@@ -311,9 +590,132 @@ def parse_scores(html: str, requested_term: str | None = None) -> ScoreData:
                     bonus_score=cells[5],
                     teacher=cells[6],
                     detail=cells[7],
+                    detail_path=_extract_score_detail_path(detail_cell) if isinstance(detail_cell, Tag) else None,
                 )
             )
     return ScoreData(current_term=requested_term or current_term, available_terms=options, items=items)
+
+
+def _extract_score_detail_path(cell: Tag) -> str | None:
+    candidates: list[str] = []
+    for link in cell.find_all("a"):
+        if not isinstance(link, Tag):
+            continue
+        for attr in ("href", "data-url", "data-href"):
+            value = normalize_space(str(link.get(attr) or ""))
+            if value:
+                candidates.append(value)
+        onclick = normalize_space(str(link.get("onclick") or ""))
+        if onclick:
+            candidates.append(onclick)
+
+    cell_html = str(cell)
+    candidates.append(cell_html)
+    for candidate in candidates:
+        direct = _clean_score_detail_candidate(candidate)
+        if direct:
+            return direct
+        for match in re.findall(r"""["']([^"']*(?:score|cj|grade)[^"']*)["']""", candidate, flags=re.IGNORECASE):
+            cleaned = _clean_score_detail_candidate(match)
+            if cleaned:
+                return cleaned
+    return None
+
+
+def _clean_score_detail_candidate(value: str) -> str | None:
+    value = normalize_space(value)
+    if not value or value == "#" or value.lower().startswith(("javascript:void", "void(")):
+        return None
+    if value.lower().startswith("javascript:"):
+        value = value[len("javascript:") :]
+    match = re.search(r"""(https?://aa\.bjtu\.edu\.cn/[^\s"'<>]+|/[^\s"'<>]*(?:score|cj|grade)[^\s"'<>]*)""", value, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).rstrip(");,")
+    if re.search(r"(?:score|cj|grade)", value, flags=re.IGNORECASE) and not re.search(r"\s", value):
+        return value.rstrip(");,")
+    return None
+
+
+def parse_score_detail(html: str) -> ScoreDetailData:
+    soup = BeautifulSoup(html, "html.parser")
+    title = _score_detail_title(soup)
+    fields: list[ScoreDetailField] = []
+    tables: list[ScoreDetailTable] = []
+    seen_fields: set[tuple[str, str]] = set()
+
+    def add_field(label: str, value: str) -> None:
+        label = normalize_space(label).rstrip(":：")
+        value = normalize_space(value)
+        if not label or not value:
+            return
+        key = (label, value)
+        if key in seen_fields:
+            return
+        seen_fields.add(key)
+        fields.append(ScoreDetailField(label=label, value=value))
+
+    for table in soup.find_all("table"):
+        if not isinstance(table, Tag):
+            continue
+        rows = _table_rows(table)
+        if not rows:
+            continue
+
+        for row in rows:
+            if len(row) >= 2 and len(row) % 2 == 0:
+                for index in range(0, len(row), 2):
+                    label = row[index]
+                    value = row[index + 1]
+                    if len(label) <= 32:
+                        add_field(label, value)
+
+        header_cells = table.find("tr").find_all(["th", "td"], recursive=False) if table.find("tr") else []
+        has_header = bool(header_cells) and all(cell.name == "th" for cell in header_cells)
+        headers = rows[0] if has_header else []
+        body_rows = rows[1:] if has_header else rows
+        is_field_table = not has_header and all(len(row) >= 2 and len(row) % 2 == 0 for row in rows)
+        if body_rows and not is_field_table:
+            tables.append(
+                ScoreDetailTable(
+                    title=_table_title(table),
+                    headers=headers,
+                    rows=body_rows,
+                )
+            )
+
+    raw_text = normalize_space(soup.get_text(" ", strip=True))
+    if len(raw_text) > 4000:
+        raw_text = f"{raw_text[:4000]}..."
+    return ScoreDetailData(
+        title=title,
+        fields=fields,
+        tables=tables,
+        raw_text=raw_text or None,
+    )
+
+
+def _score_detail_title(soup: BeautifulSoup) -> str | None:
+    for selector in (".modal-title", "h1", "h2", "h3", "legend", "title"):
+        node = soup.select_one(selector)
+        if node:
+            text = normalize_space(node.get_text(" ", strip=True))
+            if text:
+                return text
+    return None
+
+
+def _table_title(table: Tag) -> str | None:
+    caption = table.find("caption")
+    if isinstance(caption, Tag):
+        text = normalize_space(caption.get_text(" ", strip=True))
+        if text:
+            return text
+    previous = table.find_previous(["h1", "h2", "h3", "h4", "legend"])
+    if isinstance(previous, Tag):
+        text = normalize_space(previous.get_text(" ", strip=True))
+        if text:
+            return text
+    return None
 
 
 def parse_credit(value: Any) -> float | None:

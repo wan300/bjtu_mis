@@ -1,5 +1,19 @@
 package cn.edu.bjtu.mis.ui.screens
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
+import android.os.Build
+import android.provider.OpenableColumns
+import android.webkit.CookieManager
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,32 +24,51 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,52 +84,169 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import cn.edu.bjtu.mis.data.repository.CourseResourceRepository
+import cn.edu.bjtu.mis.data.agent.repository.AgentRepository
+import cn.edu.bjtu.mis.data.homework.HomeworkStatusKind
+import cn.edu.bjtu.mis.data.homework.homeworkCalendarStatusLabel
+import cn.edu.bjtu.mis.data.homework.homeworkDueDate
+import cn.edu.bjtu.mis.data.homework.homeworkStatusKind
+import cn.edu.bjtu.mis.data.repository.HomeworkAttachmentPreview
+import cn.edu.bjtu.mis.data.repository.HomeworkAttachmentPreviewCookie
+import cn.edu.bjtu.mis.data.repository.HomeworkAttachmentRepository
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
+import cn.edu.bjtu.mis.model.AcademicCalendarTerm
+import cn.edu.bjtu.mis.model.AcademicCalendarWeek
+import cn.edu.bjtu.mis.model.AcademicMonthCalendar
+import cn.edu.bjtu.mis.model.AcademicMonthDay
 import cn.edu.bjtu.mis.model.AcademicProgressData
 import cn.edu.bjtu.mis.model.CalendarData
 import cn.edu.bjtu.mis.model.CourseEntry
 import cn.edu.bjtu.mis.model.CourseResourcesData
+import cn.edu.bjtu.mis.model.CoverageLevel
+import cn.edu.bjtu.mis.model.DEFAULT_USER_COURSE_MAX_WEEK
 import cn.edu.bjtu.mis.model.EmptyRoomData
 import cn.edu.bjtu.mis.model.EmptyRoomRow
 import cn.edu.bjtu.mis.model.EmptyRoomSlotHeader
 import cn.edu.bjtu.mis.model.ExamData
+import cn.edu.bjtu.mis.model.HomeworkAttachment
 import cn.edu.bjtu.mis.model.HomeworkData
 import cn.edu.bjtu.mis.model.HomeworkItem
+import cn.edu.bjtu.mis.model.HomeworkUploadFile
+import cn.edu.bjtu.mis.model.ModuleKeys
 import cn.edu.bjtu.mis.model.ModuleEnvelope
 import cn.edu.bjtu.mis.model.ScoreData
+import cn.edu.bjtu.mis.model.ScoreDetailData
+import cn.edu.bjtu.mis.model.ScoreDetailTable
+import cn.edu.bjtu.mis.model.ScoreItem
 import cn.edu.bjtu.mis.model.StudentProfileData
 import cn.edu.bjtu.mis.model.TermOption
 import cn.edu.bjtu.mis.model.TimetableData
+import cn.edu.bjtu.mis.model.UserCourseDraft
+import cn.edu.bjtu.mis.model.UserCourseDurationType
+import cn.edu.bjtu.mis.model.UserTodoDraft
+import cn.edu.bjtu.mis.model.UserTodoItem
+import cn.edu.bjtu.mis.model.buildAcademicCalendar
+import cn.edu.bjtu.mis.model.buildAcademicMonthCalendar
+import cn.edu.bjtu.mis.model.defaultAcademicMonth
+import cn.edu.bjtu.mis.model.formatUserCourseWeeks
+import cn.edu.bjtu.mis.model.normalizedTimetablePeriodNumber
+import cn.edu.bjtu.mis.model.parseUserCourseWeeks
+import cn.edu.bjtu.mis.model.timetableEntriesConflict
+import cn.edu.bjtu.mis.model.userCourseWeekdayLabel
 import cn.edu.bjtu.mis.ui.components.InfoCard
 import cn.edu.bjtu.mis.ui.components.KeyValue
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
 import cn.edu.bjtu.mis.ui.components.SectionTitle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
+import java.util.Locale
 
 private const val HISTORY_ALL_TERMS = "all"
+private val ScoreTypeOptions = listOf(
+    "lr" to "本学期成绩",
+    "ln" to "历年成绩",
+    "en" to "英语认定成绩",
+    "rm" to "留级库成绩",
+)
+private val UserCourseColors = listOf(
+    Color(0xFFE57373),
+    Color(0xFF9575CD),
+    Color(0xFF64B5F6),
+    Color(0xFF4DB6AC),
+    Color(0xFFFFB74D),
+    Color(0xFF81C784),
+    Color(0xFFF06292),
+    Color(0xFF7986CB),
+)
 
 @Composable
-fun ProfileScreen(repository: ModuleRepository, onLogout: () -> Unit) {
-    DataScreen(title = "我的信息", loader = { repository.profile() }) { envelope ->
-        val profile = envelope.data
-        if (!profile.name.isNullOrBlank() || !profile.studentId.isNullOrBlank()) {
-            item {
-                InfoCard(profile.name ?: "基本信息", subtitle = profile.studentId) {}
+private fun SecondaryModuleLinks(
+    title: String,
+    links: List<Pair<String, String>>,
+    onNavigate: (String) -> Unit,
+) {
+    InfoCard(title) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            links.forEach { (route, label) ->
+                OutlinedButton(
+                    onClick = { onNavigate(route) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(label)
+                }
             }
+        }
+    }
+}
+
+@Composable
+fun ProfileScreen(
+    repository: ModuleRepository,
+    onLogout: () -> Unit,
+    onNavigate: (String) -> Unit,
+) {
+    DataScreen(title = "我的", loader = { repository.profile() }) { envelope ->
+        val profile = envelope.data
+        item { ProfileHeaderCard(profile) }
+        item {
+            SectionTitle(
+                title = "资料分区",
+                subtitle = "来自教务系统的个人资料",
+            )
         }
         val sections = profile.sections.ifEmpty { listOf(cn.edu.bjtu.mis.model.ProfileSection("基本信息", profile.fields)) }
         items(sections, key = { it.title }) { section ->
             InfoCard(section.title) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    section.fields.forEach { KeyValue(it.label, it.value) }
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    section.fields.chunked(2).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+                            row.forEach { field ->
+                                KeyValue(field.label, field.value, Modifier.weight(1f))
+                            }
+                            if (row.size == 1) {
+                                Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            InfoCard(title = "相关入口", subtitle = "只展示当前已实现的个人相关模块") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { onNavigate(ModuleKeys.AcademicProgress) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("学业进度")
+                        }
+                        OutlinedButton(
+                            onClick = { onNavigate(ModuleKeys.Scores) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("主修成绩")
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { onNavigate(ModuleKeys.Timetable) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("查看课表")
+                    }
                 }
             }
         }
@@ -108,6 +258,73 @@ fun ProfileScreen(repository: ModuleRepository, onLogout: () -> Unit) {
                 Text("退出登录")
             }
         }
+    }
+}
+
+@Composable
+private fun ProfileHeaderCard(profile: StudentProfileData) {
+    InfoCard(
+        title = profile.name?.takeIf { it.isNotBlank() } ?: "我的信息",
+        subtitle = profile.studentId ?: profile.account,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(64.dp)
+                    .height(64.dp)
+                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = profile.name?.trim()?.firstOrNull()?.toString() ?: "我",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = listOfNotNull(profile.college, profile.major).joinToString(" · ").ifBlank { "校园账号资料" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    ProfileChip(profile.grade ?: profile.educationLevel ?: "在读", Modifier.weight(1f))
+                    ProfileChip(profile.className ?: profile.campus ?: "北京交通大学", Modifier.weight(1f))
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+            KeyValue("培养层次", profile.educationLevel, Modifier.weight(1f))
+            KeyValue("学籍状态", profile.studentStatus ?: profile.hasStudentStatus, Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+            KeyValue("联系电话", profile.phone, Modifier.weight(1f))
+            KeyValue("邮箱", profile.email, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun ProfileChip(text: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -159,7 +376,11 @@ fun TimetableScreen(
     var homeworkStates by remember { mutableStateOf<Map<String, LoadState<List<HomeworkItem>>>>(emptyMap()) }
     var resourceStates by remember { mutableStateOf<Map<String, LoadState<ModuleEnvelope<CourseResourcesData>>>>(emptyMap()) }
     var currentWeek by remember { mutableStateOf<Int?>(null) }
+    var courseEditorSeed by remember { mutableStateOf<UserCourseEditorSeed?>(null) }
+    var courseEditorError by remember { mutableStateOf<String?>(null) }
+    var pendingDeleteCourse by remember { mutableStateOf<CourseEntry?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val editorSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     fun loadTimetable() {
         scope.launch {
@@ -174,18 +395,38 @@ fun TimetableScreen(
         val nextSelection = entries.ifEmpty { return }
         selectedCourses = nextSelection
         val selectionKey = courseSelectionKey(nextSelection)
-        homeworkStates = nextSelection.associate { courseEntryKey(it) to LoadState.Loading }
-        resourceStates = nextSelection.associate { courseEntryKey(it) to LoadState.Loading }
-        scope.launch {
+        val remoteEntries = nextSelection.filterNot { it.isUserCreated }
+        homeworkStates = nextSelection.associate { entry ->
+            courseEntryKey(entry) to if (entry.isUserCreated) LoadState.Data(emptyList()) else LoadState.Loading
+        }
+        resourceStates = nextSelection.associate { entry ->
+            courseEntryKey(entry) to if (entry.isUserCreated) {
+                LoadState.Data(
+                    ModuleEnvelope(
+                        module = "course_resources",
+                        sourceSystem = "local",
+                        coverage = CoverageLevel.Provisional,
+                        data = CourseResourcesData(),
+                    )
+                )
+            } else {
+                LoadState.Loading
+            }
+        }
+        if (remoteEntries.isNotEmpty()) scope.launch {
             runCatching {
                 repository.homework("all").data.items
             }.onSuccess { homework ->
                 if (courseSelectionKey(selectedCourses) == selectionKey) {
                     homeworkStates = nextSelection.associate { entry ->
-                        courseEntryKey(entry) to LoadState.Data(
-                            homework.filter { matchesCourse(entry, it) }
-                                .sortedWith(compareBy<HomeworkItem> { it.dueAt ?: "9999" }.thenBy { it.title })
-                        )
+                        courseEntryKey(entry) to if (entry.isUserCreated) {
+                            LoadState.Data(emptyList())
+                        } else {
+                            LoadState.Data(
+                                homework.filter { matchesCourse(entry, it) }
+                                    .sortedWith(compareBy<HomeworkItem> { it.dueAt ?: "9999" }.thenBy { it.title })
+                            )
+                        }
                     }
                 }
             }.onFailure { error ->
@@ -196,7 +437,7 @@ fun TimetableScreen(
                 }
             }
         }
-        nextSelection.forEach { entry ->
+        remoteEntries.forEach { entry ->
             val entryKey = courseEntryKey(entry)
             scope.launch {
                 runCatching {
@@ -211,6 +452,32 @@ fun TimetableScreen(
                     }
                 }
             }
+        }
+    }
+
+    fun saveUserCourse(draft: UserCourseDraft) {
+        courseEditorError = null
+        scope.launch {
+            runCatching { repository.saveUserCourse(draft) }
+                .onSuccess {
+                    courseEditorSeed = null
+                    selectedCourses = emptyList()
+                    loadTimetable()
+                }
+                .onFailure { courseEditorError = it.message ?: "保存课程失败" }
+        }
+    }
+
+    fun deleteUserCourse(entry: CourseEntry) {
+        val localId = entry.localId ?: return
+        scope.launch {
+            runCatching { repository.deleteUserCourse(localId) }
+                .onSuccess {
+                    pendingDeleteCourse = null
+                    selectedCourses = emptyList()
+                    loadTimetable()
+                }
+                .onFailure { courseEditorError = it.message ?: "删除课程失败" }
         }
     }
 
@@ -236,6 +503,16 @@ fun TimetableScreen(
                         currentWeek = currentWeek,
                         selectedCourses = selectedCourses,
                         onSelect = ::loadDetail,
+                        onAddUserCourse = { day, slot ->
+                            courseEditorError = null
+                            selectedCourses = emptyList()
+                            courseEditorSeed = userCourseEditorSeedForSlot(
+                                day = day,
+                                slot = slot,
+                                currentWeek = currentWeek,
+                                maxWeek = timetableMaxWeek(envelope.data.entries),
+                            )
+                        },
                         modifier = Modifier.weight(1f),
                     )
                     if (selectedCourses.isNotEmpty()) {
@@ -252,6 +529,16 @@ fun TimetableScreen(
                                 homeworkStates = homeworkStates,
                                 resourceStates = resourceStates,
                                 courseResourceRepository = courseResourceRepository,
+                                onEditUserCourse = {
+                                    courseEditorError = null
+                                    selectedCourses = emptyList()
+                                    courseEditorSeed = userCourseEditorSeedForEntry(
+                                        entry = it,
+                                        currentWeek = currentWeek,
+                                        maxWeek = timetableMaxWeek(envelope.data.entries),
+                                    )
+                                },
+                                onDeleteUserCourse = { pendingDeleteCourse = it },
                             )
                         }
                     }
@@ -262,6 +549,16 @@ fun TimetableScreen(
                     currentWeek = currentWeek,
                     selectedCourses = selectedCourses,
                     onSelect = ::loadDetail,
+                    onAddUserCourse = { day, slot ->
+                        courseEditorError = null
+                        selectedCourses = emptyList()
+                        courseEditorSeed = userCourseEditorSeedForSlot(
+                            day = day,
+                            slot = slot,
+                            currentWeek = currentWeek,
+                            maxWeek = timetableMaxWeek(envelope.data.entries),
+                        )
+                    },
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (selectedCourses.isNotEmpty()) {
@@ -275,6 +572,16 @@ fun TimetableScreen(
                             homeworkStates = homeworkStates,
                             resourceStates = resourceStates,
                             courseResourceRepository = courseResourceRepository,
+                            onEditUserCourse = {
+                                courseEditorError = null
+                                selectedCourses = emptyList()
+                                courseEditorSeed = userCourseEditorSeedForEntry(
+                                    entry = it,
+                                    currentWeek = currentWeek,
+                                    maxWeek = timetableMaxWeek(envelope.data.entries),
+                                )
+                            },
+                            onDeleteUserCourse = { pendingDeleteCourse = it },
                             modifier = Modifier.heightIn(max = 720.dp),
                         )
                     }
@@ -282,13 +589,70 @@ fun TimetableScreen(
             }
         }
     }
+
+    courseEditorSeed?.let { seed ->
+        val currentState = state
+        val timetableData = if (currentState is LoadState.Data) currentState.value.data else TimetableData()
+        ModalBottomSheet(
+            onDismissRequest = {
+                courseEditorSeed = null
+                courseEditorError = null
+            },
+            sheetState = editorSheetState,
+            modifier = Modifier.fillMaxHeight(0.96f),
+        ) {
+            UserCourseEditorSheet(
+                seed = seed,
+                data = timetableData,
+                currentWeek = currentWeek,
+                saveError = courseEditorError,
+                onDismiss = {
+                    courseEditorSeed = null
+                    courseEditorError = null
+                },
+                onSave = ::saveUserCourse,
+            )
+        }
+    }
+
+    pendingDeleteCourse?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteCourse = null },
+            title = { Text("删除课程") },
+            text = { Text("确定删除“${entry.courseName}”吗？") },
+            confirmButton = {
+                TextButton(onClick = { deleteUserCourse(entry) }) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteCourse = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
 }
 
 @Composable
-fun ExamsScreen(repository: ModuleRepository) {
+fun ExamsScreen(
+    repository: ModuleRepository,
+    onNavigate: (String) -> Unit,
+) {
     DataScreen(title = "考务", loader = { repository.exams() }) { envelope ->
         val data = envelope.data
         val currentTerm = data.currentTerm
+        item {
+            SecondaryModuleLinks(
+                title = "考务相关",
+                links = listOf(
+                    ModuleKeys.AcademicProgress to "学业进度",
+                    ModuleKeys.HistoryScores to "历史成绩",
+                    ModuleKeys.Scores to "主修成绩",
+                ),
+                onNavigate = onNavigate,
+            )
+        }
         if (!currentTerm.isNullOrBlank()) {
             item {
                 AssistChip(onClick = {}, label = { Text(currentTerm) })
@@ -306,15 +670,46 @@ fun ExamsScreen(repository: ModuleRepository) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScoresScreen(repository: ModuleRepository, history: Boolean = false) {
+    val scope = rememberCoroutineScope()
     var requestedTerm by remember(history) { mutableStateOf(if (history) HISTORY_ALL_TERMS else "") }
+    var termInput by remember(history) { mutableStateOf("") }
+    var requestedScoreType by remember(history) { mutableStateOf("lr") }
+    var refreshNonce by remember(history) { mutableStateOf(0) }
+    var selectedScore by remember { mutableStateOf<ScoreItem?>(null) }
+    var scoreDetailState by remember { mutableStateOf<LoadState<ModuleEnvelope<ScoreDetailData>>?>(null) }
+    val scoreDetailSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val title = if (history) "历史成绩" else "主修成绩"
     val selectedHistoryTerm = requestedTerm.takeIf { history && it != HISTORY_ALL_TERMS }
+    val selectedScoreTerm = requestedTerm.takeIf { !history && it.isNotBlank() }
+
+    fun openScoreDetail(score: ScoreItem) {
+        selectedScore = score
+        scoreDetailState = LoadState.Loading
+        scope.launch {
+            val detailPath = score.detailPath
+            if (detailPath.isNullOrBlank()) {
+                scoreDetailState = LoadState.Error("这条成绩没有可用的分数明细链接。")
+                return@launch
+            }
+            runCatching { repository.scoreDetail(detailPath) }
+                .onSuccess { scoreDetailState = LoadState.Data(it) }
+                .onFailure { scoreDetailState = LoadState.Error(it.message ?: "分数详情加载失败") }
+        }
+    }
+
     DataScreen(
         title = title,
-        refreshKey = if (history) requestedTerm else Unit,
-        loader = { if (history) repository.historyScores(selectedHistoryTerm) else repository.scores(ctype = "lr") },
+        refreshKey = if (history) requestedTerm else listOf(requestedTerm, requestedScoreType, refreshNonce),
+        loader = {
+            if (history) {
+                repository.historyScores(selectedHistoryTerm)
+            } else {
+                repository.scores(term = selectedScoreTerm, ctype = requestedScoreType)
+            }
+        },
     ) { envelope ->
         val data = envelope.data
         val currentTerm = data.currentTerm
@@ -325,6 +720,22 @@ fun ScoresScreen(repository: ModuleRepository, history: Boolean = false) {
                     value = requestedTerm,
                     onValueChange = { requestedTerm = it },
                     includeAllOption = true,
+                )
+            }
+        } else {
+            item {
+                ScoreQueryCard(
+                    termInput = termInput,
+                    scoreType = requestedScoreType,
+                    onTermInputChange = { termInput = it },
+                    onScoreTypeChange = {
+                        requestedScoreType = it
+                        refreshNonce += 1
+                    },
+                    onRefresh = {
+                        requestedTerm = termInput.trim()
+                        refreshNonce += 1
+                    },
                 )
             }
         }
@@ -358,9 +769,160 @@ fun ScoresScreen(repository: ModuleRepository, history: Boolean = false) {
                     if (history) {
                         KeyValue("教师", score.teacher)
                     }
-                    KeyValue("详情", score.detail)
+                    if (!score.detailPath.isNullOrBlank()) {
+                        OutlinedButton(onClick = { openScoreDetail(score) }) {
+                            Text(score.detail?.takeIf { it.isNotBlank() } ?: "查看分数详情")
+                        }
+                    } else {
+                        KeyValue("详情", score.detail)
+                    }
                 }
             }
+        }
+    }
+
+    selectedScore?.let { score ->
+        ModalBottomSheet(
+            onDismissRequest = {
+                selectedScore = null
+                scoreDetailState = null
+            },
+            sheetState = scoreDetailSheetState,
+        ) {
+            ScoreDetailSheetContent(
+                score = score,
+                state = scoreDetailState,
+                onRetry = { openScoreDetail(score) },
+                modifier = Modifier.heightIn(max = 720.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScoreDetailSheetContent(
+    score: ScoreItem,
+    state: LoadState<ModuleEnvelope<ScoreDetailData>>?,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(score.courseName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(score.term.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+            KeyValue("成绩", score.score, Modifier.weight(1f))
+            KeyValue("加分成绩", score.bonusScore, Modifier.weight(1f))
+            KeyValue("学分", score.credit, Modifier.weight(1f))
+        }
+
+        when (state) {
+            null -> Unit
+            LoadState.Loading, is LoadState.Error -> {
+                LoadingOrError(state)
+                if (state is LoadState.Error) {
+                    OutlinedButton(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+                        Text("重试")
+                    }
+                }
+            }
+            is LoadState.Data -> {
+                val detail = state.value.data
+                if (!detail.title.isNullOrBlank()) {
+                    Text(detail.title, style = MaterialTheme.typography.titleMedium)
+                }
+                if (detail.fields.isNotEmpty()) {
+                    InfoCard("明细字段") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            detail.fields.forEach { field ->
+                                KeyValue(field.label, field.value)
+                            }
+                        }
+                    }
+                }
+                detail.tables.forEach { table ->
+                    ScoreDetailTableView(table)
+                }
+                if (detail.fields.isEmpty() && detail.tables.isEmpty()) {
+                    Text(
+                        detail.rawText ?: "这条成绩没有可展示的明细内容。",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScoreDetailTableView(table: ScoreDetailTable) {
+    InfoCard(table.title ?: "分数构成") {
+        Column(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (table.headers.isNotEmpty()) {
+                ScoreDetailTableRow(table.headers, emphasized = true)
+                HorizontalDivider()
+            }
+            table.rows.forEach { row ->
+                ScoreDetailTableRow(row)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScoreDetailTableRow(row: List<String>, emphasized: Boolean = false) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        row.forEach { cell ->
+            Text(
+                text = cell,
+                modifier = Modifier.width(120.dp),
+                style = if (emphasized) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodyMedium,
+                fontWeight = if (emphasized) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScoreQueryCard(
+    termInput: String,
+    scoreType: String,
+    onTermInputChange: (String) -> Unit,
+    onScoreTypeChange: (String) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    InfoCard("筛选") {
+        OutlinedTextField(
+            value = termInput,
+            onValueChange = onTermInputChange,
+            label = { Text("学期值") },
+            placeholder = { Text("例如 2025-2026-2-2") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ScoreTypeOptions.forEach { (key, label) ->
+                FilterChip(
+                    selected = scoreType == key,
+                    onClick = { onScoreTypeChange(key) },
+                    label = { Text(label) },
+                )
+            }
+        }
+        Button(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) {
+            Text("按学期刷新")
         }
     }
 }
@@ -427,38 +989,1128 @@ private fun TermSelector(
     }
 }
 
+private data class CalendarDashboard(
+    val calendarEnvelope: ModuleEnvelope<CalendarData>,
+    val homework: List<HomeworkItem>,
+    val todos: List<UserTodoItem>,
+)
+
+private data class CalendarCellChip(
+    val text: String,
+    val color: Color,
+)
+
+private val CalendarMonthTitleFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("yyyy年M月")
+private val CalendarDayTitleFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.CHINA)
+private val CalendarWeekdayLabels = listOf("日", "一", "二", "三", "四", "五", "六")
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarScreen(repository: ModuleRepository) {
-    DataScreen(title = "学年日历", loader = { repository.calendar() }) { envelope ->
-        val data = envelope.data
-        val month = data.month
-        val currentWeek = data.currentWeek
-        if (!month.isNullOrBlank() || !currentWeek.isNullOrBlank()) {
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!month.isNullOrBlank()) {
-                        AssistChip(onClick = {}, label = { Text(month) })
-                    }
-                    if (!currentWeek.isNullOrBlank()) {
-                        AssistChip(onClick = {}, label = { Text("第 $currentWeek 周") })
-                    }
-                }
+    val scope = rememberCoroutineScope()
+    val today = remember { LocalDate.now() }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var selectedCalendarTerm by remember { mutableStateOf<String?>(null) }
+    var selectedMonth by remember { mutableStateOf<YearMonth?>(null) }
+    var selectedDate by remember { mutableStateOf<LocalDate?>(null) }
+    var addTodoDate by remember { mutableStateOf<LocalDate?>(null) }
+    var todoSaveError by remember { mutableStateOf<String?>(null) }
+    var showTermOverview by remember { mutableStateOf(false) }
+    var state by remember { mutableStateOf<LoadState<CalendarDashboard>>(LoadState.Loading) }
+
+    fun loadDashboard() {
+        scope.launch {
+            state = LoadState.Loading
+            runCatching {
+                val calendar = repository.calendar()
+                CalendarDashboard(
+                    calendarEnvelope = calendar,
+                    homework = runCatching { repository.homework("all").data.items }.getOrDefault(emptyList()),
+                    todos = repository.userTodos(),
+                )
+            }.onSuccess {
+                state = LoadState.Data(it)
+            }.onFailure {
+                state = LoadState.Error(it.message ?: "学年日历加载失败")
             }
         }
-        items(data.items, key = { it.date }) { item ->
-            InfoCard(item.date, subtitle = item.week) {
-                Text(item.note ?: "教学日历记录", style = MaterialTheme.typography.bodyMedium)
+    }
+
+    suspend fun refreshTodosOnly() {
+        val current = state
+        if (current !is LoadState.Data) {
+            loadDashboard()
+            return
+        }
+        runCatching { repository.userTodos() }
+            .onSuccess { todos ->
+                state = LoadState.Data(current.value.copy(todos = todos))
+            }
+            .onFailure {
+                todoSaveError = it.message ?: "待办刷新失败"
+            }
+    }
+
+    fun saveTodo(draft: UserTodoDraft) {
+        scope.launch {
+            runCatching { repository.saveUserTodo(draft) }
+                .onSuccess {
+                    addTodoDate = null
+                    todoSaveError = null
+                    refreshTodosOnly()
+                }
+                .onFailure {
+                    todoSaveError = it.message ?: "待办保存失败"
+                }
+        }
+    }
+
+    fun setTodoDone(todo: UserTodoItem, done: Boolean) {
+        scope.launch {
+            runCatching { repository.setUserTodoDone(todo.id, done) }
+                .onSuccess {
+                    todoSaveError = null
+                    refreshTodosOnly()
+                }
+                .onFailure {
+                    todoSaveError = it.message ?: "待办状态更新失败"
+                }
+        }
+    }
+
+    fun deleteTodo(todo: UserTodoItem) {
+        scope.launch {
+            runCatching { repository.deleteUserTodo(todo.id) }
+                .onSuccess {
+                    todoSaveError = null
+                    refreshTodosOnly()
+                }
+                .onFailure {
+                    todoSaveError = it.message ?: "待办删除失败"
+                }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loadDashboard()
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        when (val current = state) {
+            LoadState.Loading, is LoadState.Error -> LoadingOrError(current)
+            is LoadState.Data -> {
+                val dashboard = current.value
+                val data = dashboard.calendarEnvelope.data
+                val terms = data.availableTerms
+                val fallbackTerm = data.currentTerm?.takeIf { it.isNotBlank() }
+                    ?: terms.firstOrNull { it.selected }?.value
+                    ?: terms.firstOrNull()?.value
+                val effectiveTerm = selectedCalendarTerm
+                    ?.takeIf { candidate -> terms.isEmpty() || terms.any { it.value == candidate } }
+                    ?: fallbackTerm
+                val selectedTerm = terms.firstOrNull { it.value == effectiveTerm }
+                val calendar = buildAcademicCalendar(effectiveTerm, selectedTerm?.label)
+                val displayMonth = selectedMonth ?: defaultAcademicMonth(today, calendar)
+                val monthCalendar = remember(displayMonth) { buildAcademicMonthCalendar(displayMonth) }
+                val selectedIsCurrentTerm = effectiveTerm != null && effectiveTerm == data.currentTerm
+                val currentWeek = if (selectedIsCurrentTerm) parseWeekNumber(data.currentWeek) else null
+                val homeworkByDate = remember(dashboard.homework) { dashboard.homework.groupByHomeworkDueDate() }
+                val todosByDate = remember(dashboard.todos) { dashboard.todos.groupByTodoDate() }
+
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    contentPadding = PaddingValues(bottom = 88.dp),
+                ) {
+                    item {
+                        CalendarMonthHeaderCard(
+                            month = displayMonth,
+                            terms = terms,
+                            selectedTerm = effectiveTerm,
+                            calendar = calendar,
+                            today = today,
+                            currentWeek = currentWeek,
+                            onPreviousMonth = { selectedMonth = displayMonth.minusMonths(1) },
+                            onNextMonth = { selectedMonth = displayMonth.plusMonths(1) },
+                            onToday = {
+                                selectedMonth = YearMonth.from(today)
+                                selectedDate = today
+                            },
+                            onTermChange = { value ->
+                                selectedCalendarTerm = value
+                                val term = terms.firstOrNull { it.value == value }
+                                selectedMonth = buildAcademicCalendar(value, term?.label)
+                                    ?.let { defaultAcademicMonth(today, it) }
+                                selectedDate = null
+                                showTermOverview = false
+                            },
+                        )
+                    }
+                    item {
+                        CalendarMonthOverviewCard(
+                            month = displayMonth,
+                            homework = dashboard.homework,
+                            todos = dashboard.todos,
+                        )
+                    }
+                    item {
+                        AcademicMonthGrid(
+                            calendar = monthCalendar,
+                            today = today,
+                            selectedDate = selectedDate,
+                            homeworkByDate = homeworkByDate,
+                            todosByDate = todosByDate,
+                            onDateClick = { selectedDate = it },
+                        )
+                    }
+                    item {
+                        OutlinedButton(
+                            onClick = { showTermOverview = !showTermOverview },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(if (showTermOverview) "收起学期总览/周表" else "展开学期总览/周表")
+                        }
+                    }
+                    if (showTermOverview) {
+                        if (calendar == null) {
+                            item {
+                                InfoCard("无法生成校历", subtitle = effectiveTerm) {
+                                    Text("当前学期编码或标签无法解析。", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        } else {
+                            item {
+                                AcademicCalendarTable(
+                                    calendar = calendar,
+                                    currentWeek = currentWeek,
+                                    today = today,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                FloatingActionButton(
+                    onClick = {
+                        todoSaveError = null
+                        addTodoDate = selectedDate ?: today
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(18.dp),
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = "新增待办")
+                }
+
+                selectedDate?.let { date ->
+                    ModalBottomSheet(
+                        onDismissRequest = { selectedDate = null },
+                        sheetState = sheetState,
+                    ) {
+                        CalendarDayDetail(
+                            date = date,
+                            homework = homeworkByDate[date].orEmpty(),
+                            todos = todosByDate[date].orEmpty(),
+                            onAddTodo = {
+                                todoSaveError = null
+                                addTodoDate = date
+                            },
+                            onToggleTodo = ::setTodoDone,
+                            onDeleteTodo = ::deleteTodo,
+                        )
+                    }
+                }
+
+                addTodoDate?.let { date ->
+                    UserTodoEditorDialog(
+                        initialDate = date,
+                        errorMessage = todoSaveError,
+                        onDismiss = {
+                            addTodoDate = null
+                            todoSaveError = null
+                        },
+                        onSave = ::saveTodo,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-fun HomeworkScreen(repository: ModuleRepository) {
+private fun CalendarMonthHeaderCard(
+    month: YearMonth,
+    terms: List<TermOption>,
+    selectedTerm: String?,
+    calendar: AcademicCalendarTerm?,
+    today: LocalDate,
+    currentWeek: Int?,
+    onPreviousMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+    onToday: () -> Unit,
+    onTermChange: (String) -> Unit,
+) {
+    InfoCard(
+        title = month.format(CalendarMonthTitleFormatter),
+        subtitle = calendar?.label ?: selectedTerm,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onPreviousMonth) {
+                Icon(Icons.Filled.ChevronLeft, contentDescription = "上个月")
+            }
+            Text(
+                month.format(CalendarMonthTitleFormatter),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            IconButton(onClick = onNextMonth) {
+                Icon(Icons.Filled.ChevronRight, contentDescription = "下个月")
+            }
+        }
+        if (terms.isNotEmpty()) {
+            TermSelector(
+                terms = terms,
+                value = selectedTerm,
+                onValueChange = onTermChange,
+            )
+        }
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(onClick = onToday, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+                Icon(Icons.Filled.Today, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("今天")
+            }
+            AssistChip(onClick = {}, label = { Text("今天 ${today.monthValue}月${today.dayOfMonth}日") })
+            calendar?.let {
+                AssistChip(onClick = {}, label = { Text("${it.weeks.size} 周") })
+            }
+            if (currentWeek != null) {
+                AssistChip(onClick = {}, label = { Text("第 $currentWeek 教学周") })
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarMonthOverviewCard(
+    month: YearMonth,
+    homework: List<HomeworkItem>,
+    todos: List<UserTodoItem>,
+) {
+    val monthHomework = homework.filter { item ->
+        homeworkDueDate(item)?.let { YearMonth.from(it) == month } == true
+    }
+    val monthTodos = todos.filter { item ->
+        item.todoDate()?.let { YearMonth.from(it) == month } == true
+    }
+    val unsubmittedHomework = monthHomework.count { homeworkCalendarStatusLabel(it) == "未提交" }
+    val doneHomework = monthHomework.size - unsubmittedHomework
+    val openTodos = monthTodos.count { !it.done }
+
+    InfoCard(
+        title = "本月总览",
+        subtitle = month.format(CalendarMonthTitleFormatter),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            CalendarMetric("作业截止", monthHomework.size.toString(), Color(0xFF0B74F6), Modifier.weight(1f))
+            CalendarMetric("未提交", unsubmittedHomework.toString(), Color(0xFFD64B6B), Modifier.weight(1f))
+            CalendarMetric("已提交", doneHomework.toString(), Color(0xFF2AA876), Modifier.weight(1f))
+            CalendarMetric("待办", openTodos.toString(), Color(0xFF7C58C2), Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun CalendarMetric(label: String, value: String, tint: Color, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .background(tint.copy(alpha = 0.1f), MaterialTheme.shapes.medium)
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = tint)
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun AcademicMonthGrid(
+    calendar: AcademicMonthCalendar,
+    today: LocalDate,
+    selectedDate: LocalDate?,
+    homeworkByDate: Map<LocalDate, List<HomeworkItem>>,
+    todosByDate: Map<LocalDate, List<UserTodoItem>>,
+    onDateClick: (LocalDate) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.36f)),
+    ) {
+        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+                CalendarWeekdayLabels.forEach { label ->
+                    Text(
+                        text = label,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            calendar.weeks.forEach { week ->
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+                    week.days.forEach { day ->
+                        AcademicMonthDayCell(
+                            day = day,
+                            today = today,
+                            selected = selectedDate == day.date,
+                            homework = homeworkByDate[day.date].orEmpty(),
+                            todos = todosByDate[day.date].orEmpty(),
+                            onClick = { onDateClick(day.date) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(92.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AcademicMonthDayCell(
+    day: AcademicMonthDay,
+    today: LocalDate,
+    selected: Boolean,
+    homework: List<HomeworkItem>,
+    todos: List<UserTodoItem>,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val isToday = day.date == today
+    val borderColor = when {
+        selected -> colorScheme.primary
+        isToday -> colorScheme.primary.copy(alpha = 0.62f)
+        else -> colorScheme.outline.copy(alpha = 0.28f)
+    }
+    val background = when {
+        selected -> colorScheme.primaryContainer.copy(alpha = 0.44f)
+        isToday -> colorScheme.primaryContainer.copy(alpha = 0.28f)
+        else -> colorScheme.surface
+    }
+    val dayColor = when {
+        !day.inMonth -> colorScheme.onSurfaceVariant.copy(alpha = 0.48f)
+        isToday || selected -> colorScheme.primary
+        else -> colorScheme.onSurface
+    }
+    val chips = remember(homework, todos) {
+        buildList {
+            homework.forEach { item ->
+                val submitted = homeworkCalendarStatusLabel(item) == "已提交"
+                add(
+                    CalendarCellChip(
+                        text = "${if (submitted) "已提交" else "未提交"} ${item.title}",
+                        color = if (submitted) Color(0xFF2AA876) else Color(0xFFD64B6B),
+                    )
+                )
+            }
+            todos.forEach { todo ->
+                add(
+                    CalendarCellChip(
+                        text = "${if (todo.done) "已完成" else "待办"} ${todo.title}",
+                        color = if (todo.done) Color(0xFF6B7280) else Color(0xFF7C58C2),
+                    )
+                )
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .border(if (selected) 1.5.dp else 0.5.dp, borderColor, MaterialTheme.shapes.small)
+            .background(background, MaterialTheme.shapes.small)
+            .clickable(onClick = onClick)
+            .padding(5.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = day.date.dayOfMonth.toString(),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (isToday || selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = dayColor,
+            maxLines = 1,
+        )
+        chips.take(2).forEach { chip ->
+            CalendarCellChipView(chip)
+        }
+        if (chips.size > 2) {
+            Text(
+                text = "+${chips.size - 2}",
+                style = MaterialTheme.typography.labelSmall,
+                color = colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CalendarCellChipView(chip: CalendarCellChip) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(chip.color.copy(alpha = 0.12f), MaterialTheme.shapes.small)
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+    ) {
+        Text(
+            chip.text,
+            style = MaterialTheme.typography.labelSmall,
+            color = chip.color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun CalendarDayDetail(
+    date: LocalDate,
+    homework: List<HomeworkItem>,
+    todos: List<UserTodoItem>,
+    onAddTodo: () -> Unit,
+    onToggleTodo: (UserTodoItem, Boolean) -> Unit,
+    onDeleteTodo: (UserTodoItem) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    date.format(CalendarDayTitleFormatter),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "${homework.size} 项作业截止 · ${todos.size} 项自定义待办",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            OutlinedButton(onClick = onAddTodo) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("新增")
+            }
+        }
+
+        if (homework.isEmpty() && todos.isEmpty()) {
+            Text("当天暂无作业截止或自定义待办。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        if (homework.isNotEmpty()) {
+            Text("作业截止", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            homework.forEach { item ->
+                InfoCard(
+                    title = item.title,
+                    subtitle = item.course,
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        CalendarStatusPill(
+                            text = homeworkCalendarStatusLabel(item),
+                            color = if (homeworkCalendarStatusLabel(item) == "已提交") Color(0xFF2AA876) else Color(0xFFD64B6B),
+                        )
+                        item.submissionStatus?.takeIf { it.isNotBlank() }?.let {
+                            CalendarStatusPill(text = it, color = Color(0xFF0B74F6))
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+                        KeyValue("截止", item.dueAt, Modifier.weight(1f))
+                        KeyValue("提交", item.submittedAt, Modifier.weight(1f))
+                    }
+                    KeyValue("内容", item.contentExcerpt)
+                }
+            }
+        }
+
+        if (todos.isNotEmpty()) {
+            Text("自定义待办", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            todos.forEach { todo ->
+                UserTodoRow(
+                    todo = todo,
+                    onToggle = { onToggleTodo(todo, it) },
+                    onDelete = { onDeleteTodo(todo) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarStatusPill(text: String, color: Color) {
+    Box(
+        modifier = Modifier
+            .background(color.copy(alpha = 0.12f), MaterialTheme.shapes.small)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(text, style = MaterialTheme.typography.labelMedium, color = color, maxLines = 1)
+    }
+}
+
+@Composable
+private fun UserTodoRow(
+    todo: UserTodoItem,
+    onToggle: (Boolean) -> Unit,
+    onDelete: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = todo.done, onCheckedChange = onToggle)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    todo.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (todo.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                todo.note?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Filled.Delete, contentDescription = "删除待办", tint = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UserTodoEditorDialog(
+    initialDate: LocalDate,
+    errorMessage: String?,
+    onDismiss: () -> Unit,
+    onSave: (UserTodoDraft) -> Unit,
+) {
+    var title by remember(initialDate) { mutableStateOf("") }
+    var dateText by remember(initialDate) { mutableStateOf(initialDate.toString()) }
+    var note by remember(initialDate) { mutableStateOf("") }
+    var validationError by remember(initialDate) { mutableStateOf<String?>(null) }
+    val visibleError = validationError ?: errorMessage
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("新增待办") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = {
+                        title = it
+                        validationError = null
+                    },
+                    label = { Text("标题") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = dateText,
+                    onValueChange = {
+                        dateText = it
+                        validationError = null
+                    },
+                    label = { Text("日期 yyyy-MM-dd") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("备注") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                visibleError?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val parsedDate = try {
+                        LocalDate.parse(dateText.trim())
+                    } catch (_: DateTimeParseException) {
+                        null
+                    }
+                    when {
+                        title.isBlank() -> validationError = "标题不能为空"
+                        parsedDate == null -> validationError = "日期格式应为 yyyy-MM-dd"
+                        else -> onSave(
+                            UserTodoDraft(
+                                title = title.trim(),
+                                date = parsedDate.toString(),
+                                note = note,
+                            )
+                        )
+                    }
+                },
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
+private fun List<HomeworkItem>.groupByHomeworkDueDate(): Map<LocalDate, List<HomeworkItem>> =
+    mapNotNull { item -> homeworkDueDate(item)?.let { it to item } }
+        .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+
+private fun List<UserTodoItem>.groupByTodoDate(): Map<LocalDate, List<UserTodoItem>> =
+    mapNotNull { item -> item.todoDate()?.let { it to item } }
+        .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+
+private fun UserTodoItem.todoDate(): LocalDate? =
+    try {
+        LocalDate.parse(date)
+    } catch (_: DateTimeParseException) {
+        null
+    }
+
+@Composable
+private fun AcademicCalendarTable(
+    calendar: AcademicCalendarTerm,
+    currentWeek: Int?,
+    today: LocalDate,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primary)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = calendar.label,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val leftColumnWidth = 74.dp
+                val minDayWidth = 42.dp
+                val availableDayWidth = (maxWidth - leftColumnWidth) / 7
+                val dayWidth = if (availableDayWidth > minDayWidth) availableDayWidth else minDayWidth
+                val contentWidth = leftColumnWidth + dayWidth * 7f
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                ) {
+                    Column(Modifier.width(contentWidth)) {
+                        AcademicCalendarHeaderRow(
+                            leftColumnWidth = leftColumnWidth,
+                            dayWidth = dayWidth,
+                        )
+                        calendar.weeks.forEach { week ->
+                            AcademicCalendarWeekRow(
+                                week = week,
+                                leftColumnWidth = leftColumnWidth,
+                                dayWidth = dayWidth,
+                                currentWeek = currentWeek,
+                                today = today,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AcademicCalendarHeaderRow(leftColumnWidth: Dp, dayWidth: Dp) {
+    val borderColor = MaterialTheme.colorScheme.surfaceVariant
+    Row {
+        AcademicCalendarCell(
+            modifier = Modifier
+                .width(leftColumnWidth)
+                .height(42.dp),
+            background = MaterialTheme.colorScheme.surfaceVariant,
+            borderColor = borderColor,
+        ) {
+            Text("周", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+        }
+        listOf("一", "二", "三", "四", "五", "六", "日").forEach { weekday ->
+            AcademicCalendarCell(
+                modifier = Modifier
+                    .width(dayWidth)
+                    .height(42.dp),
+                background = MaterialTheme.colorScheme.surfaceVariant,
+                borderColor = borderColor,
+            ) {
+                Text("周$weekday", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AcademicCalendarWeekRow(
+    week: AcademicCalendarWeek,
+    leftColumnWidth: Dp,
+    dayWidth: Dp,
+    currentWeek: Int?,
+    today: LocalDate,
+) {
+    val isCurrentWeek = currentWeek == week.termWeekNumber
+    val colorScheme = MaterialTheme.colorScheme
+    val rowBackground = if (isCurrentWeek) {
+        colorScheme.primaryContainer.copy(alpha = 0.32f)
+    } else {
+        colorScheme.surface
+    }
+    val borderColor = if (isCurrentWeek) colorScheme.primary else colorScheme.surfaceVariant
+
+    Row(Modifier.height(IntrinsicSize.Min)) {
+        AcademicCalendarCell(
+            modifier = Modifier
+                .width(leftColumnWidth)
+                .fillMaxHeight()
+                .heightIn(min = 54.dp),
+            background = if (isCurrentWeek) colorScheme.primaryContainer else colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            borderColor = borderColor,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "${week.seasonLabel}${week.seasonWeekNumber}周",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                Text(
+                    text = week.monthLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+        week.dates.forEachIndexed { index, date ->
+            val isToday = date == today
+            val isWeekend = index >= 5
+            AcademicCalendarCell(
+                modifier = Modifier
+                    .width(dayWidth)
+                    .fillMaxHeight()
+                    .heightIn(min = 54.dp),
+                background = if (isToday) colorScheme.primaryContainer else rowBackground,
+                borderColor = borderColor,
+                contentPadding = 2.dp,
+            ) {
+                val label = academicCalendarDateLabel(week, date)
+                val isCompactLabel = '/' in label
+                val dateTextStyle = if (isCompactLabel) {
+                    MaterialTheme.typography.labelMedium
+                } else {
+                    MaterialTheme.typography.bodyMedium
+                }
+                if (isToday) {
+                    Box(
+                        modifier = Modifier
+                            .background(colorScheme.primary, CircleShape)
+                            .padding(
+                                horizontal = if (isCompactLabel) 4.dp else 8.dp,
+                                vertical = 4.dp,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = label,
+                            color = colorScheme.onPrimary,
+                            style = dateTextStyle,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                        )
+                    }
+                } else {
+                    Text(
+                        text = label,
+                        color = if (isWeekend) Color(0xFFC62828) else colorScheme.onSurface,
+                        style = dateTextStyle,
+                        fontWeight = if (isCurrentWeek) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AcademicCalendarCell(
+    modifier: Modifier,
+    background: Color,
+    borderColor: Color,
+    contentAlignment: Alignment = Alignment.Center,
+    contentPadding: Dp = 4.dp,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .border(0.5.dp, borderColor)
+            .background(background)
+            .padding(contentPadding),
+        contentAlignment = contentAlignment,
+    ) {
+        content()
+    }
+}
+
+private fun academicCalendarDateLabel(week: AcademicCalendarWeek, date: LocalDate): String =
+    if (week.dates.map { it.monthValue }.distinct().size > 1) {
+        "${date.monthValue}/${date.dayOfMonth}"
+    } else {
+        date.dayOfMonth.toString()
+    }
+
+@Composable
+fun HomeworkScreen(
+    repository: ModuleRepository,
+    attachmentRepository: HomeworkAttachmentRepository,
+    agentRepository: AgentRepository,
+    onNavigate: (String) -> Unit,
+) {
     var status by remember { mutableStateOf("all") }
-    DataScreen(title = "作业", refreshKey = status, loader = { repository.homework(status) }) { envelope ->
+    var expiredStatus by remember { mutableStateOf("expired") }
+    var refreshNonce by remember { mutableStateOf(0) }
+    var submitTarget by remember { mutableStateOf<HomeworkItem?>(null) }
+    var resubmitConfirmTarget by remember { mutableStateOf<HomeworkItem?>(null) }
+    var submitContent by remember { mutableStateOf("") }
+    var pickedFiles by remember { mutableStateOf<List<HomeworkPickedFile>>(emptyList()) }
+    var submitting by remember { mutableStateOf(false) }
+    var submitError by remember { mutableStateOf<String?>(null) }
+    var attachmentBusyKey by remember { mutableStateOf<String?>(null) }
+    var attachmentError by remember { mutableStateOf<String?>(null) }
+    var previewTarget by remember { mutableStateOf<HomeworkAttachmentPreviewTarget?>(null) }
+    var agentTarget by remember { mutableStateOf<HomeworkItem?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        pickedFiles = uris.map { context.describeHomeworkFile(it) }
+    }
+
+    fun openSubmitDialog(item: HomeworkItem) {
+        submitTarget = item
+        submitContent = ""
+        pickedFiles = emptyList()
+        submitError = null
+    }
+
+    fun previewAttachment(item: HomeworkItem, attachment: HomeworkAttachment) {
+        val homeworkId = item.homeworkId ?: return
+        val busyKey = homeworkAttachmentActionKey("preview", attachment)
+        scope.launch {
+            attachmentBusyKey = busyKey
+            attachmentError = null
+            runCatching {
+                attachmentRepository.preview(homeworkId, attachment.attachmentId, attachment.filename)
+            }.onSuccess { preview ->
+                previewTarget = HomeworkAttachmentPreviewTarget(item, attachment, preview)
+            }.onFailure { error ->
+                attachmentError = error.message ?: "预览附件失败"
+            }
+            attachmentBusyKey = null
+        }
+    }
+
+    fun downloadAttachment(item: HomeworkItem, attachment: HomeworkAttachment) {
+        val homeworkId = item.homeworkId ?: return
+        val busyKey = homeworkAttachmentActionKey("download", attachment)
+        scope.launch {
+            attachmentBusyKey = busyKey
+            attachmentError = null
+            runCatching {
+                attachmentRepository.download(homeworkId, attachment.attachmentId, attachment.filename)
+            }.onSuccess { file ->
+                if (!openFile(context, file)) {
+                    attachmentError = "已下载，但未找到可打开该文件的应用"
+                }
+            }.onFailure { error ->
+                attachmentError = error.message ?: "下载附件失败"
+            }
+            attachmentBusyKey = null
+        }
+    }
+
+    previewTarget?.let { target ->
+        HomeworkAttachmentPreviewScreen(
+            target = target,
+            busyKey = attachmentBusyKey,
+            error = attachmentError,
+            onClose = {
+                previewTarget = null
+                attachmentError = null
+            },
+            onDownload = { downloadAttachment(target.homework, target.attachment) },
+        )
+        return
+    }
+
+    resubmitConfirmTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { resubmitConfirmTarget = null },
+            title = { Text("确认重新提交") },
+            text = { Text("该作业已于 ${target.submittedAt.orEmpty().ifBlank { "此前" }} 提交。继续操作会再次提交作业。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        resubmitConfirmTarget = null
+                        openSubmitDialog(target)
+                    },
+                ) {
+                    Text("继续")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { resubmitConfirmTarget = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+
+    submitTarget?.let { target ->
+        HomeworkSubmitDialog(
+            homework = target,
+            content = submitContent,
+            pickedFiles = pickedFiles,
+            submitting = submitting,
+            error = submitError,
+            onContentChange = { submitContent = it },
+            onPickFiles = { filePicker.launch(arrayOf("*/*")) },
+            onRemoveFile = { file -> pickedFiles = pickedFiles.filterNot { it.uri == file.uri } },
+            onDismiss = {
+                if (!submitting) {
+                    submitTarget = null
+                    submitError = null
+                    pickedFiles = emptyList()
+                    submitContent = ""
+                }
+            },
+            onSubmit = {
+                val homeworkId = target.homeworkId ?: return@HomeworkSubmitDialog
+                submitting = true
+                submitError = null
+                scope.launch {
+                    runCatching {
+                        val uploads = pickedFiles.map { context.readHomeworkUploadFile(it) }
+                        repository.submitHomework(
+                            homeworkId = homeworkId,
+                            courseId = target.courseId,
+                            content = submitContent,
+                            files = uploads,
+                        )
+                    }.onSuccess {
+                        submitting = false
+                        submitTarget = null
+                        pickedFiles = emptyList()
+                        submitContent = ""
+                        refreshNonce += 1
+                    }.onFailure { error ->
+                        submitting = false
+                        submitError = error.message ?: "提交失败"
+                    }
+                }
+            },
+        )
+    }
+
+    agentTarget?.let { target ->
+        AgentTaskDialog(
+            homework = target,
+            repository = agentRepository,
+            onDismiss = { agentTarget = null },
+        )
+    }
+
+    val homeworkFilter = if (status == "expired") expiredStatus else status
+    DataScreen(
+        title = "作业",
+        refreshKey = Triple(status, expiredStatus, refreshNonce),
+        loader = { repository.homework(homeworkFilter) },
+    ) { envelope ->
         val data = envelope.data
         val currentTerm = data.currentTerm
+        val groups = groupHomeworkItems(data.items)
+        item {
+            SecondaryModuleLinks(
+                title = "作业相关",
+                links = listOf(ModuleKeys.Agent to "作业助手"),
+                onNavigate = onNavigate,
+            )
+        }
         if (!currentTerm.isNullOrBlank()) {
             item {
                 AssistChip(onClick = {}, label = { Text(currentTerm) })
@@ -471,47 +2123,614 @@ fun HomeworkScreen(repository: ModuleRepository) {
                 }
             }
         }
-        items(data.items, key = { it.homeworkId ?: (it.title + it.courseId).hashCode() }) { item ->
-            InfoCard(item.title, subtitle = item.course) {
-                KeyValue("开始", item.openedAt)
-                KeyValue("截止", item.dueAt)
-                KeyValue("状态", item.status)
-                KeyValue("内容", item.contentExcerpt)
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = status == "expired",
+                    onClick = { status = "expired" },
+                    label = { Text("已过期") },
+                )
+                if (status == "expired") {
+                    listOf(
+                        "expired" to "全部过期",
+                        HomeworkStatusKind.ExpiredCanSubmit.code to "可补交",
+                        HomeworkStatusKind.ExpiredClosed.code to "不可补交",
+                    ).forEach { (key, label) ->
+                        FilterChip(
+                            selected = expiredStatus == key,
+                            onClick = { expiredStatus = key },
+                            label = { Text(label) },
+                        )
+                    }
+                }
+            }
+        }
+        if (!attachmentError.isNullOrBlank()) {
+            item {
+                Text(
+                    attachmentError.orEmpty(),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+        if (groups.isEmpty()) {
+            item {
+                InfoCard("暂无作业") {
+                    Text("当前没有可展示的作业记录。", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        } else {
+            groups.forEach { group ->
+                item(key = "homework-group-${group.courseId}-${group.courseName}") {
+                    SectionTitle(
+                        title = group.courseName,
+                        subtitle = buildHomeworkGroupSubtitle(group),
+                    )
+                }
+                items(group.items, key = { it.homeworkId ?: (it.title + it.courseId).hashCode() }) { item ->
+                    val itemStatus = homeworkStatusKind(item)
+                    InfoCard(item.title, subtitle = item.course) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+                            KeyValue("开始", item.openedAt, Modifier.weight(1f))
+                            KeyValue("截止", item.dueAt, Modifier.weight(1f))
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+                            KeyValue("状态", homeworkStatusLabel(item), Modifier.weight(1f))
+                            KeyValue("提交时间", item.submittedAt ?: "未提交", Modifier.weight(1f))
+                        }
+                        KeyValue("内容", item.contentExcerpt)
+                        HomeworkAttachmentsSection(
+                            attachments = item.attachments,
+                            busyKey = attachmentBusyKey,
+                            onPreview = { previewAttachment(item, it) },
+                            onDownload = { downloadAttachment(item, it) },
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            OutlinedButton(
+                                enabled = item.homeworkId != null,
+                                onClick = { agentTarget = item },
+                            ) {
+                                Text("Agent 协助")
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            OutlinedButton(
+                                enabled = item.homeworkId != null &&
+                                    item.canSubmit &&
+                                    itemStatus != HomeworkStatusKind.ExpiredClosed &&
+                                    !submitting,
+                                onClick = {
+                                    if (itemStatus == HomeworkStatusKind.Done) {
+                                        resubmitConfirmTarget = item
+                                    } else {
+                                        openSubmitDialog(item)
+                                    }
+                                },
+                            ) {
+                                Text(homeworkSubmitButtonLabel(itemStatus))
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
+private fun HomeworkAttachmentsSection(
+    attachments: List<HomeworkAttachment>,
+    busyKey: String?,
+    onPreview: (HomeworkAttachment) -> Unit,
+    onDownload: (HomeworkAttachment) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HorizontalDivider()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("附件", style = MaterialTheme.typography.titleSmall)
+            AssistChip(onClick = {}, label = { Text("${attachments.size} 个") })
+        }
+        if (attachments.isEmpty()) {
+            Text(
+                "暂无附件",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else attachments.forEach { attachment ->
+            val previewKey = homeworkAttachmentActionKey("preview", attachment)
+            val downloadKey = homeworkAttachmentActionKey("download", attachment)
+            val previewBusy = busyKey == previewKey
+            val downloadBusy = busyKey == downloadKey
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    attachment.filename,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                attachment.size?.takeIf { it.isNotBlank() }?.let { size ->
+                    Text(
+                        size,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        enabled = busyKey == null && attachment.attachmentId.isNotBlank(),
+                        onClick = { onPreview(attachment) },
+                    ) {
+                        Text(if (previewBusy) "预览中" else "预览")
+                    }
+                    Button(
+                        enabled = busyKey == null && attachment.attachmentId.isNotBlank(),
+                        onClick = { onDownload(attachment) },
+                    ) {
+                        Text(if (downloadBusy) "下载中" else "下载")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun homeworkAttachmentActionKey(action: String, attachment: HomeworkAttachment): String =
+    "$action:${attachment.attachmentId}:${attachment.filename}"
+
+private data class HomeworkAttachmentPreviewTarget(
+    val homework: HomeworkItem,
+    val attachment: HomeworkAttachment,
+    val preview: HomeworkAttachmentPreview,
+)
+
+@Composable
+private fun HomeworkAttachmentPreviewScreen(
+    target: HomeworkAttachmentPreviewTarget,
+    busyKey: String?,
+    error: String?,
+    onClose: () -> Unit,
+    onDownload: () -> Unit,
+) {
+    var refreshNonce by remember(target.preview.url) { mutableStateOf(0) }
+    var loading by remember(target.preview.url) { mutableStateOf(true) }
+    var webError by remember(target.preview.url) { mutableStateOf<String?>(null) }
+    val downloadBusy = busyKey == homeworkAttachmentActionKey("download", target.attachment)
+
+    BackHandler(onBack = onClose)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        Surface(shadowElevation = 2.dp, color = MaterialTheme.colorScheme.surface) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = onClose) {
+                        Text("关闭")
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            target.attachment.filename,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            target.homework.title,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    OutlinedButton(
+                        enabled = !downloadBusy,
+                        onClick = {
+                            webError = null
+                            refreshNonce += 1
+                        },
+                    ) {
+                        Text("刷新")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Button(enabled = !downloadBusy, onClick = onDownload) {
+                        Text(if (downloadBusy) "下载中" else "下载")
+                    }
+                }
+            }
+        }
+
+        if (loading) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+
+        val message = webError ?: error?.takeIf { it.isNotBlank() }
+        if (!message.isNullOrBlank()) {
+            Text(
+                message,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+
+        AndroidView(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            factory = { context ->
+                WebView(context).apply {
+                    configureHomeworkPreviewWebView(
+                        onLoadingChange = { loading = it },
+                        onError = { webError = it },
+                    )
+                }
+            },
+            update = { webView ->
+                val loadKey = "${target.preview.url}#$refreshNonce"
+                if (webView.tag != loadKey) {
+                    webView.tag = loadKey
+                    webError = null
+                    loading = true
+                    if (target.preview.url.isHttpPreviewUrl()) {
+                        webView.injectHomeworkPreviewCookies(target.preview)
+                        webView.loadUrl(target.preview.url)
+                    } else {
+                        loading = false
+                        webError = "不支持的预览链接：${target.preview.url}"
+                    }
+                }
+            },
+        )
+    }
+}
+
+private fun WebView.configureHomeworkPreviewWebView(
+    onLoadingChange: (Boolean) -> Unit,
+    onError: (String) -> Unit,
+) {
+    settings.javaScriptEnabled = true
+    settings.domStorageEnabled = true
+    settings.allowFileAccess = false
+    settings.allowContentAccess = false
+    settings.loadWithOverviewMode = true
+    settings.useWideViewPort = true
+    settings.builtInZoomControls = true
+    settings.displayZoomControls = false
+    settings.javaScriptCanOpenWindowsAutomatically = false
+    settings.setSupportMultipleWindows(false)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+    }
+    webViewClient = object : WebViewClient() {
+        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+            val uri = request?.url ?: return false
+            val scheme = uri.scheme?.lowercase()
+            return if (scheme == "http" || scheme == "https") {
+                false
+            } else {
+                onError("应用内预览不支持该链接：$uri")
+                true
+            }
+        }
+
+        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+            onLoadingChange(true)
+        }
+
+        override fun onPageFinished(view: WebView?, url: String?) {
+            onLoadingChange(false)
+        }
+
+        override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+            if (request?.isForMainFrame == true) {
+                onLoadingChange(false)
+                onError(error?.description?.toString()?.takeIf { it.isNotBlank() } ?: "预览加载失败")
+            }
+        }
+    }
+}
+
+private fun WebView.injectHomeworkPreviewCookies(preview: HomeworkAttachmentPreview) {
+    val cookieManager = CookieManager.getInstance()
+    cookieManager.setAcceptCookie(true)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        cookieManager.setAcceptThirdPartyCookies(this, true)
+    }
+    preview.cookies.forEach { cookie ->
+        val targetUrl = cookie.toWebViewCookieUrl(preview.url)
+        val value = cookie.toWebViewCookieString()
+        if (targetUrl.isNotBlank() && value.isNotBlank()) {
+            cookieManager.setCookie(targetUrl, value)
+        }
+    }
+    cookieManager.flush()
+}
+
+private fun HomeworkAttachmentPreviewCookie.toWebViewCookieUrl(fallbackUrl: String): String {
+    val host = domain.trim().trimStart('.')
+    if (host.isBlank()) return fallbackUrl
+    val fallbackScheme = Uri.parse(fallbackUrl).scheme?.lowercase()
+    val scheme = when {
+        secure -> "https"
+        fallbackScheme == "http" || fallbackScheme == "https" -> fallbackScheme
+        else -> "https"
+    }
+    val safePath = path.takeIf { it.startsWith("/") } ?: "/"
+    return "$scheme://$host$safePath"
+}
+
+private fun HomeworkAttachmentPreviewCookie.toWebViewCookieString(): String =
+    buildString {
+        append(name)
+        append('=')
+        append(value)
+        if (!hostOnly && domain.isNotBlank()) {
+            append("; Domain=")
+            append(domain.trim())
+        }
+        append("; Path=")
+        append(path.ifBlank { "/" })
+        if (secure) append("; Secure")
+        if (httpOnly) append("; HttpOnly")
+    }
+
+private fun String.isHttpPreviewUrl(): Boolean {
+    val scheme = Uri.parse(this).scheme?.lowercase()
+    return scheme == "http" || scheme == "https"
+}
+
+private data class HomeworkCourseGroup(
+    val courseId: String,
+    val courseName: String,
+    val items: List<HomeworkItem>,
+    val total: Int,
+    val openCount: Int,
+    val expiredCount: Int,
+)
+
+private data class HomeworkPickedFile(
+    val uri: Uri,
+    val name: String,
+    val mimeType: String?,
+    val size: Long?,
+)
+
+private fun groupHomeworkItems(items: List<HomeworkItem>): List<HomeworkCourseGroup> =
+    items
+        .groupBy { item ->
+            val courseId = item.courseId.toString()
+            val courseName = item.course.trim().ifBlank { "未命名课程" }
+            courseId to courseName
+        }
+        .map { (key, groupItems) ->
+            val sortedItems = groupItems.sortedWith(
+                compareBy<HomeworkItem> { it.dueAt ?: "9999" }
+                    .thenBy { it.title },
+            )
+            HomeworkCourseGroup(
+                courseId = key.first,
+                courseName = key.second,
+                items = sortedItems,
+                total = sortedItems.size,
+                openCount = sortedItems.count { homeworkStatusKind(it) == HomeworkStatusKind.Open },
+                expiredCount = sortedItems.count {
+                    val status = homeworkStatusKind(it)
+                    status == HomeworkStatusKind.ExpiredCanSubmit || status == HomeworkStatusKind.ExpiredClosed
+                },
+            )
+        }
+        .sortedBy { it.courseName }
+
+private fun buildHomeworkGroupSubtitle(group: HomeworkCourseGroup): String =
+    buildList {
+        add("共 ${group.total} 条")
+        if (group.openCount > 0) add("待完成 ${group.openCount} 条")
+        if (group.expiredCount > 0) add("已过期 ${group.expiredCount} 条")
+    }.joinToString(" · ")
+
+private fun homeworkStatusLabel(item: HomeworkItem): String =
+    homeworkStatusKind(item).label
+
+private fun homeworkSubmitButtonLabel(status: HomeworkStatusKind): String =
+    when (status) {
+        HomeworkStatusKind.Done -> "重新提交"
+        HomeworkStatusKind.ExpiredCanSubmit -> "补交作业"
+        HomeworkStatusKind.ExpiredClosed -> "不可补交"
+        HomeworkStatusKind.Open -> "提交作业"
+    }
+
+@Composable
+private fun HomeworkSubmitDialog(
+    homework: HomeworkItem,
+    content: String,
+    pickedFiles: List<HomeworkPickedFile>,
+    submitting: Boolean,
+    error: String?,
+    onContentChange: (String) -> Unit,
+    onPickFiles: () -> Unit,
+    onRemoveFile: (HomeworkPickedFile) -> Unit,
+    onDismiss: () -> Unit,
+    onSubmit: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (homework.submittedAt.isNullOrBlank()) "提交作业" else "重新提交作业") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(homework.title, style = MaterialTheme.typography.titleSmall)
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = onContentChange,
+                    label = { Text("提交内容") },
+                    minLines = 4,
+                    maxLines = 8,
+                    enabled = !submitting,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedButton(
+                    enabled = !submitting,
+                    onClick = onPickFiles,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (pickedFiles.isEmpty()) "选择附件" else "重新选择附件")
+                }
+                pickedFiles.forEach { file ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(file.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                file.size?.let { formatHomeworkFileSize(it) } ?: "未知大小",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(enabled = !submitting, onClick = { onRemoveFile(file) }) {
+                            Text("移除")
+                        }
+                    }
+                }
+                if (!error.isNullOrBlank()) {
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        },
+        confirmButton = {
+            Button(enabled = !submitting && homework.homeworkId != null, onClick = onSubmit) {
+                Text(if (submitting) "提交中" else "提交")
+            }
+        },
+        dismissButton = {
+            TextButton(enabled = !submitting, onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
+private fun Context.describeHomeworkFile(uri: Uri): HomeworkPickedFile {
+    var name: String? = null
+    var size: Long? = null
+    contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (nameIndex >= 0) name = cursor.getString(nameIndex)
+            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+        }
+    }
+    return HomeworkPickedFile(
+        uri = uri,
+        name = name?.takeIf { it.isNotBlank() } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "attachment",
+        mimeType = contentResolver.getType(uri),
+        size = size,
+    )
+}
+
+private suspend fun Context.readHomeworkUploadFile(file: HomeworkPickedFile): HomeworkUploadFile =
+    withContext(Dispatchers.IO) {
+        val bytes = contentResolver.openInputStream(file.uri)?.use { it.readBytes() }
+            ?: throw IOException("无法读取附件 ${file.name}")
+        HomeworkUploadFile(
+            filename = file.name,
+            content = bytes,
+            contentType = file.mimeType ?: contentResolver.getType(file.uri),
+        )
+    }
+
+private fun formatHomeworkFileSize(bytes: Long): String =
+    when {
+        bytes >= 1024L * 1024L -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
+        bytes >= 1024L -> "%.1f KB".format(bytes / 1024.0)
+        else -> "$bytes B"
+    }
+
+@Composable
 fun EmptyRoomsScreen(repository: ModuleRepository) {
     val scope = rememberCoroutineScope()
-    var week by remember { mutableStateOf("8") }
+    var term by remember { mutableStateOf("") }
+    var week by remember { mutableStateOf("") }
     var building by remember { mutableStateOf("") }
     var room by remember { mutableStateOf("") }
     var page by remember { mutableStateOf(0) }
     var state by remember { mutableStateOf<LoadState<ModuleEnvelope<EmptyRoomData>>>(LoadState.Loading) }
 
-    fun load() {
+    fun load(targetWeek: String = week) {
         scope.launch {
             state = LoadState.Loading
-            runCatching { repository.emptyRooms(week = week, building = building.ifBlank { null }, room = room.ifBlank { null }) }
+            runCatching {
+                repository.emptyRooms(
+                    term = term.ifBlank { null },
+                    week = targetWeek.ifBlank { null },
+                    building = building.ifBlank { null },
+                    room = room.ifBlank { null },
+                )
+            }
                 .onSuccess {
                     page = 0
+                    val query = it.data.query
+                    term = query["term"].orEmpty().ifBlank { term }
+                    week = query["week"].orEmpty().ifBlank { week }
+                    building = query["building"].orEmpty().ifBlank { building }
+                    room = query["room"].orEmpty().ifBlank { room }
                     state = LoadState.Data(it)
                 }
                 .onFailure { state = LoadState.Error(it.message ?: "加载失败") }
         }
     }
 
-    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) {
+        val defaultWeek = runCatching { repository.calendar().data.currentWeek.orEmpty() }.getOrDefault("")
+        if (week.isBlank() && defaultWeek.isNotBlank()) {
+            week = defaultWeek
+        }
+        load(defaultWeek.ifBlank { week })
+    }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = term, onValueChange = { term = it }, label = { Text("学期") }, placeholder = { Text("可留空") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = week, onValueChange = { week = it }, label = { Text("周次") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = building, onValueChange = { building = it }, label = { Text("教学楼") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = room, onValueChange = { room = it }, label = { Text("教室") }, modifier = Modifier.fillMaxWidth())
-                OutlinedButton(onClick = { load() }) { Text("查询") }
+                OutlinedButton(onClick = { load() }) { Text("刷新空教室") }
             }
         }
         when (val current = state) {
@@ -896,6 +3115,7 @@ private fun TimetableList(
     currentWeek: Int?,
     selectedCourses: List<CourseEntry>,
     onSelect: (List<CourseEntry>) -> Unit,
+    onAddUserCourse: (TimetableDayColumn, TimetablePeriodSlot) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val data = envelope.data
@@ -933,16 +3153,16 @@ private fun TimetableList(
                     Text("当前没有可显示的课程。", style = MaterialTheme.typography.bodyMedium)
                 }
             }
-        } else {
-            item {
-                TimetableWeekCalendar(
-                    data = data,
-                    entries = entries,
-                    currentWeek = currentWeek,
-                    selectedKeys = selectedKeys,
-                    onSelect = onSelect,
-                )
-            }
+        }
+        item {
+            TimetableWeekCalendar(
+                data = data,
+                entries = entries,
+                currentWeek = currentWeek,
+                selectedKeys = selectedKeys,
+                onSelect = onSelect,
+                onAddUserCourse = onAddUserCourse,
+            )
         }
     }
 }
@@ -954,6 +3174,7 @@ private fun TimetableWeekCalendar(
     currentWeek: Int?,
     selectedKeys: Set<String>,
     onSelect: (List<CourseEntry>) -> Unit,
+    onAddUserCourse: (TimetableDayColumn, TimetablePeriodSlot) -> Unit,
 ) {
     val today = remember { LocalDate.now() }
     val dayColumns = remember(today) { timetableWeekColumns(today) }
@@ -1001,6 +3222,7 @@ private fun TimetableWeekCalendar(
                             entriesByCell = entriesByCell,
                             selectedKeys = selectedKeys,
                             onSelect = onSelect,
+                            onAddUserCourse = onAddUserCourse,
                         )
                     }
                 }
@@ -1067,6 +3289,7 @@ private fun TimetablePeriodRow(
     entriesByCell: Map<String, List<TimetableDisplayEntry>>,
     selectedKeys: Set<String>,
     onSelect: (List<CourseEntry>) -> Unit,
+    onAddUserCourse: (TimetableDayColumn, TimetablePeriodSlot) -> Unit,
 ) {
     Row(Modifier.height(IntrinsicSize.Min)) {
         TimetablePeriodCell(
@@ -1081,6 +3304,7 @@ private fun TimetablePeriodRow(
                 entries = entriesByCell[timetableCellKey(day.index, slot.period)].orEmpty(),
                 selectedKeys = selectedKeys,
                 onSelect = onSelect,
+                onAdd = { onAddUserCourse(day, slot) },
                 modifier = Modifier
                     .width(dayWidth)
                     .fillMaxHeight()
@@ -1126,6 +3350,7 @@ private fun TimetableCourseCell(
     entries: List<TimetableDisplayEntry>,
     selectedKeys: Set<String>,
     onSelect: (List<CourseEntry>) -> Unit,
+    onAdd: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -1135,13 +3360,29 @@ private fun TimetableCourseCell(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         val selectableEntries = entries.map { it.entry }
-        entries.forEach { displayEntry ->
-            TimetableCourseBlock(
-                entry = displayEntry.entry,
-                activeInCurrentWeek = displayEntry.activeInCurrentWeek,
-                selected = courseEntryKey(displayEntry.entry) in selectedKeys,
-                onSelect = { onSelect(selectableEntries) },
-            )
+        if (entries.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable { onAdd() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "+",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+                    textAlign = TextAlign.Center,
+                )
+            }
+        } else {
+            entries.forEach { displayEntry ->
+                TimetableCourseBlock(
+                    entry = displayEntry.entry,
+                    activeInCurrentWeek = displayEntry.activeInCurrentWeek,
+                    selected = courseEntryKey(displayEntry.entry) in selectedKeys,
+                    onSelect = { onSelect(selectableEntries) },
+                )
+            }
         }
     }
 }
@@ -1201,6 +3442,512 @@ private fun TimetableCourseBlock(
     }
 }
 
+private data class UserCourseEditorSeed(
+    val id: Long? = null,
+    val courseName: String = "",
+    val weekdayIndex: Int,
+    val period: String,
+    val periodNumber: Int,
+    val timeRange: String? = null,
+    val startWeek: Int,
+    val endWeek: Int,
+    val weeksText: String? = null,
+    val durationType: UserCourseDurationType,
+    val teacher: String = "",
+    val locationText: String = "",
+    val remark: String = "",
+    val colorIndex: Int = 0,
+)
+
+private data class TimetablePeriodChoice(
+    val period: String,
+    val periodNumber: Int,
+    val timeRange: String?,
+)
+
+@Composable
+private fun UserCourseEditorSheet(
+    seed: UserCourseEditorSeed,
+    data: TimetableData,
+    currentWeek: Int?,
+    saveError: String?,
+    onDismiss: () -> Unit,
+    onSave: (UserCourseDraft) -> Unit,
+) {
+    var courseName by remember(seed) { mutableStateOf(seed.courseName) }
+    var weekdayIndex by remember(seed) { mutableStateOf(seed.weekdayIndex.coerceIn(0, 6)) }
+    var period by remember(seed) { mutableStateOf(seed.period) }
+    var periodNumber by remember(seed) { mutableStateOf(seed.periodNumber.coerceAtLeast(1)) }
+    var timeRange by remember(seed) { mutableStateOf(seed.timeRange) }
+    var durationType by remember(seed) { mutableStateOf(seed.durationType) }
+    var weekText by remember(seed) { mutableStateOf(seed.startWeek.toString()) }
+    val weekPickerMaxWeek = remember(data.entries, seed.endWeek) {
+        maxOf(DEFAULT_USER_COURSE_MAX_WEEK, seed.endWeek, timetableMaxWeek(data.entries))
+    }
+    var longTermWeeks by remember(seed, weekPickerMaxWeek) {
+        mutableStateOf(parseUserCourseWeeks(seed.weeksText, seed.startWeek, seed.endWeek, weekPickerMaxWeek))
+    }
+    var showWeekPicker by remember(seed) { mutableStateOf(false) }
+    var teacher by remember(seed) { mutableStateOf(seed.teacher) }
+    var locationText by remember(seed) { mutableStateOf(seed.locationText) }
+    var remark by remember(seed) { mutableStateOf(seed.remark) }
+    var colorIndex by remember(seed) { mutableStateOf(seed.colorIndex.coerceIn(0, UserCourseColors.lastIndex)) }
+
+    val periodChoices = remember(data.periods, data.entries, seed) {
+        val choices = timetablePeriodSlots(data, data.entries).map {
+            TimetablePeriodChoice(
+                period = it.period,
+                periodNumber = normalizedTimetablePeriodNumber(it.period) ?: 1,
+                timeRange = it.timeRange,
+            )
+        }
+        (choices + TimetablePeriodChoice(seed.period, seed.periodNumber, seed.timeRange))
+            .distinctBy { it.periodNumber }
+            .sortedBy { it.periodNumber }
+    }
+    val longTermWeekText = remember(longTermWeeks, weekPickerMaxWeek) {
+        formatUserCourseWeeks(longTermWeeks, weekPickerMaxWeek)
+    }
+    val temporaryWeek = weekText.toIntOrNull()
+    val chosenStartWeek = if (durationType == UserCourseDurationType.Temporary) {
+        temporaryWeek
+    } else {
+        longTermWeeks.minOrNull()
+    }
+    val chosenEndWeek = if (durationType == UserCourseDurationType.Temporary) {
+        temporaryWeek
+    } else {
+        longTermWeeks.maxOrNull()
+    }
+    val weekError = if (durationType == UserCourseDurationType.Temporary) {
+        temporaryWeek == null || temporaryWeek < 1
+    } else {
+        longTermWeeks.isEmpty()
+    }
+    val candidateWeeksText = if (durationType == UserCourseDurationType.Temporary) {
+        chosenStartWeek?.let { formatUserCourseWeeks(it, it) }
+    } else {
+        longTermWeekText
+    }
+    val candidateEntry = CourseEntry(
+        weekday = userCourseWeekdayLabel(weekdayIndex),
+        period = period,
+        timeRange = timeRange,
+        courseCode = "LOCAL-${seed.id ?: "new"}",
+        section = durationType.name,
+        courseName = courseName.ifBlank { "未命名课程" },
+        teacher = teacher.takeIf { it.isNotBlank() },
+        weeks = if (!weekError) candidateWeeksText else null,
+        locationText = locationText.takeIf { it.isNotBlank() },
+        localId = seed.id,
+        remark = remark.takeIf { it.isNotBlank() },
+        colorIndex = colorIndex,
+        isUserCreated = true,
+    )
+    val conflicts = if (courseName.isBlank() || weekError) {
+        emptyList()
+    } else {
+        data.entries.filter { timetableEntriesConflict(candidateEntry, it) }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(if (seed.id == null) "添加课程" else "编辑课程", style = MaterialTheme.typography.headlineSmall)
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+        OutlinedTextField(
+            value = courseName,
+            onValueChange = { courseName = it },
+            label = { Text("课程名称") },
+            singleLine = true,
+            isError = courseName.isBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text("星期", style = MaterialTheme.typography.labelLarge)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            (0..6).forEach { index ->
+                FilterChip(
+                    selected = weekdayIndex == index,
+                    onClick = { weekdayIndex = index },
+                    label = { Text(userCourseWeekdayLabel(index)) },
+                )
+            }
+        }
+        Text("节次", style = MaterialTheme.typography.labelLarge)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            periodChoices.forEach { choice ->
+                FilterChip(
+                    selected = periodNumber == choice.periodNumber,
+                    onClick = {
+                        period = choice.period
+                        periodNumber = choice.periodNumber
+                        timeRange = choice.timeRange
+                    },
+                    label = { Text(timetablePeriodNumber(choice.period)) },
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = durationType == UserCourseDurationType.Temporary,
+                onClick = {
+                    durationType = UserCourseDurationType.Temporary
+                    val fallbackWeek = currentWeek ?: seed.startWeek.coerceAtLeast(1)
+                    weekText = fallbackWeek.toString()
+                },
+                label = { Text("临时") },
+            )
+            FilterChip(
+                selected = durationType == UserCourseDurationType.LongTerm,
+                onClick = {
+                    val wasLongTerm = durationType == UserCourseDurationType.LongTerm
+                    durationType = UserCourseDurationType.LongTerm
+                    if (!wasLongTerm) {
+                        longTermWeeks = (1..DEFAULT_USER_COURSE_MAX_WEEK).toSet()
+                    }
+                },
+                label = { Text("长期") },
+            )
+        }
+        if (durationType == UserCourseDurationType.Temporary) {
+            OutlinedTextField(
+                value = weekText,
+                onValueChange = { weekText = it.filter(Char::isDigit) },
+                label = { Text("周次") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                isError = weekError,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            WeekSelectionField(
+                weekText = longTermWeekText,
+                isError = weekError,
+                onClick = { showWeekPicker = true },
+            )
+            if (showWeekPicker) {
+                WeekSelectionDialog(
+                    maxWeek = weekPickerMaxWeek,
+                    selectedWeeks = longTermWeeks,
+                    onDismiss = { showWeekPicker = false },
+                    onConfirm = { weeks ->
+                        longTermWeeks = weeks
+                        showWeekPicker = false
+                    },
+                )
+            }
+        }
+        OutlinedTextField(
+            value = teacher,
+            onValueChange = { teacher = it },
+            label = { Text("授课老师（可不填）") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = locationText,
+            onValueChange = { locationText = it },
+            label = { Text("上课地点（可不填）") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = remark,
+            onValueChange = { remark = it },
+            label = { Text("备注（可不填）") },
+            minLines = 2,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text("颜色", style = MaterialTheme.typography.labelLarge)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            UserCourseColors.forEachIndexed { index, color ->
+                FilterChip(
+                    selected = colorIndex == index,
+                    onClick = { colorIndex = index },
+                    label = { Text("颜色 ${index + 1}") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = color.copy(alpha = 0.28f),
+                    ),
+                )
+            }
+        }
+        if (conflicts.isNotEmpty()) {
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                shape = MaterialTheme.shapes.small,
+            ) {
+                Text(
+                    text = "该时段与 ${conflicts.take(3).joinToString("、") { it.courseName }} 冲突，仍可保存。",
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+        if (!saveError.isNullOrBlank()) {
+            Text(saveError, color = MaterialTheme.colorScheme.error)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                Text("取消")
+            }
+            Button(
+                enabled = courseName.isNotBlank() && !weekError,
+                onClick = {
+                    val start = chosenStartWeek ?: return@Button
+                    val end = chosenEndWeek ?: return@Button
+                    val first = minOf(start, end).coerceAtLeast(1)
+                    val last = maxOf(start, end).coerceAtLeast(1)
+                    onSave(
+                        UserCourseDraft(
+                            id = seed.id,
+                            courseName = courseName,
+                            weekday = userCourseWeekdayLabel(weekdayIndex),
+                            weekdayIndex = weekdayIndex,
+                            period = period,
+                            periodNumber = periodNumber,
+                            timeRange = timeRange,
+                            startWeek = first,
+                            endWeek = if (durationType == UserCourseDurationType.Temporary) first else last,
+                            weeksText = candidateWeeksText,
+                            durationType = durationType,
+                            teacher = teacher,
+                            locationText = locationText,
+                            remark = remark,
+                            colorIndex = colorIndex,
+                        )
+                    )
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("保存")
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+    }
+}
+
+@Composable
+private fun WeekSelectionField(
+    weekText: String,
+    isError: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(
+            1.dp,
+            if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = "周次",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = weekText,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = "选择",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeekSelectionDialog(
+    maxWeek: Int,
+    selectedWeeks: Set<Int>,
+    onDismiss: () -> Unit,
+    onConfirm: (Set<Int>) -> Unit,
+) {
+    val safeMaxWeek = maxWeek.coerceIn(DEFAULT_USER_COURSE_MAX_WEEK, 60)
+    var draftWeeks by remember(selectedWeeks, safeMaxWeek) {
+        mutableStateOf(selectedWeeks.filter { it in 1..safeMaxWeek }.toSet())
+    }
+
+    fun applyWeeks(weeks: Iterable<Int>) {
+        draftWeeks = weeks.filter { it in 1..safeMaxWeek }.toSet()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("请选择周次") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 460.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                val weekRows = (1..safeMaxWeek).chunked(6)
+                weekRows.forEach { rowWeeks ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        rowWeeks.forEach { week ->
+                            WeekNumberButton(
+                                week = week,
+                                selected = week in draftWeeks,
+                                onClick = {
+                                    draftWeeks = if (week in draftWeeks) {
+                                        draftWeeks - week
+                                    } else {
+                                        draftWeeks + week
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        repeat(6 - rowWeeks.size) {
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = draftWeeks == (1..safeMaxWeek).toSet(),
+                        onClick = { applyWeeks(1..safeMaxWeek) },
+                        label = { Text("全周") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    FilterChip(
+                        selected = draftWeeks == (1..safeMaxWeek).filter { it % 2 == 1 }.toSet(),
+                        onClick = { applyWeeks((1..safeMaxWeek).filter { it % 2 == 1 }) },
+                        label = { Text("单周") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    FilterChip(
+                        selected = draftWeeks == (1..safeMaxWeek).filter { it % 2 == 0 }.toSet(),
+                        onClick = { applyWeeks((1..safeMaxWeek).filter { it % 2 == 0 }) },
+                        label = { Text("双周") },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+
+                val draftSummary = draftWeeks
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { formatUserCourseWeeks(it, safeMaxWeek) }
+                    ?: "未选择"
+                Text(
+                    text = "已选：$draftSummary",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = draftWeeks.isNotEmpty(),
+                onClick = { onConfirm(draftWeeks) },
+            ) {
+                Text("确定")
+            }
+        },
+    )
+}
+
+@Composable
+private fun WeekNumberButton(
+    week: Int,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val containerColor = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val contentColor = if (selected) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            modifier = Modifier
+                .width(40.dp)
+                .height(40.dp)
+                .clickable(onClick = onClick),
+            shape = CircleShape,
+            color = containerColor,
+            contentColor = contentColor,
+            border = if (selected) {
+                null
+            } else {
+                BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+            },
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = week.toString(),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun CourseDetailPanel(
     entries: List<CourseEntry>,
@@ -1208,6 +3955,8 @@ private fun CourseDetailPanel(
     homeworkStates: Map<String, LoadState<List<HomeworkItem>>>,
     resourceStates: Map<String, LoadState<ModuleEnvelope<CourseResourcesData>>>,
     courseResourceRepository: CourseResourceRepository,
+    onEditUserCourse: (CourseEntry) -> Unit,
+    onDeleteUserCourse: (CourseEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -1256,6 +4005,21 @@ private fun CourseDetailPanel(
                     KeyValue("地点", entry.locationLabel())
                 }
             }
+            if (entry.isUserCreated) {
+                item(key = "$entryKey-user-actions") {
+                    InfoCard("本地课程") {
+                        KeyValue("备注", entry.remark)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            Button(onClick = { onEditUserCourse(entry) }, modifier = Modifier.weight(1f)) {
+                                Text("编辑")
+                            }
+                            OutlinedButton(onClick = { onDeleteUserCourse(entry) }, modifier = Modifier.weight(1f)) {
+                                Text("删除")
+                            }
+                        }
+                    }
+                }
+            } else {
             item(key = "$entryKey-homework-divider") { HorizontalDivider() }
             item(key = "$entryKey-homework-title") { Text("作业", style = MaterialTheme.typography.titleMedium) }
             when (val current = homeworkState) {
@@ -1331,6 +4095,7 @@ private fun CourseDetailPanel(
                     }
                 }
             }
+            }
         }
     }
 }
@@ -1368,11 +4133,76 @@ private fun timetableWeekColumns(today: LocalDate): List<TimetableDayColumn> {
     }
 }
 
+private fun userCourseEditorSeedForSlot(
+    day: TimetableDayColumn,
+    slot: TimetablePeriodSlot,
+    currentWeek: Int?,
+    maxWeek: Int,
+): UserCourseEditorSeed {
+    val week = currentWeek ?: 1
+    return UserCourseEditorSeed(
+        weekdayIndex = day.index,
+        period = slot.period,
+        periodNumber = normalizedTimetablePeriodNumber(slot.period) ?: 1,
+        timeRange = slot.timeRange,
+        startWeek = week,
+        endWeek = week.coerceAtMost(maxWeek.coerceAtLeast(week)),
+        durationType = UserCourseDurationType.Temporary,
+    )
+}
+
+private fun userCourseEditorSeedForEntry(
+    entry: CourseEntry,
+    currentWeek: Int?,
+    maxWeek: Int,
+): UserCourseEditorSeed {
+    val (startWeek, endWeek) = timetableEntryWeekBounds(entry.weeks, currentWeek, maxWeek)
+    return UserCourseEditorSeed(
+        id = entry.localId,
+        courseName = entry.courseName,
+        weekdayIndex = parseWeekdayIndex(entry.weekday) ?: 0,
+        period = entry.period,
+        periodNumber = normalizedTimetablePeriodNumber(entry.period) ?: 1,
+        timeRange = entry.timeRange,
+        startWeek = startWeek,
+        endWeek = endWeek,
+        weeksText = entry.weeks,
+        durationType = if (startWeek == endWeek && entry.section != UserCourseDurationType.LongTerm.name) {
+            UserCourseDurationType.Temporary
+        } else {
+            UserCourseDurationType.LongTerm
+        },
+        teacher = entry.teacher.orEmpty(),
+        locationText = entry.locationLabel().orEmpty(),
+        remark = entry.remark.orEmpty(),
+        colorIndex = entry.colorIndex ?: 0,
+    )
+}
+
+private fun timetableMaxWeek(entries: List<CourseEntry>): Int =
+    entries
+        .flatMap { entry ->
+            Regex("""\d{1,2}""").findAll(entry.weeks.orEmpty()).mapNotNull { it.value.toIntOrNull() }.toList()
+        }
+        .filter { it > 0 }
+        .maxOrNull()
+        ?: 21
+
+private fun timetableEntryWeekBounds(weeks: String?, currentWeek: Int?, maxWeek: Int): Pair<Int, Int> {
+    val parsed = Regex("""\d{1,2}""").findAll(weeks.orEmpty()).mapNotNull { it.value.toIntOrNull() }.toList()
+    if (parsed.isEmpty()) {
+        val fallback = currentWeek ?: 1
+        return fallback to fallback.coerceAtMost(maxWeek.coerceAtLeast(fallback))
+    }
+    return (parsed.minOrNull() ?: 1).coerceAtLeast(1) to (parsed.maxOrNull() ?: parsed.first()).coerceAtLeast(1)
+}
+
 private fun timetablePeriodSlots(data: TimetableData, entries: List<CourseEntry>): List<TimetablePeriodSlot> {
     val periods = (data.periods + entries.map { it.period })
         .map { it.trim() }
         .filter { it.isNotEmpty() }
         .distinct()
+        .ifEmpty { (1..5).map { "Period $it" } }
     return periods.map { period ->
         TimetablePeriodSlot(
             period = period,
@@ -1427,6 +4257,10 @@ private fun timetablePeriodNumber(period: String): String =
 @Composable
 private fun timetableCourseColors(entry: CourseEntry): TimetableCourseColors {
     val colorScheme = MaterialTheme.colorScheme
+    if (entry.isUserCreated) {
+        val container = UserCourseColors[entry.colorIndex?.coerceIn(0, UserCourseColors.lastIndex) ?: 0]
+        return TimetableCourseColors(container = container, content = Color.White)
+    }
     val palette = listOf(
         colorScheme.primaryContainer to colorScheme.onPrimaryContainer,
         colorScheme.secondaryContainer to colorScheme.onSecondaryContainer,

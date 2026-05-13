@@ -18,10 +18,11 @@ import httpx
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
+from .captcha_solver import CaptchaSolveError, CaptchaSolver
 from .config import Settings
 from .exceptions import SessionExpiredError
 from .locks import FileLock
-from .schemas import SessionCaptchaResponse, SessionState, SessionStatusResponse
+from .schemas import AutoLoginResponse, SessionCaptchaResponse, SessionState, SessionStatusResponse
 
 
 AA_TIMETABLE_URL = "https://aa.bjtu.edu.cn/course_selection/courseselect/stuschedule/"
@@ -33,9 +34,10 @@ CAS_LOGIN_PATH = "/auth/login/"
 
 
 class SessionManager:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, captcha_solver: CaptchaSolver | None = None) -> None:
         self.settings = settings
         self.inline_login_state_path = self.settings.runtime_dir / "inline_login_state.json"
+        self.captcha_solver = captcha_solver or CaptchaSolver(settings)
 
     def _now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -58,6 +60,39 @@ class SessionManager:
 
     def _clear_inline_login_state(self) -> None:
         self.inline_login_state_path.unlink(missing_ok=True)
+
+    def _load_login_credentials(self) -> dict[str, str] | None:
+        path = self.settings.login_credentials_path
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        loginname = str(payload.get("loginname") or "").strip()
+        password = str(payload.get("password") or "")
+        if not loginname or not password:
+            return None
+        return {"loginname": loginname, "password": password}
+
+    def _save_login_credentials(self, loginname: str, password: str) -> None:
+        self.settings.runtime_dir.mkdir(parents=True, exist_ok=True)
+        self.settings.login_credentials_path.write_text(
+            json.dumps(
+                {
+                    "loginname": loginname.strip(),
+                    "password": password,
+                    "saved_at": self._now_iso(),
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+    def has_login_credentials(self) -> bool:
+        return self._load_login_credentials() is not None
 
     def _serialize_client_cookies(self, client: httpx.AsyncClient) -> list[dict[str, Any]]:
         cookies: list[dict[str, Any]] = []
@@ -206,6 +241,8 @@ class SessionManager:
                         "captcha_0": form_payload["captcha_0"],
                         "referer": login_page_url,
                         "cookies": self._serialize_client_cookies(client),
+                        "captcha_image_base64": encoded,
+                        "captcha_mime_type": mime_type,
                         "created_at": fetched_at,
                     }
                 )
@@ -216,7 +253,14 @@ class SessionManager:
         except Exception as exc:
             raise SessionExpiredError(f"验证码加载失败: {exc}") from exc
 
-    async def login_with_inline_form(self, loginname: str, password: str, captcha: str) -> SessionStatusResponse:
+    async def login_with_inline_form(
+        self,
+        loginname: str,
+        password: str,
+        captcha: str,
+        *,
+        persist_credentials: bool = True,
+    ) -> SessionStatusResponse:
         inline_state = self._load_inline_login_state()
         if inline_state is None:
             raise SessionExpiredError("验证码已失效，请先刷新验证码。")
@@ -274,12 +318,78 @@ class SessionManager:
                 await self._bootstrap_ve_session(client)
 
                 self._save_storage_state_from_client(client)
+                if persist_credentials:
+                    self._save_login_credentials(loginname, password)
                 self._clear_inline_login_state()
         except httpx.HTTPError as exc:
             self._clear_inline_login_state()
             raise SessionExpiredError(f"登录请求失败: {exc}") from exc
 
         return await self.validate_session()
+
+    def _captcha_from_inline_state(self) -> bytes:
+        inline_state = self._load_inline_login_state()
+        encoded = inline_state.get("captcha_image_base64") if inline_state else None
+        if not isinstance(encoded, str) or not encoded:
+            raise CaptchaSolveError("验证码图片上下文缺失。")
+        try:
+            return base64.b64decode(encoded)
+        except Exception as exc:
+            raise CaptchaSolveError("验证码图片上下文损坏。") from exc
+
+    async def login_with_auto_captcha(self, loginname: str | None = None, password: str | None = None) -> AutoLoginResponse:
+        explicit_credentials = bool(loginname and password)
+        credentials = (
+            {"loginname": loginname.strip(), "password": password}
+            if explicit_credentials and loginname is not None and password is not None
+            else self._load_login_credentials()
+        )
+        if credentials is None:
+            return AutoLoginResponse(status="auto_failed", message="未保存登录凭据，请手动输入学号和密码。")
+
+        max_attempts = 2 if explicit_credentials else 3
+        last_message = ""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                await self.fetch_inline_login_captcha()
+                captcha_bytes = self._captcha_from_inline_state()
+                solved = self.captcha_solver.solve(captcha_bytes)
+                status = await self.login_with_inline_form(
+                    credentials["loginname"],
+                    credentials["password"],
+                    solved.answer,
+                    persist_credentials=True,
+                )
+                return AutoLoginResponse(
+                    status="ready",
+                    message=f"自动识别验证码算式 {solved.expression} 并完成登录。",
+                    attempts=attempt,
+                    session=status,
+                )
+            except CaptchaSolveError as exc:
+                last_message = str(exc)
+                self._clear_inline_login_state()
+            except SessionExpiredError as exc:
+                last_message = str(exc)
+
+        if explicit_credentials:
+            captcha = None
+            try:
+                captcha = await self.fetch_inline_login_captcha()
+            except SessionExpiredError as exc:
+                last_message = str(exc)
+            return AutoLoginResponse(
+                status="manual_required",
+                message=f"自动识别连续失败，请手动输入验证码。{last_message}".strip(),
+                attempts=max_attempts,
+                captcha=captcha,
+            )
+
+        return AutoLoginResponse(
+            status="auto_failed",
+            message=f"自动登录连续失败 {max_attempts} 次：{last_message or '未知错误'}",
+            attempts=max_attempts,
+        )
 
     def _extract_aa_client_login_url(self, html: str) -> str | None:
         form_action = re.search(

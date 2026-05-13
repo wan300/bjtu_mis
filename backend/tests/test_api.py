@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.exceptions import SessionExpiredError
 from app.main import create_app, filter_homework_payload
-from app.schemas import SessionCaptchaResponse, SessionState, SessionStatusResponse
+from app.schemas import AutoLoginResponse, SessionCaptchaResponse, SessionState, SessionStatusResponse
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -166,6 +166,96 @@ def academic_progress_html() -> str:
     """
 
 
+def course_selection_selected_html() -> str:
+    return """
+    <html><body>
+      <form method="post" action="/course_selection/courseselecttask/submit/">
+        <input type="hidden" name="csrfmiddlewaretoken" value="csrf-token" />
+        <div id="selected-container">
+          <table class="table table-bordered">
+            <tr><th>Action</th><th>Course</th><th>Remaining</th><th>Credit</th><th>Type</th><th>Exam</th><th>Teacher</th><th>Time</th></tr>
+            <tr>
+              <td><a class="select-delete-btn" data-pk="target-1">Delete</a></td>
+              <td>M410003B Platform Software Design 01 Software School</td>
+              <td>1</td><td>2</td><td>Optional</td><td>Essay</td><td>Teacher B</td><td>Tue 3-4 Room 202</td>
+            </tr>
+          </table>
+        </div>
+        <table class="table table-bordered"><tr><th>Other</th><th>Value</th></tr></table>
+        <table class="table table-bordered">
+          <tr><th>Select</th><th>Course</th><th>Remaining</th><th>Credit</th><th>Type</th><th>Exam</th><th>Teacher</th><th>Time</th></tr>
+          <tr><td>Selected</td><td>M410003B Platform Software Design 01 Software School</td><td>1</td><td>2</td><td>Optional</td><td>Essay</td><td>Teacher B</td><td>Tue 3-4 Room 202</td></tr>
+        </table>
+        <a class="btn btn-primary" href="#">Submit</a>
+      </form>
+    </body></html>
+    """
+
+
+def course_selection_replace_html(
+    *,
+    selected_os: bool = True,
+    selected_target: bool = False,
+    target_remaining: int = 2,
+) -> str:
+    selected_rows = []
+    if selected_os:
+        selected_rows.append(
+            """
+            <tr>
+              <td><a class="select-delete-btn" data-pk="selected-1">Delete</a></td>
+              <td>M310005B Operating Systems 01 Software School</td>
+              <td>1</td><td>3</td><td>Required</td><td>Exam</td><td>Teacher A</td><td>Mon 1-2 Room 101</td>
+            </tr>
+            """
+        )
+    if selected_target:
+        selected_rows.append(
+            """
+            <tr>
+              <td><a class="select-delete-btn" data-pk="target-1">Delete</a></td>
+              <td>M410003B Platform Software Design 01 Software School</td>
+              <td>1</td><td>2</td><td>Optional</td><td>Essay</td><td>Teacher B</td><td>Tue 3-4 Room 202</td>
+            </tr>
+            """
+        )
+
+    os_available = ""
+    if not selected_os:
+        os_available = """
+          <tr>
+            <td><input type="checkbox" name="selects" value="selected-1"></td>
+            <td>M310005B Operating Systems 01 Software School</td>
+            <td>1</td><td>3</td><td>Required</td><td>Exam</td><td>Teacher A</td><td>Mon 1-2 Room 101</td>
+          </tr>
+        """
+    target_action = "Selected" if selected_target else '<input type="checkbox" name="selects" value="target-1">'
+    return f"""
+    <html><body>
+      <form method="post" action="/course_selection/courseselecttask/submit/">
+        <input type="hidden" name="csrfmiddlewaretoken" value="csrf-token" />
+        <div id="selected-container">
+          <table class="table table-bordered">
+            <tr><th>Action</th><th>Course</th><th>Remaining</th><th>Credit</th><th>Type</th><th>Exam</th><th>Teacher</th><th>Time</th></tr>
+            {''.join(selected_rows)}
+          </table>
+        </div>
+        <table class="table table-bordered"><tr><th>Other</th><th>Value</th></tr></table>
+        <table class="table table-bordered">
+          <tr><th>Select</th><th>Course</th><th>Remaining</th><th>Credit</th><th>Type</th><th>Exam</th><th>Teacher</th><th>Time</th></tr>
+          {os_available}
+          <tr>
+            <td>{target_action}</td>
+            <td>M410003B Platform Software Design 01 Software School</td>
+            <td>{target_remaining}</td><td>2</td><td>Optional</td><td>Essay</td><td>Teacher B</td><td>Tue 3-4 Room 202</td>
+          </tr>
+        </table>
+        <a class="btn btn-primary" href="#">Submit</a>
+      </form>
+    </body></html>
+    """
+
+
 def read_text(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
@@ -188,8 +278,11 @@ def make_settings(tmp_path: Path) -> Settings:
         profile_dir=profile_dir,
         db_path=runtime_dir / "bjtu_mis.sqlite3",
         session_state_path=runtime_dir / "session_state.json",
+        login_credentials_path=runtime_dir / "login_credentials.json",
         sync_lock_path=runtime_dir / "sync.lock",
         login_lock_path=runtime_dir / "login_browser.lock",
+        captcha_model_path=tmp_path / "model.pt",
+        captcha_charset=" 0123456789+-*=",
         frontend_dist_dir=tmp_path / "frontend" / "dist",
         python_executable=Path("python"),
         mis_home_url="https://mis.bjtu.edu.cn/home/",
@@ -198,7 +291,7 @@ def make_settings(tmp_path: Path) -> Settings:
     )
 
 
-def build_transport() -> httpx.MockTransport:
+def build_transport(calendar_week: str = "8", expected_empty_room_week: str = "8") -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         params = dict(request.url.params)
@@ -255,6 +348,9 @@ def build_transport() -> httpx.MockTransport:
         if host == "aa.bjtu.edu.cn" and path == "/score/scores/stu/view/":
             assert params.get("ctype") in {"lr", "ln"}
             return httpx.Response(200, text=read_text("scores_main.html"))
+        if host == "aa.bjtu.edu.cn" and path == "/score/scores/stu/detail/1001/":
+            assert params.get("term") == "2025-2026-2-2"
+            return httpx.Response(200, text=read_text("score_detail.html"))
         if host == "aa.bjtu.edu.cn" and path == "/school_census/schoolcensus/stuview/":
             return httpx.Response(200, text=student_status_profile_html())
         if host == "aa.bjtu.edu.cn" and path == "/school_census/schooltraininfo/studylist/":
@@ -266,13 +362,15 @@ def build_transport() -> httpx.MockTransport:
         if host == "aa.bjtu.edu.cn" and path == "/score/scorereplacecourse/stu_lists/":
             return httpx.Response(200, text=replace_courses_html())
         if host == "aa.bjtu.edu.cn" and path == "/classroom/timeholdresult/room_view/":
-            assert params.get("zc") == "8"
+            assert params.get("zc") == expected_empty_room_week
             return httpx.Response(200, text=read_text("empty_rooms.html"))
         if host == "123.121.147.7" and path == "/ve/back/rp/common/teachCalendar.shtml":
             return httpx.Response(200, json=read_json("calendar_terms.json"))
         if host == "123.121.147.7" and path == "/ve/back/coursePlatform/course.shtml":
             if params.get("method") == "getTimeList":
-                return httpx.Response(200, json=read_json("calendar_month.json"))
+                payload = read_json("calendar_month.json")
+                payload["weekCode"] = calendar_week
+                return httpx.Response(200, json=payload)
             if params.get("method") == "getCourseList":
                 assert request.headers.get("sessionid") == VE_SESSION_ID
                 assert "toCoursePlatformIndex" in request.headers.get("referer", "")
@@ -313,6 +411,19 @@ def attach_transport_client(app, transport: httpx.BaseTransport) -> None:
 
 def attach_mock_client(app) -> None:
     attach_transport_client(app, build_transport())
+
+
+def test_empty_rooms_default_uses_current_calendar_week(tmp_path: Path) -> None:
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, build_transport(calendar_week="12", expected_empty_room_week="12"))
+
+    with TestClient(app) as client:
+        response = client.get("/api/modules/empty-rooms")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_params"]["week"] == "12"
+    assert body["data"]["query"]["week"] == "12"
 
 
 def test_session_captcha_endpoint_returns_payload(tmp_path: Path) -> None:
@@ -403,6 +514,64 @@ def test_session_login_inline_returns_session_expired(tmp_path: Path) -> None:
     assert response.json()["detail"]["code"] == "SESSION_EXPIRED"
 
 
+def test_session_login_auto_endpoint_returns_manual_required(tmp_path: Path) -> None:
+    app = create_app(make_settings(tmp_path))
+
+    async def fake_login_with_auto_captcha(self, loginname: str | None = None, password: str | None = None):
+        assert loginname == "20250001"
+        assert password == "secret"
+        return AutoLoginResponse(
+            status="manual_required",
+            message="请手动输入验证码。",
+            attempts=2,
+            captcha=SessionCaptchaResponse(
+                image_data_url="data:image/png;base64,aGVsbG8=",
+                fetched_at="2026-04-23T00:00:00Z",
+            ),
+        )
+
+    app.state.session_manager.login_with_auto_captcha = MethodType(
+        fake_login_with_auto_captcha,
+        app.state.session_manager,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/session/login-auto",
+            json={"loginname": "20250001", "password": "secret"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "manual_required"
+    assert body["attempts"] == 2
+    assert body["captcha"]["image_data_url"].startswith("data:image/png;base64,")
+
+
+def test_session_login_auto_endpoint_can_use_saved_credentials(tmp_path: Path) -> None:
+    app = create_app(make_settings(tmp_path))
+
+    async def fake_login_with_auto_captcha(self, loginname: str | None = None, password: str | None = None):
+        assert loginname is None
+        assert password is None
+        return AutoLoginResponse(
+            status="ready",
+            attempts=1,
+            session=SessionStatusResponse(state=SessionState.READY, detail="ok"),
+        )
+
+    app.state.session_manager.login_with_auto_captcha = MethodType(
+        fake_login_with_auto_captcha,
+        app.state.session_manager,
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/api/session/login-auto", json={})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+
+
 def test_sync_run_returns_session_expired_when_not_logged_in(tmp_path: Path) -> None:
     app = create_app(make_settings(tmp_path))
 
@@ -416,6 +585,178 @@ def test_sync_run_returns_session_expired_when_not_logged_in(tmp_path: Path) -> 
         response = client.post("/api/sync/run")
     assert response.status_code == 401
     assert response.json()["detail"]["code"] == "SESSION_EXPIRED"
+
+
+def test_course_selection_endpoint_lists_courses(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "aa.bjtu.edu.cn" and request.url.path == "/course_selection/courseselecttask/selects/":
+            return httpx.Response(200, text=read_text("course_selection.html"))
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        response = client.get("/api/modules/course-selection")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["module"] == "course_selection"
+    assert body["data"]["can_submit"] is True
+    assert body["data"]["available_courses"][0]["key"] == "M410003B_01"
+
+
+def test_course_selection_endpoint_returns_session_expired(tmp_path: Path) -> None:
+    app = create_app(make_settings(tmp_path))
+
+    @asynccontextmanager
+    async def expired_client(self):
+        raise SessionExpiredError("会话已失效，请重新登录。")
+        yield
+
+    app.state.session_manager.get_authenticated_client = MethodType(expired_client, app.state.session_manager)
+    with TestClient(app) as client:
+        response = client.get("/api/modules/course-selection")
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "SESSION_EXPIRED"
+
+
+def test_course_selection_select_posts_parsed_form(tmp_path: Path) -> None:
+    submitted: dict[str, list[str]] = {}
+    selected = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal selected
+        if request.url.host == "aa.bjtu.edu.cn" and request.url.path == "/course_selection/courseselecttask/selects/":
+            return httpx.Response(200, text=course_selection_selected_html() if selected else read_text("course_selection.html"))
+        if request.url.host == "aa.bjtu.edu.cn" and request.url.path == "/course_selection/courseselecttask/submit/":
+            submitted.update(parse_qs(request.content.decode()))
+            selected = True
+            return httpx.Response(200, text="<div class='alert'>ok</div>")
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        response = client.post("/api/modules/course-selection/select", json={"course_key": "M410003B_01"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert submitted["csrfmiddlewaretoken"] == ["csrf-token"]
+    assert submitted["selects"] == ["target-1"]
+
+
+def test_course_selection_select_no_remaining_does_not_submit(tmp_path: Path) -> None:
+    submit_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal submit_count
+        if request.url.host == "aa.bjtu.edu.cn" and request.url.path == "/course_selection/courseselecttask/selects/":
+            return httpx.Response(200, text=read_text("course_selection.html"))
+        if request.url.host == "aa.bjtu.edu.cn" and request.url.path == "/course_selection/courseselecttask/submit/":
+            submit_count += 1
+            return httpx.Response(200, text="<div class='alert'>unexpected</div>")
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        response = client.post("/api/modules/course-selection/select", json={"course_key": "M410004B_01"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "no_remaining"
+    assert submit_count == 0
+
+
+def test_course_selection_drop_posts_delete_form(tmp_path: Path) -> None:
+    dropped = False
+    submitted: dict[str, list[str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal dropped
+        if request.url.host == "aa.bjtu.edu.cn" and request.url.path == "/course_selection/courseselecttask/selects/":
+            return httpx.Response(200, text=course_selection_replace_html(selected_os=not dropped))
+        if request.url.host == "aa.bjtu.edu.cn" and request.url.path == "/course_selection/courseselecttask/delete/":
+            submitted.update(parse_qs(request.content.decode()))
+            dropped = True
+            return httpx.Response(200, text="<div class='alert'>ok</div>")
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        response = client.post("/api/modules/course-selection/drop", json={"course_key": "M310005B_01"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "drop_success"
+    assert submitted["csrfmiddlewaretoken"] == ["csrf-token"]
+    assert submitted["pk"] == ["selected-1"]
+
+
+def test_course_selection_replace_drops_then_selects_target(tmp_path: Path) -> None:
+    selected_os = True
+    selected_target = False
+    requests: list[str] = []
+    submitted_values: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal selected_os, selected_target
+        requests.append(f"{request.method} {request.url.path}")
+        if request.url.host == "aa.bjtu.edu.cn" and request.url.path == "/course_selection/courseselecttask/selects/":
+            return httpx.Response(200, text=course_selection_replace_html(selected_os=selected_os, selected_target=selected_target))
+        if request.url.host == "aa.bjtu.edu.cn" and request.url.path == "/course_selection/courseselecttask/delete/":
+            selected_os = False
+            return httpx.Response(200, text="<div class='alert'>drop ok</div>")
+        if request.url.host == "aa.bjtu.edu.cn" and request.url.path == "/course_selection/courseselecttask/submit/":
+            submitted = parse_qs(request.content.decode())
+            submitted_values.extend(submitted.get("selects", []))
+            selected_target = submitted.get("selects") == ["target-1"]
+            return httpx.Response(200, text="<div class='alert'>select ok</div>")
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/modules/course-selection/replace",
+            json={"target_course_key": "M410003B_01", "drop_course_key": "M310005B_01"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "replace_success"
+    assert "POST /course_selection/courseselecttask/delete/" in requests
+    assert submitted_values == ["target-1"]
+
+
+def test_course_selection_replace_target_no_remaining_does_not_drop(tmp_path: Path) -> None:
+    delete_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal delete_count
+        if request.url.host == "aa.bjtu.edu.cn" and request.url.path == "/course_selection/courseselecttask/selects/":
+            return httpx.Response(200, text=course_selection_replace_html(target_remaining=0))
+        if request.url.host == "aa.bjtu.edu.cn" and request.url.path == "/course_selection/courseselecttask/delete/":
+            delete_count += 1
+            return httpx.Response(200, text="<div class='alert'>unexpected</div>")
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/modules/course-selection/replace",
+            json={"target_course_key": "M410003B_01", "drop_course_key": "M310005B_01"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "target_no_remaining"
+    assert delete_count == 0
 
 
 def test_sync_run_persists_snapshots_and_serves_modules(tmp_path: Path) -> None:
@@ -451,6 +792,14 @@ def test_sync_run_persists_snapshots_and_serves_modules(tmp_path: Path) -> None:
         assert history_scores["coverage"] == "verified"
         assert history_scores["module"] == "history_scores"
         assert history_scores["source_params"]["ctype"] == "ln"
+        assert history_scores["data"]["items"][0]["detail_path"] == "/score/scores/stu/detail/1001/?term=2025-2026-2-2"
+
+        score_detail = client.get(
+            "/api/modules/score-detail",
+            params={"path": history_scores["data"]["items"][0]["detail_path"]},
+        )
+        assert score_detail.status_code == 200
+        assert score_detail.json()["data"]["tables"][0]["rows"][0] == ["平时", "40%", "88"]
 
         profile = client.get("/api/modules/profile").json()
         assert profile["coverage"] == "verified"
@@ -463,6 +812,10 @@ def test_sync_run_persists_snapshots_and_serves_modules(tmp_path: Path) -> None:
         assert progress["data"]["summary"]["course_count"] == 1
         assert progress["data"]["buckets"][0]["name"] == "综合素质教育平台"
         assert progress["data"]["detail_buckets"][0]["name"] == "思政类课程【17.0】"
+
+        snapshots = client.get("/api/modules/snapshots")
+        assert snapshots.status_code == 200
+        assert snapshots.json()["snapshots"]["profile"]["data"]["name"] == "测试学生"
 
 
 def test_homework_filter_uses_parsed_status() -> None:
@@ -490,6 +843,17 @@ def test_sync_run_returns_409_when_lock_exists(tmp_path: Path) -> None:
     attach_mock_client(app)
     with TestClient(app) as client:
         response = client.post("/api/sync/run")
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "SYNC_ALREADY_RUNNING"
+
+
+def test_sync_start_returns_409_when_lock_exists(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    settings.ensure_directories()
+    settings.sync_lock_path.write_text("busy", encoding="utf-8")
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.post("/api/sync/start")
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "SYNC_ALREADY_RUNNING"
 
@@ -1196,3 +1560,584 @@ def test_homework_payload_status_error_falls_back_to_provisional(tmp_path: Path)
     assert homework.json()["coverage"] == "provisional"
     assert homework.json()["data"]["items"] == []
     assert "VE payload STATUS=1" in (homework.json()["source_params"]["fallback_reason"] or "")
+
+
+COREMAIL_TEST_SID = "MAIL-SID"
+
+
+def coremail_sso_response(request: httpx.Request) -> httpx.Response | None:
+    host = request.url.host
+    path = request.url.path
+    if host == "mis.bjtu.edu.cn" and path == "/osys_sso_email/":
+        return httpx.Response(
+            302,
+            headers={"Location": f"https://mail.bjtu.edu.cn/coremail/XT/index.jsp?sid={COREMAIL_TEST_SID}"},
+        )
+    if host == "mail.bjtu.edu.cn" and path == "/coremail/XT/index.jsp":
+        assert request.url.params.get("sid") == COREMAIL_TEST_SID
+        return httpx.Response(200, text=f"<script>var sid='{COREMAIL_TEST_SID}'</script>")
+    return None
+
+
+def request_json(request: httpx.Request) -> dict:
+    return json.loads(request.content.decode("utf-8") or "{}")
+
+
+def request_form(request: httpx.Request) -> dict[str, str]:
+    return {key: values[0] for key, values in parse_qs(request.content.decode("utf-8"), keep_blank_values=True).items()}
+
+
+def test_mail_folders_and_messages_use_coremail_sid_and_parse_payloads(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        sso = coremail_sso_response(request)
+        if sso is not None:
+            return sso
+
+        host = request.url.host
+        path = request.url.path
+        params = dict(request.url.params)
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/XT/jsp/mail.jsp":
+            assert params == {"func": "getAllFolders", "sid": COREMAIL_TEST_SID}
+            assert request_form(request) == {"stats": "true", "threads": "false"}
+            return httpx.Response(
+                200,
+                json={
+                    "code": "S_OK",
+                    "var": [
+                        {
+                            "id": 1,
+                            "name": "收件箱",
+                            "flags": {"system": True},
+                            "stats": {
+                                "messageCount": 8,
+                                "unreadMessageCount": 3,
+                                "messageSize": 1024,
+                                "unreadMessageSize": 512,
+                            },
+                        }
+                    ],
+                },
+            )
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/s/json" and params.get("func") == "mbox:listMessages":
+            assert params["sid"] == COREMAIL_TEST_SID
+            assert "text/x-json" in request.headers["content-type"]
+            payload = request_json(request)
+            assert payload["fid"] == 1
+            assert payload["start"] == 5
+            assert payload["limit"] == 10
+            assert payload["order"] == "date"
+            assert payload["desc"] is True
+            assert payload["returnTotal"] is True
+            return httpx.Response(
+                200,
+                json={
+                    "code": "S_OK",
+                    "total": 1,
+                    "var": [
+                        {
+                            "id": "2:abc+",
+                            "fid": 1,
+                            "from": "Alice <alice@example.edu>",
+                            "to": "Bob <bob@example.edu>",
+                            "sender": "alice@example.edu",
+                            "subject": "hello",
+                            "sentDate": "2026-05-10 10:00:00",
+                            "receivedDate": "2026-05-10 10:00:01",
+                            "modifiedDate": "2026-05-10 10:00:02",
+                            "size": 123,
+                            "priority": 3,
+                            "summary": "preview",
+                            "flags": {"read": False, "attached": True},
+                        }
+                    ],
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        folders = client.get("/api/modules/mail/folders")
+        messages = client.get("/api/modules/mail/messages?folder_id=1&start=5&limit=10")
+
+    assert folders.status_code == 200
+    folder = folders.json()["data"]["folders"][0]
+    assert folder["folder_id"] == "1"
+    assert folder["message_count"] == 8
+    assert folder["unread_count"] == 3
+
+    assert messages.status_code == 200
+    body = messages.json()
+    assert body["data"]["total"] == 1
+    message = body["data"]["messages"][0]
+    assert message["message_id"] == "2:abc+"
+    assert message["subject"] == "hello"
+    assert message["attached"] is True
+
+
+def test_mail_detail_and_attachment_download(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        sso = coremail_sso_response(request)
+        if sso is not None:
+            return sso
+
+        host = request.url.host
+        path = request.url.path
+        params = dict(request.url.params)
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/XT/jsp/readMessage.jsp":
+            form = request_form(request)
+            assert form["mid"] == "2:abc+"
+            assert form["mboxa"] == ""
+            return httpx.Response(
+                200,
+                json={
+                    "code": "S_OK",
+                    "var": {
+                        "mail": {
+                            "from": ["Alice <alice@example.edu>"],
+                            "to": ["Bob <bob@example.edu>"],
+                            "cc": ["Carol <carol@example.edu>"],
+                            "bcc": [],
+                            "subject": "detail subject",
+                            "headers": {"From": "Alice <alice@example.edu>"},
+                            "attachments": [
+                                {
+                                    "id": "3",
+                                    "filename": "report.txt",
+                                    "contentType": "text/plain",
+                                    "contentLength": 11,
+                                }
+                            ],
+                            "mainPartData": {"content": "<p>mail body</p>"},
+                        },
+                        "mailInfo": {
+                            "id": "2:abc+",
+                            "fid": 1,
+                            "from": "Alice <alice@example.edu>",
+                            "to": "Bob <bob@example.edu>",
+                            "subject": "detail subject",
+                            "size": 456,
+                            "flags": {"read": True, "attached": True},
+                        },
+                    },
+                },
+            )
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/mbox-data/report.txt":
+            assert params == {"part": "3", "mid": "2:abc+", "mode": "download"}
+            return httpx.Response(
+                200,
+                content=b"hello world",
+                headers={
+                    "content-type": "text/plain",
+                    "content-disposition": 'attachment; filename="report.txt"',
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        detail = client.get("/api/modules/mail/message?message_id=2%3Aabc%2B")
+        attachment = client.get("/api/modules/mail/attachment?message_id=2%3Aabc%2B&part=3&filename=report.txt")
+
+    assert detail.status_code == 200
+    data = detail.json()["data"]
+    assert data["message_id"] == "2:abc+"
+    assert data["html_content"] == "<p>mail body</p>"
+    assert data["attachments"][0]["attachment_id"] == "3"
+    assert data["attachments"][0]["filename"] == "report.txt"
+
+    assert attachment.status_code == 200
+    assert attachment.content == b"hello world"
+    assert attachment.headers["content-type"].startswith("text/plain")
+    assert attachment.headers["content-disposition"] == 'attachment; filename="report.txt"'
+
+
+def test_mail_delete_moves_messages_to_trash_folder(tmp_path: Path) -> None:
+    captured: dict[str, dict] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sso = coremail_sso_response(request)
+        if sso is not None:
+            return sso
+
+        params = dict(request.url.params)
+        if request.url.host == "mail.bjtu.edu.cn" and request.url.path == "/coremail/s/json":
+            assert params["sid"] == COREMAIL_TEST_SID
+            assert params["func"] == "mbox:updateMessageInfos"
+            captured["payload"] = request_json(request)
+            return httpx.Response(200, json={"code": "S_OK", "var": {"updated": 1}})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        response = client.post("/api/modules/mail/messages/delete", json={"message_ids": ["2:abc+"], "mboxa": ""})
+
+    assert response.status_code == 200
+    assert captured["payload"]["attrs"]["fid"] == 4
+    assert captured["payload"]["ids"] == ["2:abc+"]
+    assert response.json()["status"] == "deleted"
+
+
+def test_mail_attachment_upload_creates_compose_and_uploads_chunks(tmp_path: Path) -> None:
+    file_content = (b"a" * (2 * 1024 * 1024)) + b"bbb"
+    offsets: list[int] = []
+    ranges: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sso = coremail_sso_response(request)
+        if sso is not None:
+            return sso
+
+        host = request.url.host
+        path = request.url.path
+        params = dict(request.url.params)
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/XT/jsp/compose.jsp":
+            assert params["sid"] == COREMAIL_TEST_SID
+            assert request_form(request)["ctype"] == "normal"
+            return httpx.Response(200, json={"code": "S_OK", "var": {"id": "compose-1"}})
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/s/json" and params.get("func") == "upload:prepare":
+            payload = request_json(request)
+            assert payload["composeId"] == "compose-1"
+            assert payload["attachmentId"] == -1
+            assert payload["fileName"] == "upload.txt"
+            assert payload["size"] == len(file_content)
+            return httpx.Response(
+                200,
+                json={
+                    "code": "S_OK",
+                    "var": {
+                        "attachmentId": 1,
+                        "fileName": "upload.txt",
+                        "contentType": "text/plain",
+                        "size": len(file_content),
+                    },
+                },
+            )
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/XT/jsp/upload.jsp":
+            assert params["func"] == "directData"
+            assert params["sid"] == COREMAIL_TEST_SID
+            assert params["composeId"] == "compose-1"
+            assert params["attachmentId"] == "1"
+            offsets.append(int(params["offset"]))
+            ranges.append(request.headers["content-range"])
+            assert request.headers["x-requested-with"] == "XMLHttpRequest"
+            return httpx.Response(
+                200,
+                json={
+                    "code": "S_OK",
+                    "composeId": "compose-1",
+                    "var": {
+                        "actualSize": 3 if params["offset"] != "0" else 2 * 1024 * 1024,
+                        "attachmentId": 1,
+                        "fileName": "upload.txt",
+                        "contentType": "text/plain",
+                        "size": len(file_content),
+                    },
+                },
+            )
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/s/json" and params.get("func") == "mbox:compose":
+            payload = request_json(request)
+            assert payload["id"] == "compose-1"
+            assert payload["attrs"]["attachments"] == [
+                {
+                    "id": 1,
+                    "type": "upload",
+                    "name": "upload.txt",
+                    "displayName": "upload.txt",
+                    "size": len(file_content),
+                }
+            ]
+            return httpx.Response(200, json={"code": "S_OK", "var": {"attachments": payload["attrs"]["attachments"]}})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/modules/mail/attachments/upload",
+            files={"file": ("upload.txt", file_content, "text/plain")},
+        )
+
+    assert response.status_code == 200
+    assert offsets == [0, 2 * 1024 * 1024]
+    assert ranges == [
+        f"bytes 0-{2 * 1024 * 1024 - 1}/{len(file_content)}",
+        f"bytes {2 * 1024 * 1024}-{len(file_content) - 1}/{len(file_content)}",
+    ]
+    body = response.json()
+    assert body["status"] == "uploaded"
+    assert body["compose_id"] == "compose-1"
+    assert body["attachment"]["attachment_id"] == "1"
+
+
+def test_mail_send_uses_compose_payload_and_uploaded_attachments(tmp_path: Path) -> None:
+    captured: dict[str, dict] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sso = coremail_sso_response(request)
+        if sso is not None:
+            return sso
+
+        host = request.url.host
+        path = request.url.path
+        params = dict(request.url.params)
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/s/json" and params.get("func") == "user:getAttrs":
+            assert request_json(request)["optionalAttrIds"] == ["email", "true_name", "default_sender_address"]
+            return httpx.Response(
+                200,
+                json={"code": "S_OK", "var": {"email": "sender@example.edu", "true_name": "Sender"}},
+            )
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/common/mbox/compose.jsp":
+            assert params == {"isUserConfirmed": "true", "sid": COREMAIL_TEST_SID}
+            assert "text/x-json" in request.headers["content-type"]
+            payload = request_json(request)
+            captured["payload"] = payload
+            return httpx.Response(
+                200,
+                json={
+                    "code": "S_OK",
+                    "savedSent": {"mid": "2:sent-id"},
+                    "sentTInfo": "trace",
+                    "var": {"subject": payload["attrs"]["subject"]},
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/modules/mail/messages/send",
+            json={
+                "compose_id": "compose-1",
+                "to": ["to@example.edu"],
+                "cc": ["cc@example.edu"],
+                "subject": "hello",
+                "html_content": "<p>body</p>",
+                "attachments": [
+                    {
+                        "attachment_id": "1",
+                        "filename": "report.pdf",
+                        "content_type": "application/pdf",
+                        "size": 123,
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "sent"
+    assert body["compose_id"] == "compose-1"
+    assert body["sent_message_id"] == "2:sent-id"
+
+    payload = captured["payload"]
+    assert payload["action"] == "deliver"
+    assert payload["id"] == "compose-1"
+    assert payload["returnInfo"] is True
+    assert payload["autosaveHitCounter"] is True
+    assert payload["attrs"]["account"] == '"Sender" <sender@example.edu>'
+    assert payload["attrs"]["to"] == ["to@example.edu"]
+    assert payload["attrs"]["cc"] == ["cc@example.edu"]
+    assert payload["attrs"]["content"] == "<p>body</p>"
+    assert payload["attrs"]["attachments"] == [
+        {
+            "id": 1,
+            "type": "upload",
+            "name": "report.pdf",
+            "displayName": "report.pdf",
+            "size": 123,
+            "contentType": "application/pdf",
+        }
+    ]
+
+
+def test_mail_draft_save_creates_compose_when_missing_id(tmp_path: Path) -> None:
+    captured: dict[str, dict] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sso = coremail_sso_response(request)
+        if sso is not None:
+            return sso
+
+        host = request.url.host
+        path = request.url.path
+        params = dict(request.url.params)
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/XT/jsp/compose.jsp":
+            assert params["sid"] == COREMAIL_TEST_SID
+            assert request_form(request)["ctype"] == "normal"
+            return httpx.Response(200, json={"code": "S_OK", "var": {"id": "draft-compose"}})
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/common/mbox/compose.jsp":
+            payload = request_json(request)
+            captured["payload"] = payload
+            return httpx.Response(
+                200,
+                json={"code": "S_OK", "draftId": "2:draft-id", "var": {"id": payload["id"]}},
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/modules/mail/drafts/save",
+            json={
+                "account": "Sender <sender@example.edu>",
+                "to": ["to@example.edu"],
+                "subject": "draft",
+                "content": "plain draft body",
+                "is_html": False,
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "saved"
+    assert body["compose_id"] == "draft-compose"
+    assert body["draft_id"] == "2:draft-id"
+    assert captured["payload"]["action"] == "save"
+    assert captured["payload"]["id"] == "draft-compose"
+    assert captured["payload"]["attrs"]["content"] == "plain draft body"
+    assert captured["payload"]["attrs"]["isHtml"] is False
+
+
+def test_mail_contacts_autocomplete_maps_coremail_results(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        sso = coremail_sso_response(request)
+        if sso is not None:
+            return sso
+
+        host = request.url.host
+        path = request.url.path
+        params = dict(request.url.params)
+        if host == "mail.bjtu.edu.cn" and path == "/coremail/s/json" and params.get("func") == "oab:autoMatch":
+            payload = request_json(request)
+            assert payload["keyword"] == "alice"
+            assert payload["limit"] == 10
+            assert payload["@type"] == "U,L,X"
+            assert payload["attrIds"] == ["m", "@id", "@type", "location"]
+            return httpx.Response(
+                200,
+                json={
+                    "code": "S_OK",
+                    "var": [
+                        {
+                            "@id": "alice-id",
+                            "@type": "U",
+                            "name": "Alice",
+                            "m": ["alice@example.edu"],
+                            "location": "School",
+                        }
+                    ],
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    app = create_app(make_settings(tmp_path))
+    attach_transport_client(app, httpx.MockTransport(handler))
+
+    with TestClient(app) as client:
+        response = client.get("/api/modules/mail/contacts/autocomplete?keyword=alice&limit=10")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["module"] == "mail_contacts"
+    contact = body["data"]["contacts"][0]
+    assert contact["contact_id"] == "alice-id"
+    assert contact["display_name"] == "Alice"
+    assert contact["email"] == "alice@example.edu"
+    assert contact["type"] == "U"
+
+
+def test_mail_upstream_errors_map_to_operation_codes(tmp_path: Path) -> None:
+    def build_failure_handler(kind: str):
+        def handler(request: httpx.Request) -> httpx.Response:
+            sso = coremail_sso_response(request)
+            if sso is not None:
+                return sso
+
+            host = request.url.host
+            path = request.url.path
+            params = dict(request.url.params)
+            if kind == "fetch" and host == "mail.bjtu.edu.cn" and path == "/coremail/XT/jsp/mail.jsp":
+                return httpx.Response(200, json={"code": "FA_TEST"})
+            if kind == "delete" and host == "mail.bjtu.edu.cn" and path == "/coremail/s/json":
+                return httpx.Response(200, json={"code": "FA_TEST"})
+            if kind == "download" and host == "mail.bjtu.edu.cn" and path == "/coremail/mbox-data":
+                return httpx.Response(500, text="download failed")
+            if kind == "upload" and host == "mail.bjtu.edu.cn" and path == "/coremail/XT/jsp/compose.jsp":
+                return httpx.Response(200, json={"code": "S_OK", "var": {"id": "compose-1"}})
+            if kind == "upload" and host == "mail.bjtu.edu.cn" and path == "/coremail/s/json":
+                assert params.get("func") == "upload:prepare"
+                return httpx.Response(200, json={"code": "FA_TEST"})
+            if kind in {"send", "draft"} and host == "mail.bjtu.edu.cn" and path == "/coremail/common/mbox/compose.jsp":
+                return httpx.Response(200, json={"code": "FA_TEST"})
+            if kind == "contacts" and host == "mail.bjtu.edu.cn" and path == "/coremail/s/json":
+                assert params.get("func") == "oab:autoMatch"
+                return httpx.Response(200, json={"code": "FA_TEST"})
+            raise AssertionError(f"Unexpected request for {kind}: {request.method} {request.url}")
+
+        return handler
+
+    cases = [
+        (
+            "fetch",
+            lambda client: client.get("/api/modules/mail/folders"),
+            "MAIL_FETCH_FAILED",
+        ),
+        (
+            "delete",
+            lambda client: client.post("/api/modules/mail/messages/delete", json={"message_ids": ["2:abc+"], "mboxa": ""}),
+            "MAIL_DELETE_FAILED",
+        ),
+        (
+            "download",
+            lambda client: client.get("/api/modules/mail/attachment?message_id=2%3Aabc%2B&part=3"),
+            "MAIL_DOWNLOAD_FAILED",
+        ),
+        (
+            "upload",
+            lambda client: client.post(
+                "/api/modules/mail/attachments/upload",
+                files={"file": ("upload.txt", b"body", "text/plain")},
+            ),
+            "MAIL_UPLOAD_FAILED",
+        ),
+        (
+            "send",
+            lambda client: client.post(
+                "/api/modules/mail/messages/send",
+                json={"compose_id": "compose-1", "account": "Sender <sender@example.edu>", "to": ["to@example.edu"]},
+            ),
+            "MAIL_SEND_FAILED",
+        ),
+        (
+            "draft",
+            lambda client: client.post(
+                "/api/modules/mail/drafts/save",
+                json={"compose_id": "compose-1", "account": "Sender <sender@example.edu>"},
+            ),
+            "MAIL_DRAFT_FAILED",
+        ),
+        (
+            "contacts",
+            lambda client: client.get("/api/modules/mail/contacts/autocomplete?keyword=alice"),
+            "MAIL_CONTACTS_FAILED",
+        ),
+    ]
+
+    for kind, call_api, expected_code in cases:
+        app = create_app(make_settings(tmp_path / kind))
+        attach_transport_client(app, httpx.MockTransport(build_failure_handler(kind)))
+        with TestClient(app) as client:
+            response = call_api(client)
+        assert response.status_code == 502
+        assert response.json()["detail"]["code"] == expected_code

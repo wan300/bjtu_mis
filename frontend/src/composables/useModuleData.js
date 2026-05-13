@@ -7,6 +7,7 @@ const payloads = reactive({
   academicProgress: null,
   historyScores: null,
   timetable: null,
+  courseSelection: null,
   exams: null,
   scores: null,
   calendar: null,
@@ -20,6 +21,7 @@ const moduleErrors = reactive({
   academicProgress: '',
   historyScores: '',
   timetable: '',
+  courseSelection: '',
   exams: '',
   scores: '',
   calendar: '',
@@ -27,6 +29,20 @@ const moduleErrors = reactive({
   emptyRooms: '',
   courseResources: ''
 })
+
+const snapshotKeyMap = {
+  profile: 'profile',
+  academic_progress: 'academicProgress',
+  history_scores: 'historyScores',
+  timetable: 'timetable',
+  course_selection: 'courseSelection',
+  exams: 'exams',
+  scores: 'scores',
+  calendar: 'calendar',
+  homework: 'homework',
+  empty_rooms: 'emptyRooms',
+  course_resources: 'courseResources'
+}
 
 function clearModuleError(key) {
   moduleErrors[key] = ''
@@ -88,6 +104,12 @@ async function loadTimetable() {
   payloads.timetable = await api.getTimetable()
 }
 
+async function loadCourseSelection() {
+  clearModuleError('courseSelection')
+  if (!(await ensureSessionReady('courseSelection'))) return
+  payloads.courseSelection = await api.getCourseSelection()
+}
+
 async function loadExams(term) {
   clearModuleError('exams')
   if (!(await ensureSessionReady('exams'))) return
@@ -124,6 +146,17 @@ async function loadCourseResources(query) {
   payloads.courseResources = await api.getCourseResources(query)
 }
 
+async function loadSnapshots() {
+  const response = await api.getSnapshots()
+  Object.entries(response.snapshots || {}).forEach(([snapshotKey, payload]) => {
+    const localKey = snapshotKeyMap[snapshotKey]
+    if (localKey) {
+      payloads[localKey] = payload
+      moduleErrors[localKey] = ''
+    }
+  })
+}
+
 export function useModuleData() {
   return {
     payloads,
@@ -136,11 +169,13 @@ export function useModuleData() {
     loadAcademicProgress,
     loadHistoryScores,
     loadTimetable,
+    loadCourseSelection,
     loadExams,
     loadScores,
     loadCalendar,
     loadHomework,
     loadEmptyRooms,
-    loadCourseResources
+    loadCourseResources,
+    loadSnapshots
   }
 }

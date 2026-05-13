@@ -83,6 +83,12 @@ export const api = {
       body: JSON.stringify(payload)
     })
   },
+  loginAuto(payload = {}) {
+    return request('/api/session/login-auto', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
   openBrowser() {
     return request('/api/session/open-browser', { method: 'POST' })
   },
@@ -91,6 +97,12 @@ export const api = {
   },
   runSync() {
     return request('/api/sync/run', { method: 'POST' })
+  },
+  startSync() {
+    return request('/api/sync/start', { method: 'POST' })
+  },
+  getSnapshots() {
+    return request('/api/modules/snapshots')
   },
   getProfile() {
     return request('/api/modules/profile')
@@ -105,6 +117,33 @@ export const api = {
   getTimetable() {
     return request('/api/modules/timetable')
   },
+  getCourseSelection() {
+    return request('/api/modules/course-selection')
+  },
+  selectCourse(payload) {
+    return request('/api/modules/course-selection/select', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  dropCourse(payload) {
+    return request('/api/modules/course-selection/drop', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  replaceCourse(payload) {
+    return request('/api/modules/course-selection/replace', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  submitCourseSelectionCaptcha(payload) {
+    return request('/api/modules/course-selection/captcha', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
   getExams(term) {
     const query = term ? `?term=${encodeURIComponent(term)}` : ''
     return request(`/api/modules/exams${query}`)
@@ -115,6 +154,10 @@ export const api = {
     if (ctype) search.set('ctype', ctype)
     const query = search.toString() ? `?${search.toString()}` : ''
     return request(`/api/modules/scores${query}`)
+  },
+  getScoreDetail(path) {
+    const query = `?path=${encodeURIComponent(path)}`
+    return request(`/api/modules/score-detail${query}`)
   },
   getCalendar(month) {
     const query = month ? `?month=${encodeURIComponent(month)}` : ''
@@ -162,5 +205,75 @@ export const api = {
     if (filename) search.set('filename', filename)
     const suffix = search.toString() ? `?${search.toString()}` : ''
     return `/api/modules/course-resources/download/${encodeURIComponent(rpId)}${suffix}`
+  },
+  getMailFolders() {
+    return request('/api/modules/mail/folders')
+  },
+  getMailMessages(query) {
+    const search = new URLSearchParams()
+    Object.entries(query || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && `${value}`.trim() !== '') {
+        search.set(key, value)
+      }
+    })
+    const suffix = search.toString() ? `?${search.toString()}` : ''
+    return request(`/api/modules/mail/messages${suffix}`)
+  },
+  getMailMessageDetail(query) {
+    const search = new URLSearchParams()
+    Object.entries(query || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && `${value}`.trim() !== '') {
+        search.set(key, value)
+      }
+    })
+    const suffix = search.toString() ? `?${search.toString()}` : ''
+    return request(`/api/modules/mail/message${suffix}`)
+  },
+  getMailAttachmentDownloadUrl(query) {
+    const search = new URLSearchParams()
+    Object.entries(query || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && `${value}`.trim() !== '') {
+        search.set(key, value)
+      }
+    })
+    const suffix = search.toString() ? `?${search.toString()}` : ''
+    return `/api/modules/mail/attachment${suffix}`
+  },
+  deleteMailMessages(payload) {
+    return request('/api/modules/mail/messages/delete', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  sendMailMessage(payload) {
+    return request('/api/modules/mail/messages/send', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  saveMailDraft(payload) {
+    return request('/api/modules/mail/drafts/save', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  },
+  autocompleteMailContacts(query) {
+    const search = new URLSearchParams()
+    Object.entries(query || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && `${value}`.trim() !== '') {
+        search.set(key, value)
+      }
+    })
+    const suffix = search.toString() ? `?${search.toString()}` : ''
+    return request(`/api/modules/mail/contacts/autocomplete${suffix}`)
+  },
+  uploadMailAttachment({ composeId, file }) {
+    const form = new FormData()
+    if (composeId) form.set('compose_id', composeId)
+    form.set('file', file)
+    return request('/api/modules/mail/attachments/upload', {
+      method: 'POST',
+      body: form
+    })
   }
 }

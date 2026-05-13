@@ -44,13 +44,37 @@ async function runSync() {
   }
 }
 
+async function startSync({ notify = false } = {}) {
+  const { isSessionReady, loadSessionStatus } = useSession()
+  busy.sync = true
+  try {
+    await loadSessionStatus()
+    if (!isSessionReady.value) return { started: false }
+    const result = await api.startSync()
+    if (notify) {
+      useAlerts().pushAlert('后台同步已启动。', 'info')
+    }
+    await loadSyncStatus()
+    return result
+  } catch (error) {
+    if (error.status !== 409) {
+      useAlerts().pushAlert(error.message, 'error')
+    }
+    await loadSyncStatus()
+    return { started: false, error }
+  } finally {
+    busy.sync = false
+  }
+}
+
 async function refreshAll() {
   const { isSessionReady, loadSessionStatus, captchaState, busy: sessionBusy, loadCaptcha } = useSession()
-  const { loadProfile, loadAcademicProgress, loadHistoryScores, loadTimetable, loadExams, loadScores, loadCalendar, loadHomework, loadEmptyRooms, loadCourseResources,
-          markModuleNeedsLogin, moduleErrors } = useModuleData()
+  const { loadProfile, loadAcademicProgress, loadHistoryScores, loadTimetable, loadCourseSelection, loadExams, loadScores, loadCalendar, loadHomework, loadEmptyRooms, loadCourseResources,
+          markModuleNeedsLogin, moduleErrors, loadSnapshots } = useModuleData()
 
   await loadSessionStatus()
   await loadSyncStatus()
+  await loadSnapshots().catch(() => {})
 
   if (!isSessionReady.value) {
     if (!captchaState.imageDataUrl && !sessionBusy.captcha) {
@@ -60,6 +84,7 @@ async function refreshAll() {
     markModuleNeedsLogin('academicProgress')
     markModuleNeedsLogin('historyScores')
     markModuleNeedsLogin('timetable')
+    markModuleNeedsLogin('courseSelection')
     markModuleNeedsLogin('exams')
     markModuleNeedsLogin('scores')
     markModuleNeedsLogin('calendar')
@@ -74,6 +99,7 @@ async function refreshAll() {
     loadAcademicProgress().catch((error) => { moduleErrors.academicProgress = error.message }),
     loadHistoryScores().catch((error) => { moduleErrors.historyScores = error.message }),
     loadTimetable().catch((error) => { moduleErrors.timetable = error.message }),
+    loadCourseSelection().catch((error) => { moduleErrors.courseSelection = error.message }),
     loadExams().catch((error) => { moduleErrors.exams = error.message }),
     loadScores().catch((error) => { moduleErrors.scores = error.message }),
     loadCalendar().catch((error) => { moduleErrors.calendar = error.message }),
@@ -81,6 +107,7 @@ async function refreshAll() {
     loadEmptyRooms().catch((error) => { moduleErrors.emptyRooms = error.message }),
     loadCourseResources().catch((error) => { moduleErrors.courseResources = error.message })
   ])
+  await loadSyncStatus()
 }
 
 export function useSync() {
@@ -89,6 +116,7 @@ export function useSync() {
     busy,
     loadSyncStatus,
     runSync,
+    startSync,
     refreshAll
   }
 }

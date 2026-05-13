@@ -8,8 +8,11 @@ from app.parsers.aa import (
     is_passing_score,
     parse_academic_progress,
     parse_academic_progress_detail_path,
+    parse_course_selection_captcha,
+    parse_course_selection_page,
     parse_empty_rooms,
     parse_exams,
+    parse_score_detail,
     parse_scorecard_progress,
     parse_scores,
     parse_student_status_profile,
@@ -38,6 +41,61 @@ def read_json(name: str) -> dict:
     return json.loads(read_text(name))
 
 
+def test_parse_course_selection_page() -> None:
+    parsed = parse_course_selection_page(read_text("course_selection.html"))
+
+    assert parsed.data.can_submit is True
+    assert len(parsed.data.selected_courses) == 1
+    assert len(parsed.data.available_courses) == 2
+    assert parsed.data.selected_courses[0].selected is True
+    assert parsed.data.available_courses[0].key == "M410003B_01"
+    assert parsed.data.available_courses[0].remaining == 2
+    assert parsed.actions["M410003B_01"].action_url.endswith("/course_selection/courseselecttask/submit/")
+    assert parsed.actions["M410003B_01"].fields["csrfmiddlewaretoken"] == "csrf-token"
+    assert parsed.actions["M410003B_01"].fields["selects"] == "target-1"
+    assert parsed.drop_actions["M310005B_01"].action_url.endswith("/course_selection/courseselecttask/delete/")
+    assert parsed.drop_actions["M310005B_01"].fields["csrfmiddlewaretoken"] == "csrf-token"
+    assert parsed.drop_actions["M310005B_01"].fields["pk"] == "selected-1"
+
+
+def test_parse_course_selection_reports_unparseable_submit_entry() -> None:
+    parsed = parse_course_selection_page(
+        """
+        <table class="table table-bordered"><tr><th>Other</th></tr></table>
+        <table class="table table-bordered">
+          <tr><th>Select</th><th>Course</th><th>Remaining</th></tr>
+          <tr><td><input type="checkbox" name="selects" value="target-1"></td><td>M410003B Course 01</td><td>3</td></tr>
+        </table>
+        """
+    )
+
+    assert parsed.data.can_submit is False
+    assert parsed.data.submit_error
+    assert parsed.actions == {}
+
+
+def test_parse_course_selection_captcha_form() -> None:
+    image_url, input_name, fields, prompt = parse_course_selection_captcha(
+        """
+        <div class="modal">
+          <p>Please enter captcha</p>
+          <form action="/course_selection/courseselecttask/captcha/">
+            <input type="hidden" name="csrfmiddlewaretoken" value="csrf-token" />
+            <img src="/captcha/image/1.png" />
+            <input type="text" name="captcha" />
+          </form>
+        </div>
+        """,
+        "https://aa.bjtu.edu.cn/course_selection/courseselecttask/selects/",
+    )
+
+    assert image_url == "https://aa.bjtu.edu.cn/captcha/image/1.png"
+    assert input_name == "captcha"
+    assert fields["csrfmiddlewaretoken"] == "csrf-token"
+    assert fields["__action__"].endswith("/course_selection/courseselecttask/captcha/")
+    assert prompt is not None
+
+
 def test_parse_timetable_non_empty() -> None:
     data = parse_timetable(read_text("timetable.html"))
     assert len(data.entries) == 2
@@ -64,6 +122,18 @@ def test_parse_score_table_with_items() -> None:
     assert len(data.items) == 2
     assert data.items[0].course_name == "软件项目管理与产品运维"
     assert data.items[1].score == "72"
+    assert data.items[0].detail == "详情"
+    assert data.items[0].detail_path == "/score/scores/stu/detail/1001/?term=2025-2026-2-2"
+    assert data.items[1].detail_path == "/score/scores/stu/detail/1002/?term=2025-2026-2-2"
+
+
+def test_parse_score_detail_table() -> None:
+    data = parse_score_detail(read_text("score_detail.html"))
+    assert data.title == "软件项目管理与产品运维 成绩详情"
+    assert data.fields[0].label == "课程"
+    assert data.fields[0].value == "软件项目管理与产品运维"
+    assert data.tables[0].headers == ["项目", "比例", "成绩"]
+    assert data.tables[0].rows[0] == ["平时", "40%", "88"]
 
 
 def test_letter_grades_at_d_or_above_pass() -> None:

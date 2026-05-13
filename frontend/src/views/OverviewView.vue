@@ -1,14 +1,14 @@
 <script setup>
 import { computed, onMounted } from 'vue'
-import { NCard, NGrid, NGi, NStatistic, NTag, NDataTable, NH2, NP, NSpace } from 'naive-ui'
+import { NAlert, NCard, NGrid, NGi, NStatistic, NTag, NDataTable, NH2, NP, NSpace } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useModuleData } from '../composables/useModuleData'
 import { useSync } from '../composables/useSync'
 import { useSession } from '../composables/useSession'
 
 const router = useRouter()
-const { payloads, itemCount } = useModuleData()
-const { syncStatus, refreshAll } = useSync()
+const { payloads, itemCount, loadSnapshots } = useModuleData()
+const { syncStatus, busy, loadSyncStatus, startSync } = useSync()
 const { isSessionReady, loadSessionStatus } = useSession()
 
 const navigation = [
@@ -16,6 +16,7 @@ const navigation = [
   { key: 'academicProgress', label: '学业进度' },
   { key: 'historyScores', label: '历史成绩' },
   { key: 'timetable', label: '课表' },
+  { key: 'courseSelection', label: '抢课' },
   { key: 'exams', label: '考务' },
   { key: 'scores', label: '主修成绩' },
   { key: 'calendar', label: '学年日历' },
@@ -65,6 +66,7 @@ const summaryData = computed(() =>
 const moduleRoutes = {
   academicProgress: 'academic-progress',
   historyScores: 'history-scores',
+  courseSelection: 'course-selection',
   courseResources: 'course-resources',
   emptyRooms: 'empty-rooms'
 }
@@ -77,8 +79,10 @@ onMounted(async () => {
   if (!isSessionReady.value) {
     await loadSessionStatus()
   }
+  await loadSnapshots().catch(() => {})
+  await loadSyncStatus()
   if (isSessionReady.value) {
-    await refreshAll()
+    await startSync()
   }
 })
 </script>
@@ -89,6 +93,10 @@ onMounted(async () => {
       <NH2>模块总览</NH2>
       <NP class="section-desc">点击模块卡片进入详情页</NP>
     </div>
+
+    <NAlert v-if="busy.sync || syncStatus.status === 'running'" type="info" :show-icon="true">
+      信息正在后台同步中，当前先展示本地快照。
+    </NAlert>
 
     <NGrid cols="1 s:2 m:3" :x-gap="16" :y-gap="16" responsive="screen">
       <NGi v-for="module in moduleCards" :key="module.key">

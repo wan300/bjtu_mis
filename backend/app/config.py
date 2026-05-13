@@ -17,8 +17,11 @@ class Settings:
     profile_dir: Path
     db_path: Path
     session_state_path: Path
+    login_credentials_path: Path
     sync_lock_path: Path
     login_lock_path: Path
+    captcha_model_path: Path
+    captcha_charset: str
     frontend_dist_dir: Path
     python_executable: Path
     mis_home_url: str
@@ -57,12 +60,19 @@ def get_settings() -> Settings:
         session_state_path=Path(
             os.getenv("BJTU_MIS_SESSION_STATE_PATH", runtime_dir / "session_state.json")
         ).resolve(),
+        login_credentials_path=Path(
+            os.getenv("BJTU_MIS_LOGIN_CREDENTIALS_PATH", runtime_dir / "login_credentials.json")
+        ).resolve(),
         sync_lock_path=Path(
             os.getenv("BJTU_MIS_SYNC_LOCK_PATH", runtime_dir / "sync.lock")
         ).resolve(),
         login_lock_path=Path(
             os.getenv("BJTU_MIS_LOGIN_LOCK_PATH", runtime_dir / "login_browser.lock")
         ).resolve(),
+        captcha_model_path=Path(
+            os.getenv("BJTU_MIS_CAPTCHA_MODEL_PATH", root_dir / "models" / "bjtu_captcha_crnn.pt")
+        ).resolve(),
+        captcha_charset=os.getenv("BJTU_MIS_CAPTCHA_CHARSET", " 0123456789+-*="),
         frontend_dist_dir=frontend_dist_dir,
         python_executable=Path(os.getenv("BJTU_MIS_PYTHON", sys.executable)).resolve(),
         mis_home_url=os.getenv("BJTU_MIS_HOME_URL", "https://mis.bjtu.edu.cn/home/"),

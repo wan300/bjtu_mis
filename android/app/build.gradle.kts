@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.chaquopy)
 }
 
 android {
@@ -18,6 +19,10 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -38,11 +43,23 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    sourceSets {
+        getByName("main") {
+            assets.srcDirs("src/main/assets", "../../models")
+        }
+    }
 }
 
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
     arg("room.incremental", "true")
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.13"
+    }
 }
 
 dependencies {
@@ -60,12 +77,20 @@ dependencies {
     implementation(libs.okhttp.logging)
     implementation(libs.jsoup)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.pytorch.android)
+    implementation(libs.androidx.javascriptengine)
+    implementation(libs.pdfbox.android)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.exoplayer.hls)
+    implementation(libs.media3.ui)
+    implementation(libs.media3.datasource.okhttp)
 
     ksp(libs.androidx.room.compiler)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
+    implementation(libs.compose.material.icons.extended)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
 
@@ -73,4 +98,5 @@ dependencies {
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.jsoup)
     testImplementation(libs.kotlinx.serialization.json)
+    testImplementation(libs.androidx.room.testing)
 }

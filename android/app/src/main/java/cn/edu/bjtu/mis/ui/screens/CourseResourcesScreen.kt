@@ -206,12 +206,12 @@ private fun CourseSelector(
     }
 }
 
-internal fun openFile(context: android.content.Context, file: File) {
+internal fun openFile(context: android.content.Context, file: File): Boolean {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     val extension = file.extension.lowercase()
     val type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
     val intent = Intent(Intent.ACTION_VIEW)
         .setDataAndType(uri, type)
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    runCatching { context.startActivity(Intent.createChooser(intent, "打开文件")) }
+    return runCatching { context.startActivity(Intent.createChooser(intent, "打开文件")) }.isSuccess
 }

@@ -1,14 +1,25 @@
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NCard, NForm, NFormItem, NInput, NH1, NP, NSpace, NDivider } from 'naive-ui'
+import { NButton, NCard, NDivider, NForm, NFormItem, NH1, NInput, NP, NSpace } from 'naive-ui'
 import { useSession } from '../composables/useSession'
 import { useSync } from '../composables/useSync'
 
 const router = useRouter()
 const route = useRoute()
-const { loginForm, captchaState, busy, isSessionReady, loadCaptcha, submitInlineLogin, openBrowser, loadSessionStatus } = useSession()
-const { refreshAll } = useSync()
+const {
+  loginForm,
+  captchaState,
+  busy,
+  isSessionReady,
+  loadCaptcha,
+  submitInlineLogin,
+  submitAutoLogin,
+  openBrowser,
+  loadSessionStatus
+} = useSession()
+const { startSync } = useSync()
+const showManualCaptcha = ref(false)
 
 function getPostLoginRedirect() {
   const redirect = Array.isArray(route.query.redirect) ? route.query.redirect[0] : route.query.redirect
@@ -17,11 +28,24 @@ function getPostLoginRedirect() {
   return redirect
 }
 
-async function handleLogin() {
+async function finishLogin() {
+  await startSync()
+  router.push(getPostLoginRedirect())
+}
+
+async function handleAutoLogin() {
+  const result = await submitAutoLogin()
+  if (result.success) {
+    await finishLogin()
+  } else if (result.manualRequired) {
+    showManualCaptcha.value = true
+  }
+}
+
+async function handleManualLogin() {
   const result = await submitInlineLogin()
   if (result.success) {
-    await refreshAll()
-    router.push(getPostLoginRedirect())
+    await finishLogin()
   }
 }
 
@@ -33,10 +57,6 @@ onMounted(async () => {
   await loadSessionStatus({ redirectOnInvalid: false })
   if (isSessionReady.value) {
     router.replace(getPostLoginRedirect())
-    return
-  }
-  if (!captchaState.imageDataUrl) {
-    await loadCaptcha(false)
   }
 })
 </script>
@@ -46,7 +66,7 @@ onMounted(async () => {
     <NCard class="login-card" :bordered="true">
       <div class="login-header">
         <NH1 class="login-title">BJTU MIS</NH1>
-        <NP class="login-subtitle">校园信息采集控制台 · 统一登录</NP>
+        <NP class="login-subtitle">校园信息采集控制台 · 自动登录</NP>
       </div>
 
       <NDivider />
@@ -69,11 +89,11 @@ onMounted(async () => {
             size="large"
             :disabled="busy.login"
             show-password-on="click"
-            @keyup.enter="handleLogin"
+            @keyup.enter="showManualCaptcha ? handleManualLogin() : handleAutoLogin()"
           />
         </NFormItem>
 
-        <NFormItem label="验证码">
+        <NFormItem v-if="showManualCaptcha" label="验证码">
           <div class="captcha-row">
             <NInput
               v-model:value="loginForm.captcha"
@@ -81,17 +101,17 @@ onMounted(async () => {
               size="large"
               :disabled="busy.login"
               maxlength="8"
-              @keyup.enter="handleLogin"
+              @keyup.enter="handleManualLogin"
             />
             <img
               v-if="captchaState.imageDataUrl"
               :src="captchaState.imageDataUrl"
               alt="验证码"
               class="captcha-image"
-              @click="loadCaptcha(false)"
               title="点击刷新验证码"
+              @click="loadCaptcha(false)"
             />
-            <div v-else class="captcha-placeholder" @click="loadCaptcha(false)" title="点击加载验证码">
+            <div v-else class="captcha-placeholder" title="点击加载验证码" @click="loadCaptcha(false)">
               点击加载
             </div>
           </div>
@@ -108,9 +128,9 @@ onMounted(async () => {
           block
           :loading="busy.login"
           :disabled="busy.captcha"
-          @click="handleLogin"
+          @click="showManualCaptcha ? handleManualLogin() : handleAutoLogin()"
         >
-          {{ busy.login ? '登录中...' : '提交登录' }}
+          {{ busy.login ? '登录中...' : (showManualCaptcha ? '提交验证码登录' : '自动登录') }}
         </NButton>
         <NButton
           size="large"

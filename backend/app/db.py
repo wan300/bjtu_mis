@@ -106,6 +106,13 @@ class Database:
             return None
         return json.loads(row["payload_json"])
 
+    def get_snapshots(self) -> dict[str, dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT module_key, payload_json FROM module_snapshots ORDER BY module_key"
+            ).fetchall()
+        return {row["module_key"]: json.loads(row["payload_json"]) for row in rows}
+
     def get_latest_sync_run(self) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(

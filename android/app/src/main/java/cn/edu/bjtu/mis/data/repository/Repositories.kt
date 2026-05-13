@@ -5,44 +5,90 @@ import cn.edu.bjtu.mis.data.AppJson
 import cn.edu.bjtu.mis.data.db.BjtuMisDao
 import cn.edu.bjtu.mis.data.db.ModuleSnapshotEntity
 import cn.edu.bjtu.mis.data.db.SyncRunEntity
+import cn.edu.bjtu.mis.data.db.UserCourseEntity
+import cn.edu.bjtu.mis.data.db.UserTodoEntity
 import cn.edu.bjtu.mis.data.db.encodeSummary
+import cn.edu.bjtu.mis.data.db.toEntity
 import cn.edu.bjtu.mis.data.db.toModel
+import cn.edu.bjtu.mis.data.db.toCourseEntry
+import cn.edu.bjtu.mis.data.homework.homeworkMatchesStatusFilter
+import cn.edu.bjtu.mis.data.perf.PerfTrace
 import cn.edu.bjtu.mis.data.provider.AaProvider
+import cn.edu.bjtu.mis.data.provider.CoremailProvider
 import cn.edu.bjtu.mis.data.provider.SessionExpiredException
 import cn.edu.bjtu.mis.data.provider.SessionManager
+import cn.edu.bjtu.mis.data.provider.SessionValidationPolicy
 import cn.edu.bjtu.mis.data.provider.VeProvider
 import cn.edu.bjtu.mis.model.AcademicProgressData
+import cn.edu.bjtu.mis.model.AutoLoginResult
 import cn.edu.bjtu.mis.model.CalendarData
+import cn.edu.bjtu.mis.model.CourseReplayData
+import cn.edu.bjtu.mis.model.CourseReplayPlaybackInfo
+import cn.edu.bjtu.mis.model.CourseSelectionAttemptResult
+import cn.edu.bjtu.mis.model.CourseSelectionData
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.EmptyRoomData
 import cn.edu.bjtu.mis.model.ExamData
+import cn.edu.bjtu.mis.model.ExamItem
 import cn.edu.bjtu.mis.model.HomeworkData
+import cn.edu.bjtu.mis.model.HomeworkItem
+import cn.edu.bjtu.mis.model.HomeworkSubmitResponse
+import cn.edu.bjtu.mis.model.HomeworkUploadFile
+import cn.edu.bjtu.mis.model.MailAttachmentUploadResponse
+import cn.edu.bjtu.mis.model.MailComposeRequest
+import cn.edu.bjtu.mis.model.MailComposeResponse
+import cn.edu.bjtu.mis.model.MailContactsData
+import cn.edu.bjtu.mis.model.MailDeleteResponse
+import cn.edu.bjtu.mis.model.MailFoldersData
+import cn.edu.bjtu.mis.model.MailMessageDetail
+import cn.edu.bjtu.mis.model.MailMessagesData
 import cn.edu.bjtu.mis.model.ModuleEnvelope
 import cn.edu.bjtu.mis.model.ModuleKeys
 import cn.edu.bjtu.mis.model.ScoreData
+import cn.edu.bjtu.mis.model.ScoreDetailData
 import cn.edu.bjtu.mis.model.SessionCaptcha
 import cn.edu.bjtu.mis.model.SessionStatus
 import cn.edu.bjtu.mis.model.StudentProfileData
 import cn.edu.bjtu.mis.model.SyncModuleSummary
 import cn.edu.bjtu.mis.model.SyncRun
 import cn.edu.bjtu.mis.model.TimetableData
+import cn.edu.bjtu.mis.model.UserCourseDraft
+import cn.edu.bjtu.mis.model.UserTodoDraft
+import cn.edu.bjtu.mis.model.UserTodoItem
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import okhttp3.Cookie
 import java.io.File
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+
+enum class ModuleLoadStrategy {
+    CacheOnly,
+    CacheFirst,
+    NetworkFirst,
+}
 
 class SessionRepository(
     private val sessionManager: SessionManager,
 ) {
-    suspend fun status(): SessionStatus = sessionManager.validateSession()
+    fun cachedStatus(): SessionStatus = sessionManager.cachedSessionStatus()
+
+    suspend fun status(
+        policy: SessionValidationPolicy = SessionValidationPolicy.Fresh,
+    ): SessionStatus = sessionManager.validateSession(policy)
 
     suspend fun captcha(): SessionCaptcha = sessionManager.fetchInlineLoginCaptcha()
 
     suspend fun login(loginName: String, password: String, captcha: String): SessionStatus =
         sessionManager.loginInline(loginName, password, captcha)
+
+    suspend fun loginAuto(loginName: String? = null, password: String? = null): AutoLoginResult =
+        sessionManager.loginAuto(loginName, password)
 
     fun logout() = sessionManager.logout()
 }
@@ -76,7 +122,17 @@ class SyncRepository(
                 fetchAndStore(ModuleKeys.AcademicProgress, summary, errors) { aa.fetchAcademicProgress() }
                 fetchAndStore(ModuleKeys.Homework, summary, errors) { ve.fetchHomework(term = currentTerm) }
                 fetchAndStore(ModuleKeys.CourseResources, summary, errors) { ve.fetchCourseResources(term = currentTerm) }
-                fetchAndStore(ModuleKeys.EmptyRooms, summary, errors) { aa.fetchEmptyRooms(week = currentWeek ?: "8") }
+                fetchAndStore(ModuleKeys.EmptyRooms, summary, errors) { aa.fetchEmptyRooms(week = currentWeek) }
+                fetchAndStore(ModuleKeys.Mail, summary, errors) {
+                    val mail = CoremailProvider(client)
+                    val folders = mail.fetchFolders().copy(syncedAt = nowIso())
+                    dao.clearMailFolders()
+                    dao.saveMailFolders(folders.data.folders.map { folder -> folder.toEntity(folders.syncedAt ?: nowIso()) })
+                    val messages = mail.fetchMessages(folderId = "1", start = 0, limit = 20).copy(syncedAt = nowIso())
+                    dao.clearMailMessageSummaries("1")
+                    dao.saveMailMessageSummaries(messages.data.messages.map { message -> message.toEntity(messages.syncedAt ?: nowIso()) })
+                    messages
+                }
             }
         } catch (error: SessionExpiredException) {
             finish(runId, "session_expired", summary, error.message)
@@ -89,6 +145,40 @@ class SyncRepository(
         val status = if (errors.isEmpty()) "success" else "partial_failure"
         finish(runId, status, summary, errors.joinToString(" | ").takeIf { it.isNotBlank() })
         return latestStatus()
+    }
+
+    suspend fun runQuickSync(): SyncRun = mutex.withLock {
+        PerfTrace.measureSuspend("Sync.quick") {
+            val startedAt = nowIso()
+            val runId = dao.insertSyncRun(SyncRunEntity(startedAt = startedAt, status = "quick_running"))
+            val summary = linkedMapOf<String, SyncModuleSummary>()
+            val errors = mutableListOf<String>()
+
+            try {
+                sessionManager.withAuthenticatedClient { client ->
+                    val aa = AaProvider(client)
+                    val ve = VeProvider(client)
+
+                    val calendar = fetchAndStore(ModuleKeys.Calendar, summary, errors) { ve.fetchCalendar() }
+                    val currentTerm = calendar?.data?.currentTerm
+
+                    fetchAndStore(ModuleKeys.Exams, summary, errors) { aa.fetchExams() }
+                    fetchAndStore(ModuleKeys.Homework, summary, errors) {
+                        ve.fetchHomework(term = currentTerm, includeAttachments = false)
+                    }
+                }
+            } catch (error: SessionExpiredException) {
+                finish(runId, "session_expired", summary, error.message)
+                throw error
+            } catch (error: Throwable) {
+                finish(runId, "failed", summary, error.message)
+                throw error
+            }
+
+            val status = if (errors.isEmpty()) "success" else "partial_failure"
+            finish(runId, status, summary, errors.joinToString(" | ").takeIf { it.isNotBlank() })
+            latestStatus()
+        }
     }
 
     suspend fun latestStatus(): SyncRun =
@@ -137,6 +227,71 @@ class SyncRepository(
         )
     }
 
+    suspend fun userCourses(): List<UserCourseEntity> =
+        dao.getUserCourses()
+
+    suspend fun saveUserCourse(draft: UserCourseDraft): Long {
+        val now = nowIso()
+        val existing = draft.id?.let { dao.getUserCourse(it) }
+        val startWeek = draft.startWeek.coerceAtLeast(1)
+        val endWeek = draft.endWeek.coerceAtLeast(1)
+        return dao.saveUserCourse(
+            UserCourseEntity(
+                id = draft.id ?: 0,
+                courseName = draft.courseName.trim(),
+                weekday = draft.weekday.trim(),
+                weekdayIndex = draft.weekdayIndex.coerceIn(0, 6),
+                period = draft.period.trim(),
+                periodNumber = draft.periodNumber.coerceAtLeast(1),
+                timeRange = draft.timeRange.blankToNull(),
+                startWeek = minOf(startWeek, endWeek),
+                endWeek = maxOf(startWeek, endWeek),
+                weeksText = draft.weeksText.blankToNull(),
+                durationType = draft.durationType.name,
+                teacher = draft.teacher.blankToNull(),
+                locationText = draft.locationText.blankToNull(),
+                remark = draft.remark.blankToNull(),
+                colorIndex = draft.colorIndex.coerceIn(0, 7),
+                createdAt = existing?.createdAt ?: now,
+                updatedAt = now,
+            )
+        )
+    }
+
+    suspend fun deleteUserCourse(id: Long) {
+        dao.deleteUserCourse(id)
+    }
+
+    suspend fun userTodos(): List<UserTodoItem> =
+        dao.getUserTodos().map { it.toModel() }
+
+    suspend fun saveUserTodo(draft: UserTodoDraft): Long {
+        val now = nowIso()
+        val existing = draft.id?.let { dao.getUserTodo(it) }
+        val title = draft.title.trim()
+        require(title.isNotBlank()) { "待办标题不能为空" }
+        val date = LocalDate.parse(draft.date.trim()).toString()
+        return dao.saveUserTodo(
+            UserTodoEntity(
+                id = draft.id ?: 0,
+                title = title,
+                date = date,
+                note = draft.note.blankToNull(),
+                done = draft.done,
+                createdAt = existing?.createdAt ?: now,
+                updatedAt = now,
+            )
+        )
+    }
+
+    suspend fun setUserTodoDone(id: Long, done: Boolean) {
+        dao.setUserTodoDone(id, done, nowIso())
+    }
+
+    suspend fun deleteUserTodo(id: Long) {
+        dao.deleteUserTodo(id)
+    }
+
     private suspend fun finish(
         runId: Long,
         status: String,
@@ -162,11 +317,44 @@ class SyncRepository(
         is CalendarData -> data.items.size
         is HomeworkData -> data.items.size
         is CourseResourcesData -> data.resources.size
+        is CourseReplayData -> data.lessons.size
         is EmptyRoomData -> data.rooms.size
+        is MailMessagesData -> data.messages.size
+        is MailFoldersData -> data.folders.size
         is StudentProfileData -> data.fields.size
         is AcademicProgressData -> if (data.buckets.isNotEmpty()) data.buckets.size else data.courses.size
         else -> 0
     }
+}
+
+data class OverviewDashboard(
+    val snapshots: List<ModuleSnapshotEntity>,
+    val latest: SyncRun,
+    val homework: List<HomeworkItem>,
+    val exams: List<ExamItem>,
+    val calendar: CalendarData?,
+    val hasCache: Boolean,
+)
+
+class OverviewRepository(
+    private val syncRepository: SyncRepository,
+) {
+    suspend fun loadCached(): OverviewDashboard =
+        PerfTrace.measureSuspend("Overview.cacheLoad") {
+            val snapshots = syncRepository.snapshots()
+            val latest = syncRepository.latestStatus()
+            val homework = syncRepository.snapshot<HomeworkData>(ModuleKeys.Homework)?.data?.items.orEmpty()
+            val exams = syncRepository.snapshot<ExamData>(ModuleKeys.Exams)?.data?.items.orEmpty()
+            val calendar = syncRepository.snapshot<CalendarData>(ModuleKeys.Calendar)?.data
+            OverviewDashboard(
+                snapshots = snapshots,
+                latest = latest,
+                homework = homework,
+                exams = exams,
+                calendar = calendar,
+                hasCache = snapshots.isNotEmpty() || homework.isNotEmpty() || exams.isNotEmpty() || calendar != null,
+            )
+        }
 }
 
 class ModuleRepository(
@@ -184,6 +372,7 @@ class ModuleRepository(
 
     suspend fun timetable(): ModuleEnvelope<TimetableData> =
         snapshotOrFetch(ModuleKeys.Timetable) { AaProvider(it).fetchTimetable() }
+            .withUserCourses()
 
     suspend fun exams(term: String? = null): ModuleEnvelope<ExamData> =
         fetchLiveOrSnapshot(ModuleKeys.Exams) { AaProvider(it).fetchExams(term) }
@@ -191,14 +380,27 @@ class ModuleRepository(
     suspend fun scores(term: String? = null, ctype: String? = null): ModuleEnvelope<ScoreData> =
         fetchLiveOrSnapshot(ModuleKeys.Scores) { AaProvider(it).fetchScores(term, ctype) }
 
+    suspend fun scoreDetail(detailPath: String): ModuleEnvelope<ScoreDetailData> =
+        sessionManager.withAuthenticatedClient { AaProvider(it).fetchScoreDetail(detailPath) }.copy(syncedAt = nowIso())
+
     suspend fun calendar(month: String? = null): ModuleEnvelope<CalendarData> =
         fetchLiveOrSnapshot(ModuleKeys.Calendar) { VeProvider(it).fetchCalendar(month) }
 
     suspend fun homework(status: String = "all"): ModuleEnvelope<HomeworkData> {
         val envelope = fetchLiveOrSnapshot(ModuleKeys.Homework) { VeProvider(it).fetchHomework() }
         if (status == "all") return envelope
-        return envelope.copy(data = envelope.data.copy(items = envelope.data.items.filter { it.status == status }))
+        return envelope.copy(data = envelope.data.copy(items = envelope.data.items.filter {
+            homeworkMatchesStatusFilter(it, status)
+        }))
     }
+
+    suspend fun submitHomework(
+        homeworkId: Int,
+        courseId: Int,
+        content: String,
+        files: List<HomeworkUploadFile>,
+    ): HomeworkSubmitResponse =
+        sessionManager.withAuthenticatedClient { VeProvider(it).submitHomework(homeworkId, courseId, content, files) }
 
     suspend fun emptyRooms(
         term: String? = null,
@@ -219,6 +421,33 @@ class ModuleRepository(
         }
 
     suspend fun snapshots(): List<ModuleSnapshotEntity> = syncRepository.snapshots()
+
+    suspend fun saveUserCourse(draft: UserCourseDraft): Long =
+        syncRepository.saveUserCourse(draft)
+
+    suspend fun deleteUserCourse(id: Long) {
+        syncRepository.deleteUserCourse(id)
+    }
+
+    suspend fun userTodos(): List<UserTodoItem> =
+        syncRepository.userTodos()
+
+    suspend fun saveUserTodo(draft: UserTodoDraft): Long =
+        syncRepository.saveUserTodo(draft)
+
+    suspend fun setUserTodoDone(id: Long, done: Boolean) {
+        syncRepository.setUserTodoDone(id, done)
+    }
+
+    suspend fun deleteUserTodo(id: Long) {
+        syncRepository.deleteUserTodo(id)
+    }
+
+    private suspend fun ModuleEnvelope<TimetableData>.withUserCourses(): ModuleEnvelope<TimetableData> {
+        val localEntries = syncRepository.userCourses().map { it.toCourseEntry() }
+        if (localEntries.isEmpty()) return this
+        return copy(data = data.copy(entries = data.entries + localEntries))
+    }
 
     private suspend inline fun <reified T> snapshotOrFetch(
         moduleKey: String,
@@ -281,6 +510,293 @@ class CourseResourceRepository(
     }
 }
 
+class HomeworkAttachmentRepository(
+    private val context: Context,
+    private val sessionManager: SessionManager,
+) {
+    suspend fun download(homeworkId: Int, attachmentId: String, filename: String): File =
+        sessionManager.withAuthenticatedClient { client ->
+            val targetDir = File(context.filesDir, "downloads/homework").apply { mkdirs() }
+            val target = File(targetDir, safeHomeworkAttachmentFileName(filename, attachmentId))
+            VeProvider(client).downloadHomeworkAttachment(homeworkId, attachmentId, target).file
+        }
+
+    suspend fun preview(homeworkId: Int, attachmentId: String, filename: String): HomeworkAttachmentPreview {
+        if (!homeworkAttachmentPreviewSupported(filename)) {
+            throw IllegalStateException("压缩文件暂不支持在线预览，请下载后查看")
+        }
+        return sessionManager.withAuthenticatedClient { client ->
+            HomeworkAttachmentPreview(
+                url = VeProvider(client).previewHomeworkAttachment(homeworkId, attachmentId),
+                cookies = client.cookieJar.snapshot().map { it.toHomeworkAttachmentPreviewCookie() },
+            )
+        }
+    }
+
+    suspend fun previewUrl(homeworkId: Int, attachmentId: String, filename: String): String {
+        if (!homeworkAttachmentPreviewSupported(filename)) {
+            throw IllegalStateException("压缩文件暂不支持在线预览，请下载后查看")
+        }
+        return sessionManager.withAuthenticatedClient { client ->
+            VeProvider(client).previewHomeworkAttachment(homeworkId, attachmentId)
+        }
+    }
+}
+
+data class HomeworkAttachmentPreview(
+    val url: String,
+    val cookies: List<HomeworkAttachmentPreviewCookie>,
+)
+
+data class HomeworkAttachmentPreviewCookie(
+    val name: String,
+    val value: String,
+    val domain: String,
+    val path: String,
+    val secure: Boolean,
+    val httpOnly: Boolean,
+    val hostOnly: Boolean,
+)
+
+private fun Cookie.toHomeworkAttachmentPreviewCookie(): HomeworkAttachmentPreviewCookie =
+    HomeworkAttachmentPreviewCookie(
+        name = name,
+        value = value,
+        domain = domain,
+        path = path,
+        secure = secure,
+        httpOnly = httpOnly,
+        hostOnly = hostOnly,
+    )
+
+internal fun homeworkAttachmentPreviewSupported(filename: String): Boolean =
+    filename.substringAfterLast('.', "").lowercase() !in setOf("zip", "rar", "7z")
+
+internal fun safeHomeworkAttachmentFileName(filename: String, attachmentId: String): String {
+    val safeId = attachmentId
+        .trim()
+        .replace(Regex("""[^A-Za-z0-9._-]+"""), "_")
+        .trim('.', '_')
+        .ifBlank { "file" }
+    val safeName = filename
+        .trim()
+        .replace(Regex("""[\u0000-\u001F\\/:*?"<>|]"""), "_")
+        .trim()
+        .trim('.')
+        .ifBlank { "homework-attachment-$safeId" }
+    return collapseRepeatedExtension(safeName)
+}
+
+private fun collapseRepeatedExtension(filename: String): String {
+    var result = filename
+    while (true) {
+        val extension = result.substringAfterLast('.', missingDelimiterValue = "")
+        if (extension.isBlank()) return result
+        val suffix = ".$extension"
+        val base = result.dropLast(suffix.length)
+        if (!base.endsWith(suffix, ignoreCase = true)) return result
+        result = base
+    }
+}
+
+class CourseReplayRepository(
+    private val syncRepository: SyncRepository,
+    private val sessionManager: SessionManager,
+) {
+    suspend fun listing(
+        term: String? = null,
+        courseId: String? = null,
+    ): ModuleEnvelope<CourseReplayData> =
+        runCatching {
+            val envelope = sessionManager.withAuthenticatedClient {
+                VeProvider(it).fetchCourseReplays(term, courseId)
+            }.copy(syncedAt = nowIso())
+            syncRepository.saveSnapshot(ModuleKeys.CourseReplay, envelope)
+            envelope
+        }.getOrElse {
+            syncRepository.snapshot<CourseReplayData>(ModuleKeys.CourseReplay)
+                ?: throw it
+        }
+
+    suspend fun playback(
+        term: String? = null,
+        courseId: String? = null,
+        courseSchedId: String,
+        userId: String? = null,
+        timeTableId: String? = null,
+    ): CourseReplayPlaybackInfo =
+        sessionManager.withAuthenticatedClient {
+            VeProvider(it).fetchCourseReplayPlayback(term, courseId, courseSchedId, userId, timeTableId)
+        }
+
+    suspend fun reportListen(
+        userId: String,
+        timetableId: String,
+        courseId: Int,
+        listenTimeSeconds: Long,
+    ): Boolean =
+        sessionManager.withAuthenticatedClient {
+            VeProvider(it).reportCourseReplayListen(userId, timetableId, courseId, listenTimeSeconds)
+        }
+}
+
+data class MailUploadFile(
+    val filename: String,
+    val content: ByteArray,
+    val contentType: String? = null,
+)
+
+class MailRepository(
+    private val context: Context,
+    private val dao: BjtuMisDao,
+    private val sessionManager: SessionManager,
+) {
+    suspend fun folders(): ModuleEnvelope<MailFoldersData> =
+        runCatching {
+            val envelope = sessionManager.withAuthenticatedClient { CoremailProvider(it).fetchFolders() }.copy(syncedAt = nowIso())
+            dao.clearMailFolders()
+            dao.saveMailFolders(envelope.data.folders.map { it.toEntity(envelope.syncedAt ?: nowIso()) })
+            envelope
+        }.getOrElse { error ->
+            cachedFolders() ?: throw error
+        }
+
+    suspend fun messages(folderId: String = "1", start: Int = 0, limit: Int = 20): ModuleEnvelope<MailMessagesData> =
+        runCatching {
+            val envelope = sessionManager.withAuthenticatedClient {
+                CoremailProvider(it).fetchMessages(folderId = folderId, start = start, limit = limit)
+            }.copy(syncedAt = nowIso())
+            if (start == 0) dao.clearMailMessageSummaries(folderId)
+            dao.saveMailMessageSummaries(envelope.data.messages.map { it.toEntity(envelope.syncedAt ?: nowIso()) })
+            envelope
+        }.getOrElse { error ->
+            cachedMessages(folderId, start, limit) ?: throw error
+        }
+
+    suspend fun detail(messageId: String, mboxa: String = ""): ModuleEnvelope<MailMessageDetail> =
+        sessionManager.withAuthenticatedClient {
+            CoremailProvider(it).fetchMessageDetail(messageId = messageId, mboxa = mboxa)
+        }.copy(syncedAt = nowIso())
+
+    suspend fun delete(messageIds: List<String>, mboxa: String = ""): MailDeleteResponse =
+        sessionManager.withAuthenticatedClient {
+            CoremailProvider(it).deleteMessages(messageIds = messageIds, mboxa = mboxa)
+        }.also {
+            dao.deleteMailMessageSummaries(messageIds)
+        }
+
+    suspend fun download(messageId: String, part: String, filename: String?, contentType: String? = null): File =
+        sessionManager.withAuthenticatedClient { client ->
+            val targetDir = File(context.filesDir, "downloads/mail").apply { mkdirs() }
+            val target = File(targetDir, safeMailFileName(filename, contentType, part))
+            CoremailProvider(client).downloadAttachment(messageId, part, filename, target).file
+        }
+
+    suspend fun uploadAttachment(composeId: String?, file: MailUploadFile): MailAttachmentUploadResponse =
+        sessionManager.withAuthenticatedClient {
+            CoremailProvider(it).uploadAttachment(
+                filename = file.filename,
+                content = file.content,
+                contentType = file.contentType,
+                composeId = composeId,
+            )
+        }
+
+    suspend fun send(request: MailComposeRequest): MailComposeResponse =
+        sessionManager.withAuthenticatedClient { CoremailProvider(it).sendMessage(request) }
+
+    suspend fun saveDraft(request: MailComposeRequest): MailComposeResponse =
+        sessionManager.withAuthenticatedClient { CoremailProvider(it).saveDraft(request) }
+
+    suspend fun contacts(keyword: String, limit: Int = 20): ModuleEnvelope<MailContactsData> =
+        sessionManager.withAuthenticatedClient {
+            CoremailProvider(it).autocompleteContacts(keyword = keyword, limit = limit)
+        }.copy(syncedAt = nowIso())
+
+    private suspend fun cachedFolders(): ModuleEnvelope<MailFoldersData>? {
+        val folders = dao.getMailFolders()
+        if (folders.isEmpty()) return null
+        return ModuleEnvelope(
+            module = "mail_folders",
+            syncedAt = folders.maxOfOrNull { it.syncedAt },
+            sourceSystem = "coremail_cache",
+            coverage = cn.edu.bjtu.mis.model.CoverageLevel.Provisional,
+            sourceParams = buildJsonObject { put("cache", true) },
+            data = MailFoldersData(folders.map { it.toModel() }),
+        )
+    }
+
+    private suspend fun cachedMessages(folderId: String, start: Int, limit: Int): ModuleEnvelope<MailMessagesData>? {
+        val messages = dao.getMailMessageSummaries(folderId, start, limit)
+        if (messages.isEmpty()) return null
+        return ModuleEnvelope(
+            module = "mail_messages",
+            syncedAt = messages.maxOfOrNull { it.syncedAt },
+            sourceSystem = "coremail_cache",
+            coverage = cn.edu.bjtu.mis.model.CoverageLevel.Provisional,
+            sourceParams = buildJsonObject {
+                put("cache", true)
+                put("folder_id", folderId)
+                put("start", start)
+                put("limit", limit)
+            },
+            data = MailMessagesData(
+                folderId = folderId,
+                start = start,
+                limit = limit,
+                total = dao.countMailMessageSummaries(folderId),
+                messages = messages.map { it.toModel() },
+            ),
+        )
+    }
+
+    private fun safeMailFileName(filename: String?, contentType: String?, part: String): String {
+        val safeName = filename
+            ?.trim()
+            ?.replace(Regex("""[\\/:*?"<>|]"""), "_")
+            ?.ifBlank { null }
+            ?: "mail-attachment-$part"
+        if (safeName.contains('.')) return safeName
+        val extension = when (contentType?.substringBefore(';')?.trim()?.lowercase()) {
+            "text/plain" -> "txt"
+            "application/pdf" -> "pdf"
+            "image/jpeg" -> "jpg"
+            "image/png" -> "png"
+            else -> ""
+        }
+        return if (extension.isBlank()) safeName else "$safeName.$extension"
+    }
+}
+
+class CourseSelectionRepository(
+    private val sessionManager: SessionManager,
+) {
+    suspend fun listing(): ModuleEnvelope<CourseSelectionData> =
+        sessionManager.withAuthenticatedClient { AaProvider(it).fetchCourseSelection() }.copy(syncedAt = nowIso())
+
+    suspend fun select(courseKey: String, courseName: String? = null): CourseSelectionAttemptResult =
+        sessionManager.withAuthenticatedClient { AaProvider(it).attemptCourseSelection(courseKey, courseName) }
+
+    suspend fun drop(courseKey: String, courseName: String? = null): CourseSelectionAttemptResult =
+        sessionManager.withAuthenticatedClient { AaProvider(it).dropCourseSelection(courseKey, courseName) }
+
+    suspend fun replace(
+        targetCourseKey: String,
+        dropCourseKey: String,
+        targetCourseName: String? = null,
+        dropCourseName: String? = null,
+    ): CourseSelectionAttemptResult =
+        sessionManager.withAuthenticatedClient {
+            AaProvider(it).replaceCourseSelection(targetCourseKey, targetCourseName, dropCourseKey, dropCourseName)
+        }
+
+    suspend fun submitCaptcha(challengeId: String, captcha: String): CourseSelectionAttemptResult =
+        sessionManager.withAuthenticatedClient { AaProvider(it).submitCourseSelectionCaptcha(challengeId, captcha) }
+}
+
 @PublishedApi
 internal fun nowIso(): String =
     OffsetDateTime.now(ZoneOffset.UTC).withNano(0).toString()
+
+private fun String?.blankToNull(): String? =
+    this?.trim()?.takeIf { it.isNotBlank() }

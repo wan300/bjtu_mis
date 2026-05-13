@@ -25,6 +25,7 @@ const menuOptions = [
   { label: '学业进度', key: '/academic-progress', icon: () => h(NIcon, null, { default: () => h(StatsChartOutline) }) },
   { label: '历史成绩', key: '/history-scores', icon: () => h(NIcon, null, { default: () => h(TimeOutline) }) },
   { label: '课表', key: '/timetable', icon: () => h(NIcon, null, { default: () => h(CalendarNumberOutline) }) },
+  { label: '抢课', key: '/course-selection', icon: () => h(NIcon, null, { default: () => h(BookOutline) }) },
   { label: '考务', key: '/exams', icon: () => h(NIcon, null, { default: () => h(DocumentTextOutline) }) },
   { label: '主修成绩', key: '/scores', icon: () => h(NIcon, null, { default: () => h(TrophyOutline) }) },
   { label: '学年日历', key: '/calendar', icon: () => h(NIcon, null, { default: () => h(CalendarOutline) }) },

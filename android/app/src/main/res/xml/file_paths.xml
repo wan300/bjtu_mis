@@ -3,6 +3,9 @@
     <files-path
         name="downloads"
         path="downloads/" />
+    <files-path
+        name="agent-workspaces"
+        path="agent-workspaces/" />
     <cache-path
         name="cache"
         path="." />

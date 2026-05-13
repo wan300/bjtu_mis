@@ -2,24 +2,37 @@ package cn.edu.bjtu.mis.data.provider
 
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.data.network.FileResponse
+import cn.edu.bjtu.mis.data.network.MultipartFilePart
 import cn.edu.bjtu.mis.data.network.TextResponse
 import cn.edu.bjtu.mis.data.parser.buildCourseResourcesData
+import cn.edu.bjtu.mis.data.parser.buildCourseReplayData
 import cn.edu.bjtu.mis.data.parser.buildHomeworkData
 import cn.edu.bjtu.mis.data.parser.parseCalendar
 import cn.edu.bjtu.mis.data.parser.parseCalendarTerms
 import cn.edu.bjtu.mis.data.parser.parseCourseResourceListing
 import cn.edu.bjtu.mis.data.parser.parseCourseResourceTree
+import cn.edu.bjtu.mis.data.parser.parseCourseReplayLessons
+import cn.edu.bjtu.mis.data.parser.parseCourseReplayPlayback
 import cn.edu.bjtu.mis.data.parser.parseCourses
+import cn.edu.bjtu.mis.data.parser.parseHomeworkAttachments
 import cn.edu.bjtu.mis.data.parser.parseHomeworkList
+import cn.edu.bjtu.mis.data.parser.parseVeUserInfo
 import cn.edu.bjtu.mis.model.CalendarData
+import cn.edu.bjtu.mis.model.CourseReplayData
+import cn.edu.bjtu.mis.model.CourseReplayPlaybackInfo
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.CourseSummary
 import cn.edu.bjtu.mis.model.CoverageLevel
 import cn.edu.bjtu.mis.model.HomeworkData
+import cn.edu.bjtu.mis.model.HomeworkAttachment
+import cn.edu.bjtu.mis.model.HomeworkSubmitResponse
+import cn.edu.bjtu.mis.model.HomeworkUploadFile
 import cn.edu.bjtu.mis.model.ModuleEnvelope
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -29,6 +42,9 @@ import java.io.File
 import java.io.IOException
 import java.time.LocalDate
 import java.net.URI
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 class VeProvider(private val client: BjtuHttpClient) {
     private var sessionId: String? = null
@@ -57,7 +73,10 @@ class VeProvider(private val client: BjtuHttpClient) {
         )
     }
 
-    suspend fun fetchHomework(term: String? = null): ModuleEnvelope<HomeworkData> {
+    suspend fun fetchHomework(
+        term: String? = null,
+        includeAttachments: Boolean = true,
+    ): ModuleEnvelope<HomeworkData> {
         ensureStrictFlow("homework")
         val currentTerm = term ?: parseCalendarTerms(
             getJsonObject("/ve/back/rp/common/teachCalendar.shtml", mapOf("method" to "queryCurrentXq"))
@@ -81,10 +100,11 @@ class VeProvider(private val client: BjtuHttpClient) {
         )
         val items = mutableListOf<cn.edu.bjtu.mis.model.HomeworkItem>()
         val errors = mutableListOf<String>()
+        val attachmentCache = mutableMapOf<Pair<Int, Int>, List<HomeworkAttachment>>()
         for (course in courses) {
             runCatching { openHomeworkContext(course) }
                 .onFailure { errors += "toCoursePlatform:${course.courseId}:${it.message}" }
-                .onSuccess {
+                .onSuccess { teacherId ->
                     for (subType in listOf(0, 2)) {
                         runCatching {
                             val payload = getJsonObject(
@@ -97,7 +117,21 @@ class VeProvider(private val client: BjtuHttpClient) {
                                     "pagesize" to "10",
                                 ),
                             )
-                            items += parseHomeworkList(payload, course, subType)
+                            items += parseHomeworkList(payload, course, subType).map { item ->
+                                val homeworkId = item.homeworkId ?: return@map item
+                                val attachments = if (includeAttachments) {
+                                    attachmentCache.getOrPut(course.courseId to homeworkId) {
+                                        runCatching {
+                                            fetchHomeworkAttachments(homeworkId, course.courseId, teacherId)
+                                        }.onFailure {
+                                            errors += "homeWorkAttachment:${course.courseId}:$homeworkId:${it.message}"
+                                        }.getOrDefault(emptyList())
+                                    }
+                                } else {
+                                    emptyList()
+                                }
+                                item.copy(attachments = attachments)
+                            }
                         }.onFailure { errors += "homeWork:${course.courseId}:$subType:${it.message}" }
                     }
                 }
@@ -117,9 +151,122 @@ class VeProvider(private val client: BjtuHttpClient) {
             coverage = if (errors.isEmpty()) CoverageLevel.Verified else CoverageLevel.Provisional,
             sourceParams = buildJsonObject {
                 put("term", currentTerm)
+                put("include_attachments", includeAttachments)
                 if (errors.isNotEmpty()) put("partial_error_count", errors.size)
             },
             data = buildHomeworkData(currentTerm, courses, dedupedItems.values.toList()),
+        )
+    }
+
+    suspend fun submitHomework(
+        homeworkId: Int,
+        courseId: Int,
+        content: String = "",
+        files: List<HomeworkUploadFile> = emptyList(),
+        term: String? = null,
+    ): HomeworkSubmitResponse {
+        ensureStrictFlow("homework submit")
+        val currentTerm = term ?: parseCalendarTerms(
+            getJsonObject("/ve/back/rp/common/teachCalendar.shtml", mapOf("method" to "queryCurrentXq"))
+        ).second ?: throw IllegalStateException("当前学期缺失，无法定位作业。")
+
+        val courses = parseCourses(
+            getJsonObject(
+                "/ve/back/coursePlatform/course.shtml",
+                mapOf("method" to "getCourseList", "pagesize" to "100", "page" to "1", "xqCode" to currentTerm),
+            )
+        )
+        val course = courses.firstOrNull { it.courseId == courseId }
+            ?: throw IllegalStateException("未找到课程 $courseId")
+
+        openHomeworkContext(course)
+        val homeworkEntry = listOf(0, 2).firstNotNullOfOrNull { subType ->
+            val payload = getJsonObject(
+                "/ve/back/coursePlatform/homeWork.shtml",
+                mapOf(
+                    "method" to "getHomeWorkList",
+                    "cId" to courseId.toString(),
+                    "subType" to subType.toString(),
+                    "page" to "1",
+                    "pagesize" to "100",
+                ),
+            )
+            payload.objectList("courseNoteList").firstOrNull { it.text("id") == homeworkId.toString() }
+        } ?: throw IllegalStateException("未找到作业 $homeworkId")
+
+        val uploadParams = mapOf(
+            "method" to "uploadDiv3",
+            "courseId" to courseId.toString(),
+            "calendarId" to homeworkEntry.text("calendar_id").orEmpty(),
+            "upId" to homeworkId.toString(),
+            "contentType" to homeworkEntry.int("content_type", 0).toString(),
+            "fz" to homeworkEntry.int("is_fz", 0).toString(),
+            "openTime" to homeworkEntry.text("open_date").orEmpty(),
+            "endTime" to homeworkEntry.text("end_time").orEmpty(),
+            "return_num" to homeworkEntry.int("return_num", 0).toString(),
+        )
+        val uploadPage = client.getText(
+            "${ProviderConstants.VE_BASE_URL}/ve/back/course/courseWorkInfo.shtml",
+            params = uploadParams,
+            headers = mapOf(
+                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Referer" to coursePlatformReferer,
+            ),
+        )
+        rememberSession(uploadPage)
+
+        val uploadUrl = extractHomeworkUploadUrl(uploadPage.body, uploadPage.url)
+        val uploadedFiles = if (files.isEmpty()) {
+            emptyList()
+        } else {
+            val targetUrl = uploadUrl ?: throw IllegalStateException("作业提交页缺少附件上传地址。")
+            files.map { file ->
+                uploadHomeworkFile(targetUrl, uploadPage.url, file)
+            }
+        }
+
+        val submitPayload = buildJsonArray {
+            uploadedFiles.forEach { fields ->
+                add(buildJsonObject {
+                    fields.forEach { (key, value) -> put(key, value) }
+                })
+            }
+        }.toString()
+        val submitResponse = client.postForm(
+            "${ProviderConstants.VE_BASE_URL}/ve/back/course/courseWorkInfo.shtml",
+            params = mapOf("method" to "sendStuHomeWorks"),
+            form = mapOf(
+                "content" to urlQuote(content),
+                "groupName" to urlQuote(extractInputValue(uploadPage.body, "groupName").orEmpty()),
+                "groupId" to extractInputValue(uploadPage.body, "groupId").orEmpty(),
+                "courseId" to (extractInputValue(uploadPage.body, "courseId") ?: courseId.toString()),
+                "contentType" to (extractInputValue(uploadPage.body, "contentType") ?: uploadParams.getValue("contentType")),
+                "fz" to (extractInputValue(uploadPage.body, "fz") ?: uploadParams.getValue("fz")),
+                "jxrl_id" to extractInputValue(uploadPage.body, "jxrl_id").orEmpty(),
+                "fileList" to submitPayload,
+                "upId" to (extractInputValue(uploadPage.body, "upId") ?: homeworkId.toString()),
+                "return_num" to (extractInputValue(uploadPage.body, "return_num") ?: uploadParams.getValue("return_num")),
+                "isTeacher" to "0",
+            ),
+            headers = mapOf(
+                "Accept" to "*/*",
+                "X-Requested-With" to "XMLHttpRequest",
+                "Referer" to uploadPage.url,
+            ) + sessionHeader(),
+        )
+        rememberSession(submitResponse)
+        val payload = parseJsonObjectResponse(submitResponse, "homework submit")
+        val flag = (payload.text("flag") ?: payload.text("status")).orEmpty().lowercase()
+        if (flag != "success") {
+            throw IOException(payload.text("message") ?: payload.text("msg") ?: "VE 作业提交失败")
+        }
+
+        return HomeworkSubmitResponse(
+            status = "success",
+            message = payload.text("message") ?: payload.text("msg") ?: "提交成功",
+            homeworkId = homeworkId,
+            submittedAt = payload.text("subTime") ?: payload.text("submitted_at"),
+            upstream = payload,
         )
     }
 
@@ -237,6 +384,188 @@ class VeProvider(private val client: BjtuHttpClient) {
         return client.downloadToFile(downloadUrl, target, headers = mapOf("Referer" to coursePlatformReferer))
     }
 
+    suspend fun downloadHomeworkAttachment(
+        homeworkId: Int,
+        attachmentId: String,
+        target: File,
+    ): FileResponse {
+        ensureStrictFlow("homework attachment download")
+        warmupAjaxSession()
+        return client.downloadToFile(
+            "${ProviderConstants.VE_BASE_URL}/ve/back/coursePlatform/dataSynAction.shtml",
+            target,
+            params = mapOf(
+                "method" to "downLoadPic",
+                "id" to attachmentId.trim(),
+                "noteId" to homeworkId.toString(),
+            ),
+            headers = mapOf("Referer" to coursePlatformReferer) + sessionHeader(),
+        )
+    }
+
+    suspend fun previewHomeworkAttachment(homeworkId: Int, attachmentId: String): String {
+        ensureStrictFlow("homework attachment preview")
+        val payload = getJsonObject(
+            "/ve/back/coursePlatform/dataSynAction.shtml",
+            mapOf(
+                "method" to "queryStuViewUrl",
+                "id" to attachmentId.trim(),
+                "noteId" to homeworkId.toString(),
+                "type" to "4",
+            ),
+        )
+        return payload.text("url") ?: throw IllegalStateException("暂无预览地址")
+    }
+
+    suspend fun fetchCourseReplays(
+        term: String? = null,
+        courseId: String? = null,
+    ): ModuleEnvelope<CourseReplayData> {
+        ensureStrictFlow("course replay")
+        val currentTerm = term ?: parseCalendarTerms(
+            getJsonObject("/ve/back/rp/common/teachCalendar.shtml", mapOf("method" to "queryCurrentXq"))
+        ).second
+
+        if (currentTerm.isNullOrBlank()) {
+            return ModuleEnvelope(
+                module = "course_replay",
+                sourceSystem = "ve",
+                coverage = CoverageLevel.Provisional,
+                sourceParams = buildJsonObject { put("fallback_reason", "missing_current_term") },
+                data = buildCourseReplayData(null, emptyList(), null, null, null, emptyList()),
+            )
+        }
+
+        val courses = parseCourses(
+            getJsonObject(
+                "/ve/back/coursePlatform/course.shtml",
+                mapOf("method" to "getCourseList", "pagesize" to "100", "page" to "1", "xqCode" to currentTerm),
+            )
+        )
+        val selected = selectCourse(courses, courseId)
+        val sourceParams = buildJsonObject {
+            put("term", currentTerm)
+            put("course_id", courseId?.trim().orEmpty().ifBlank { selected?.courseId?.toString().orEmpty() })
+        }
+        if (selected == null) {
+            return ModuleEnvelope(
+                module = "course_replay",
+                sourceSystem = "ve",
+                coverage = CoverageLevel.Verified,
+                sourceParams = sourceParams,
+                data = buildCourseReplayData(currentTerm, courses, null, null, null, emptyList()),
+            )
+        }
+
+        val context = openCourseReplayContext(selected)
+        val payload = getJsonObject(
+            "/ve/back/rp/common/teachCalendar.shtml",
+            mapOf("method" to "toDisplyTeachCourses", "courseId" to selected.courseId.toString()),
+        )
+        return ModuleEnvelope(
+            module = "course_replay",
+            sourceSystem = "ve",
+            coverage = CoverageLevel.Verified,
+            sourceParams = sourceParams,
+            data = buildCourseReplayData(
+                currentTerm,
+                courses,
+                selected,
+                context.userId,
+                context.listenUserId,
+                parseCourseReplayLessons(payload),
+            ),
+        )
+    }
+
+    suspend fun fetchCourseReplayPlayback(
+        term: String? = null,
+        courseId: String? = null,
+        courseSchedId: String,
+        userId: String? = null,
+        timeTableId: String? = null,
+    ): CourseReplayPlaybackInfo {
+        ensureStrictFlow("course replay playback")
+        val currentTerm = term ?: parseCalendarTerms(
+            getJsonObject("/ve/back/rp/common/teachCalendar.shtml", mapOf("method" to "queryCurrentXq"))
+        ).second
+        val courses = parseCourses(
+            getJsonObject(
+                "/ve/back/coursePlatform/course.shtml",
+                mapOf("method" to "getCourseList", "pagesize" to "100", "page" to "1", "xqCode" to currentTerm),
+            )
+        )
+        val selected = selectCourse(courses, courseId)
+            ?: throw IllegalStateException("Course not found: ${courseId.orEmpty()}")
+        val context = openCourseReplayContext(selected)
+        val userIdCandidates = courseReplayUserIdCandidates(
+            contextUserId = context.userId,
+            preferredUserId = userId,
+            listenUserId = context.listenUserId,
+        )
+        if (userIdCandidates.isEmpty()) {
+            throw IllegalStateException("Cannot resolve VE platform user ID")
+        }
+        val (payload, platformUserId) = getCourseReplayDetailPayload(courseSchedId, userIdCandidates)
+        return parseCourseReplayPlayback(
+            payload = payload,
+            courseSchedId = courseSchedId,
+            timeTableId = timeTableId,
+            courseId = selected.courseId,
+            userId = platformUserId,
+            listenUserId = context.listenUserId,
+            referer = context.referer,
+        )
+    }
+
+    private suspend fun getCourseReplayDetailPayload(
+        courseSchedId: String,
+        userIdCandidates: List<String>,
+    ): Pair<JsonObject, String> {
+        var lastError: Throwable? = null
+        userIdCandidates.forEach { candidate ->
+            try {
+                val payload = getJsonObject(
+                    "/ve/back/rp/common/teachCalendar.shtml",
+                    mapOf(
+                        "method" to "toDisplyCourseSchedDetail",
+                        "courseSchedId" to courseSchedId,
+                        "userLevel" to "1",
+                        "userId" to candidate,
+                    ),
+                )
+                return payload to candidate
+            } catch (error: Throwable) {
+                lastError = error
+                if (!isCourseReplayUserIdRejected(error)) throw error
+            }
+        }
+        throw lastError ?: IllegalStateException("VE course replay detail request failed")
+    }
+
+    suspend fun reportCourseReplayListen(
+        userId: String,
+        timetableId: String,
+        courseId: Int,
+        listenTimeSeconds: Long,
+    ): Boolean {
+        ensureStrictFlow("course replay listen record")
+        val payload = getJsonObject(
+            "/ve/back/tqa/tqaListenRecord.shtml",
+            mapOf(
+                "method" to "insertListenRecord",
+                "userId" to userId,
+                "timetableId" to timetableId,
+                "type" to "1",
+                "listenTime" to listenTimeSeconds.coerceAtLeast(0).toString(),
+                "infoId" to "",
+                "cId" to courseId.toString(),
+                "listenFrom" to "1",
+            ),
+        )
+        return payload.text("STATUS") in setOf("0", "2")
+    }
+
     private suspend fun ensureStrictFlow(reason: String) {
         if (strictFlowReady && coursePlatformIndexReferer != ProviderConstants.VE_COURSE_PLATFORM_BASE_URL) return
         val ok = bootstrapVeSession()
@@ -331,14 +660,16 @@ class VeProvider(private val client: BjtuHttpClient) {
         }
     }
 
-    private suspend fun openHomeworkContext(course: CourseSummary) {
+    private suspend fun openHomeworkContext(course: CourseSummary): String {
         val coursePage = client.getText(
             ProviderConstants.VE_COURSE_PLATFORM_BASE_URL,
             params = buildCoursePageParams(course),
             headers = mapOf("Referer" to coursePlatformIndexReferer),
         )
         rememberCoursePlatformContext(coursePage.url, coursePage.body)
-        val teacherId = extractInputValue(coursePage.body, "teacherId") ?: course.teacherId
+        val teacherId = extractInputValue(coursePage.body, "teacherId")
+            ?: extractJsStringValue(coursePage.body, "teacherId")
+            ?: course.teacherId
             ?: throw IllegalStateException("课程缺少 teacherId：${course.courseId}")
         val homeworkPage = client.getText(
             ProviderConstants.VE_COURSE_PLATFORM_BASE_URL,
@@ -346,6 +677,24 @@ class VeProvider(private val client: BjtuHttpClient) {
             headers = mapOf("Referer" to coursePlatformReferer),
         )
         rememberCoursePlatformContext(homeworkPage.url, homeworkPage.body)
+        return teacherId
+    }
+
+    private suspend fun fetchHomeworkAttachments(
+        homeworkId: Int,
+        courseId: Int,
+        teacherId: String,
+    ): List<HomeworkAttachment> {
+        val payload = getJsonObject(
+            "/ve/back/coursePlatform/homeWork.shtml",
+            mapOf(
+                "method" to "queryStudentCourseNote",
+                "id" to homeworkId.toString(),
+                "courseId" to courseId.toString(),
+                "teacherId" to teacherId,
+            ),
+        )
+        return parseHomeworkAttachments(payload)
     }
 
     private suspend fun openCourseResourcesContext(course: CourseSummary): Map<String, String> {
@@ -376,6 +725,57 @@ class VeProvider(private val client: BjtuHttpClient) {
             "teacherId" to pick(extractInputValue(resourcesPage.body, "teacherId"), extractJsStringValue(resourcesPage.body, "teacherId"), teacherId),
         )
     }
+
+    private suspend fun openCourseReplayContext(course: CourseSummary): CourseReplayContext {
+        val coursePage = client.getText(
+            ProviderConstants.VE_COURSE_PLATFORM_BASE_URL,
+            params = buildCoursePageParams(course),
+            headers = mapOf("Referer" to coursePlatformIndexReferer),
+        )
+        rememberCoursePlatformContext(coursePage.url, coursePage.body)
+        val teacherId = extractInputValue(coursePage.body, "teacherId")
+            ?: extractJsStringValue(coursePage.body, "teacherId")
+            ?: course.teacherId
+            ?: throw IllegalStateException("Course ${course.courseId} is missing teacherId")
+        val replayPage = client.getText(
+            ProviderConstants.VE_COURSE_PLATFORM_BASE_URL,
+            params = buildCoursePageParams(course, ProviderConstants.VE_COURSE_REPLAY_COURSE_TO_PAGE, teacherId),
+            headers = mapOf("Referer" to coursePlatformReferer),
+        )
+        rememberCoursePlatformContext(replayPage.url, replayPage.body)
+
+        val listenUserId = extractInputValue(replayPage.body, "userId")
+            ?: extractJsStringValue(replayPage.body, "cpersonid")
+        val (platformUserId, userInfoLoginId) = runCatching {
+            parseVeUserInfo(
+                getJsonObject(
+                    "/ve/back/coursePlatform/userInfo.shtml",
+                    mapOf("method" to "getUserInfo"),
+                )
+            )
+        }.getOrDefault(null to null)
+
+        return CourseReplayContext(
+            userId = platformUserId,
+            listenUserId = listenUserId ?: userInfoLoginId,
+            referer = coursePlatformReferer,
+        )
+    }
+
+    private fun selectCourse(courses: List<CourseSummary>, requestedCourseId: String?): CourseSummary? {
+        val requested = requestedCourseId?.trim().orEmpty()
+        return if (requested.isNotBlank()) {
+            courses.firstOrNull { it.courseId.toString() == requested || it.courseCode == requested }
+        } else {
+            courses.firstOrNull()
+        }
+    }
+
+    private data class CourseReplayContext(
+        val userId: String?,
+        val listenUserId: String?,
+        val referer: String,
+    )
 
     private fun buildCoursePageParams(
         course: CourseSummary,
@@ -471,7 +871,12 @@ class VeProvider(private val client: BjtuHttpClient) {
         val method = params["method"].orEmpty()
         return when {
             path == "/ve/back/coursePlatform/homeWork.shtml" && method == "getHomeWorkList" -> coursePlatformReferer
+            path == "/ve/back/coursePlatform/homeWork.shtml" && method == "queryStudentCourseNote" -> coursePlatformReferer
             path == "/ve/back/coursePlatform/courseResource.shtml" -> coursePlatformReferer
+            path == "/ve/back/coursePlatform/dataSynAction.shtml" -> coursePlatformReferer
+            path == "/ve/back/coursePlatform/userInfo.shtml" && method == "getUserInfo" -> coursePlatformReferer
+            path == "/ve/back/rp/common/teachCalendar.shtml" && method in setOf("toDisplyTeachCourses", "toDisplyCourseSchedDetail") -> coursePlatformReferer
+            path == "/ve/back/tqa/tqaListenRecord.shtml" && method == "insertListenRecord" -> coursePlatformReferer
             else -> coursePlatformIndexReferer
         }
     }
@@ -481,8 +886,11 @@ class VeProvider(private val client: BjtuHttpClient) {
         return when {
             path == "/ve/back/coursePlatform/course.shtml" && method in setOf("getCourseList", "getTimeList") -> true
             path == "/ve/back/coursePlatform/homeWork.shtml" && method == "getHomeWorkList" -> true
+            path == "/ve/back/coursePlatform/homeWork.shtml" && method == "queryStudentCourseNote" -> true
             path == "/ve/back/coursePlatform/courseResource.shtml" && method == "stuQueryUploadResourceForCourseList" -> true
+            path == "/ve/back/coursePlatform/dataSynAction.shtml" && method == "queryStuViewUrl" -> true
             path == "/ve/back/coursePlatform/userInfo.shtml" && method == "getUserInfo" -> true
+            path == "/ve/back/rp/common/teachCalendar.shtml" && method in setOf("toDisplyTeachCourses", "toDisplyCourseSchedDetail") -> true
             else -> false
         }
     }
@@ -532,7 +940,7 @@ class VeProvider(private val client: BjtuHttpClient) {
         val method = params["method"].orEmpty()
         if (
             status == "2" &&
-            method in setOf("getHomeWorkList", "stuQueryCourseResourceBag", "stuQueryUploadResourceForCourseList")
+            method in setOf("getHomeWorkList", "stuQueryCourseResourceBag", "stuQueryUploadResourceForCourseList", "insertListenRecord")
         ) {
             return
         }
@@ -613,10 +1021,112 @@ class VeProvider(private val client: BjtuHttpClient) {
             ?.trim()
             ?.takeIf { it.isNotBlank() }
 
+    private suspend fun uploadHomeworkFile(
+        uploadUrl: String,
+        uploadPageUrl: String,
+        file: HomeworkUploadFile,
+    ): Map<String, String> {
+        val parts = filenameParts(file.filename)
+        val response = client.postMultipart(
+            uploadUrl,
+            files = listOf(
+                MultipartFilePart(
+                    formName = "file",
+                    fileName = parts.cleanName,
+                    content = file.content,
+                    contentType = file.contentType ?: "application/octet-stream",
+                )
+            ),
+            headers = mapOf(
+                "Accept" to "*/*",
+                "X-Requested-With" to "XMLHttpRequest",
+                "Referer" to uploadPageUrl,
+            ) + sessionHeader(),
+        )
+        rememberSession(response)
+        val payload = parseJsonObjectResponse(response, "homework upload")
+        ensurePayloadSuccess(payload, "homework upload", emptyMap())
+
+        val visitName = payload.text("visitName")
+            ?: throw IOException("VE upload response missing visitName")
+        val noExt = urlDecode(payload.text("fileNameNoExt") ?: parts.stem).ifBlank { parts.stem }
+        val ext = payload.text("fileExtName") ?: parts.extension
+        val size = payload.text("fileSize") ?: file.content.size.toString()
+
+        return mapOf(
+            "fileNameNoExt" to urlQuote(noExt),
+            "fileExtName" to ext,
+            "fileSize" to size,
+            "visitName" to visitName,
+            "pid" to "",
+            "ftype" to "insert",
+        )
+    }
+
+    private fun extractHomeworkUploadUrl(html: String, pageUrl: String): String? {
+        val raw = listOf(
+            Regex("""url\s*:\s*["']([^"']*rpUpload\.shtml[^"']*)["']""", RegexOption.IGNORE_CASE),
+            Regex("""["']([^"']*rpUpload\.shtml[^"']*)["']""", RegexOption.IGNORE_CASE),
+        ).firstNotNullOfOrNull { pattern ->
+            pattern.find(html)?.groupValues?.get(1)
+        }?.replace("&amp;", "&")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        return if (raw.startsWith("http", ignoreCase = true)) raw else URI(pageUrl).resolve(raw).toString()
+    }
+
+    private data class FilenameParts(
+        val cleanName: String,
+        val stem: String,
+        val extension: String,
+    )
+
+    private fun filenameParts(filename: String): FilenameParts {
+        val cleanName = filename
+            .trim()
+            .substringAfterLast('\\')
+            .substringAfterLast('/')
+            .ifBlank { "attachment" }
+        val dot = cleanName.lastIndexOf('.')
+        val stem = if (dot > 0) cleanName.substring(0, dot) else cleanName
+        val extension = if (dot > 0 && dot < cleanName.lastIndex - 1) cleanName.substring(dot + 1) else ""
+        return FilenameParts(cleanName, stem.ifBlank { "attachment" }, extension.lowercase())
+    }
+
+    private fun urlQuote(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8.name())
+            .replace("+", "%20")
+            .replace("%7E", "~")
+
+    private fun urlDecode(value: String): String =
+        runCatching { URLDecoder.decode(value, StandardCharsets.UTF_8.name()) }.getOrDefault(value)
+
+    private fun JsonObject.objectList(key: String): List<JsonObject> =
+        runCatching { this[key]?.jsonArray?.mapNotNull { it as? JsonObject }.orEmpty() }.getOrDefault(emptyList())
+
+    private fun JsonObject.int(key: String, default: Int): Int =
+        text(key)?.toIntOrNull() ?: default
+
     private fun JsonObject.text(key: String): String? =
         this[key]?.primitiveText()?.takeIf { it.isNotBlank() }
 
     private fun JsonElement.primitiveText(): String? =
         runCatching { jsonPrimitive.contentOrNull }.getOrNull()?.trim()
 
+}
+
+internal fun courseReplayUserIdCandidates(
+    contextUserId: String?,
+    preferredUserId: String?,
+    listenUserId: String?,
+): List<String> =
+    listOf(contextUserId, preferredUserId, listenUserId)
+        .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+        .distinct()
+
+private fun isCourseReplayUserIdRejected(error: Throwable): Boolean {
+    val message = error.message.orEmpty()
+    return message.contains("/ve/back/rp/common/teachCalendar.shtml") &&
+        Regex("""STATUS\s*=\s*4""", RegexOption.IGNORE_CASE).containsMatchIn(message)
 }

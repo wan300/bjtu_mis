@@ -3,6 +3,8 @@ package cn.edu.bjtu.mis.data.parser
 import cn.edu.bjtu.mis.model.AcademicProgressCourse
 import cn.edu.bjtu.mis.model.AcademicProgressData
 import cn.edu.bjtu.mis.model.CourseEntry
+import cn.edu.bjtu.mis.model.CourseSelectionCourse
+import cn.edu.bjtu.mis.model.CourseSelectionData
 import cn.edu.bjtu.mis.model.CreditBucket
 import cn.edu.bjtu.mis.model.CreditSummary
 import cn.edu.bjtu.mis.model.EmptyRoomData
@@ -13,12 +15,16 @@ import cn.edu.bjtu.mis.model.ExamItem
 import cn.edu.bjtu.mis.model.ProfileField
 import cn.edu.bjtu.mis.model.ProfileSection
 import cn.edu.bjtu.mis.model.ScoreData
+import cn.edu.bjtu.mis.model.ScoreDetailData
+import cn.edu.bjtu.mis.model.ScoreDetailField
+import cn.edu.bjtu.mis.model.ScoreDetailTable
 import cn.edu.bjtu.mis.model.ScoreItem
 import cn.edu.bjtu.mis.model.StudentProfileData
 import cn.edu.bjtu.mis.model.TermOption
 import cn.edu.bjtu.mis.model.TimetableData
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
+import java.net.URI
 
 fun parseSelectOptions(document: Element, fieldName: String): Pair<List<TermOption>, String?> {
     val select = document.selectFirst("select[name=$fieldName], select#$fieldName")
@@ -33,6 +39,234 @@ fun parseSelectOptions(document: Element, fieldName: String): Pair<List<TermOpti
 
 fun parseInputValue(document: Element, fieldName: String): String? =
     document.selectFirst("[name=$fieldName]")?.attr("value")?.let(::normalizeSpace)
+
+data class CourseSelectionAction(
+    val actionUrl: String,
+    val method: String,
+    val fields: Map<String, String>,
+)
+
+data class ParsedCourseSelectionPage(
+    val data: CourseSelectionData,
+    val actions: Map<String, CourseSelectionAction>,
+    val dropActions: Map<String, CourseSelectionAction>,
+)
+
+fun parseCourseSelectionPage(
+    html: String,
+    pageUrl: String = "https://aa.bjtu.edu.cn/course_selection/courseselecttask/selects/",
+): ParsedCourseSelectionPage {
+    val document = Jsoup.parse(html, pageUrl)
+    val selectedCourses = mutableListOf<CourseSelectionCourse>()
+    val availableCourses = mutableListOf<CourseSelectionCourse>()
+    val actions = mutableMapOf<String, CourseSelectionAction>()
+    val dropActions = mutableMapOf<String, CourseSelectionAction>()
+    val submit = submitAction(document, pageUrl)
+    var canSubmit = submit.actionUrl != null
+    var submitError = submit.error
+
+    val selectedTable = document.selectFirst("#selected-container table")
+    directRows(selectedTable).drop(1).forEachIndexed { index, cells ->
+        courseSelectionCourse(cells, selected = true, index = index)?.let { course ->
+            selectedCourses += course
+            dropAction(cells.firstOrNull(), pageUrl, submit.fields)?.let { action ->
+                dropActions[course.key] = action
+            }
+        }
+    }
+
+    val candidateTables = document.select("table.table-bordered").ifEmpty { document.select("table") }
+    val tables = candidateTables.filter { table -> table.parents().none { it.id() == "selected-container" } }
+    val availableTable = tables.getOrNull(1) ?: tables.getOrNull(0)
+
+    directRows(availableTable).drop(1).forEachIndexed { index, cells ->
+        val course = courseSelectionCourse(cells, selected = false, index = index) ?: return@forEachIndexed
+        availableCourses += course
+        val (checkboxName, checkboxValue) = checkboxPayload(cells.firstOrNull())
+        if (submit.actionUrl != null && checkboxName != null) {
+            actions[course.key] = CourseSelectionAction(
+                actionUrl = submit.actionUrl,
+                method = submit.method,
+                fields = submit.fields + (checkboxName to (checkboxValue ?: "on")),
+            )
+        } else if (checkboxName == null) {
+            canSubmit = false
+            submitError = submitError ?: "无法解析选课提交入口：目标课程行没有 checkbox name。"
+        }
+    }
+
+    return ParsedCourseSelectionPage(
+        data = CourseSelectionData(
+            selectedCourses = selectedCourses,
+            availableCourses = availableCourses,
+            canSubmit = canSubmit,
+            submitError = submitError,
+        ),
+        actions = actions,
+        dropActions = dropActions,
+    )
+}
+
+data class CourseSelectionCaptchaForm(
+    val imageUrl: String?,
+    val inputName: String?,
+    val fields: Map<String, String>,
+    val prompt: String?,
+)
+
+fun parseCourseSelectionCaptcha(html: String, pageUrl: String): CourseSelectionCaptchaForm {
+    val document = Jsoup.parse(html, pageUrl)
+    val modal = document.select(".modal, .bootbox").firstOrNull { it.selectFirst("img") != null } ?: document
+    val image = modal.selectFirst("img")
+    val form = image?.parents()?.firstOrNull { it.tagName().equals("form", ignoreCase = true) }
+        ?: document.selectFirst("form")
+    val action = form?.attr("action")?.takeIf { it.isNotBlank() }?.let { resolveUrl(pageUrl, it) } ?: pageUrl
+    val inputName = (form?.select("input") ?: document.select("input"))
+        .firstOrNull { input ->
+            val type = input.attr("type").ifBlank { "text" }.lowercase()
+            val name = normalizeSpace(input.attr("name"))
+            name.isNotBlank() && type !in setOf("hidden", "submit", "button", "checkbox", "radio")
+        }
+        ?.attr("name")
+        ?.let(::normalizeSpace)
+    return CourseSelectionCaptchaForm(
+        imageUrl = image?.attr("src")?.takeIf { it.isNotBlank() }?.let { resolveUrl(pageUrl, it) },
+        inputName = inputName,
+        fields = formFields(form) + ("__action__" to action),
+        prompt = normalizeSpace(modal.text()).takeIf { it.isNotBlank() },
+    )
+}
+
+private data class SubmitAction(
+    val actionUrl: String?,
+    val method: String,
+    val fields: Map<String, String>,
+    val error: String?,
+)
+
+private fun submitAction(document: Element, pageUrl: String): SubmitAction {
+    val submit = document.selectFirst("a.btn-primary, button.btn-primary, input[type=submit]")
+    val form = submit?.parents()?.firstOrNull { it.tagName().equals("form", ignoreCase = true) }
+        ?: document.selectFirst("form")
+    val method = form?.attr("method")?.let(::normalizeSpace)?.lowercase()?.ifBlank { null } ?: "post"
+    val candidates = mutableListOf<String>()
+    if (submit != null) {
+        listOf("data-url", "data-href", "data-action", "formaction", "href").forEach { attr ->
+            val value = normalizeSpace(submit.attr(attr))
+            if (value.isNotBlank() && value != "#" && !value.startsWith("javascript:", ignoreCase = true)) {
+                candidates += value
+            }
+        }
+    }
+    if (form != null) {
+        candidates += form.attr("action").takeIf { it.isNotBlank() } ?: pageUrl
+    }
+    val actionUrl = candidates.firstOrNull()?.let { resolveUrl(pageUrl, it) }
+    return SubmitAction(
+        actionUrl = actionUrl,
+        method = method,
+        fields = formFields(form),
+        error = if (actionUrl == null) "无法解析选课提交入口：页面没有暴露 form/action/data-url。" else null,
+    )
+}
+
+private fun formFields(form: Element?): Map<String, String> {
+    if (form == null) return emptyMap()
+    return form.select("input[name]").mapNotNull { input ->
+        val name = normalizeSpace(input.attr("name"))
+        val type = input.attr("type").lowercase()
+        if (name.isBlank() || type in setOf("checkbox", "radio", "submit", "button", "image", "file")) {
+            null
+        } else {
+            name to input.attr("value")
+        }
+    }.toMap()
+}
+
+private fun checkboxPayload(cell: Element?): Pair<String?, String?> {
+    val checkbox = cell?.selectFirst("input[type=checkbox]") ?: return null to null
+    val name = normalizeSpace(checkbox.attr("name"))
+    if (name.isBlank()) return null to null
+    return name to checkbox.attr("value").ifBlank { "on" }
+}
+
+private fun onclickActionCandidate(value: String): String? =
+    Regex("""["']([^"']*(?:delete|courseselecttask)[^"']*)["']""", RegexOption.IGNORE_CASE)
+        .find(value)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.let(::normalizeSpace)
+        ?.takeIf { it.isNotBlank() && !it.startsWith("javascript:", ignoreCase = true) }
+
+private fun dropAction(cell: Element?, pageUrl: String, baseFields: Map<String, String>): CourseSelectionAction? {
+    val trigger = cell?.selectFirst(".select-delete-btn, [data-pk], [data-url], [data-href], [data-action], [formaction], a, button, input")
+        ?: return null
+    val dataPk = listOf("data-pk", "pk", "value")
+        .firstNotNullOfOrNull { attr -> normalizeSpace(trigger.attr(attr)).takeIf { it.isNotBlank() } }
+    val candidates = mutableListOf<String>()
+    listOf("href", "data-url", "data-href", "data-action", "formaction").forEach { attr ->
+        val value = normalizeSpace(trigger.attr(attr))
+        if (value.isNotBlank() && value != "#" && !value.startsWith("javascript:", ignoreCase = true)) {
+            candidates += value
+        }
+    }
+    onclickActionCandidate(normalizeSpace(trigger.attr("onclick")))?.let(candidates::add)
+    if (candidates.isEmpty() && dataPk != null) {
+        candidates += "/course_selection/courseselecttask/delete/"
+    }
+    val actionUrl = candidates.firstOrNull()?.let { resolveUrl(pageUrl, it) } ?: return null
+    val method = listOf("data-method", "method")
+        .firstNotNullOfOrNull { attr -> normalizeSpace(trigger.attr(attr)).lowercase().takeIf { it.isNotBlank() } }
+        ?: "post"
+    val fields = if (dataPk == null) baseFields else baseFields + ("pk" to dataPk)
+    return CourseSelectionAction(actionUrl = actionUrl, method = method, fields = fields)
+}
+
+private fun courseSelectionCourse(cells: List<Element>, selected: Boolean, index: Int): CourseSelectionCourse? {
+    val texts = cells.map { normalizeSpace(it.text()) }
+    if (texts.size < 2 || texts[1].isBlank()) return null
+    val (key, code, section) = courseSelectionKey(texts[1])
+    val status = texts[0].ifBlank { if (selected) "selected" else "available" }
+    val remainingText = texts.getOrNull(2)?.takeIf { it.isNotBlank() }
+    return CourseSelectionCourse(
+        key = key.ifBlank { "course_$index" },
+        status = status,
+        selected = selected || status.contains("已选") || status.contains("selected", ignoreCase = true),
+        courseName = texts[1],
+        courseCode = code,
+        section = section,
+        remaining = remainingText?.let { Regex("""-?\d+""").find(it)?.value?.toIntOrNull() },
+        remainingText = remainingText,
+        credit = texts.getOrNull(3)?.takeIf { it.isNotBlank() },
+        courseType = texts.getOrNull(4)?.takeIf { it.isNotBlank() },
+        examType = texts.getOrNull(5)?.takeIf { it.isNotBlank() },
+        teacher = texts.getOrNull(6)?.takeIf { it.isNotBlank() },
+        timeLocation = texts.getOrNull(7)?.takeIf { it.isNotBlank() },
+        note = texts.getOrNull(8)?.takeIf { it.isNotBlank() },
+    )
+}
+
+private fun courseSelectionKey(courseName: String): Triple<String, String?, String?> {
+    val text = normalizeSpace(courseName)
+    val code = Regex("""^([A-Za-z]\d+[A-Za-z]?)""").find(text)?.groupValues?.get(1)
+    val section = Regex("""\s(\d{2})(?:\s|$)""").find(text)?.groupValues?.get(1)
+    val key = when {
+        code != null && section != null -> "${code}_$section"
+        code != null -> code
+        else -> text
+    }
+    return Triple(key, code, section)
+}
+
+private fun directRows(table: Element?): List<List<Element>> {
+    if (table == null) return emptyList()
+    return table.select("tr").mapNotNull { row ->
+        row.select("> th, > td").takeIf { it.isNotEmpty() }
+    }
+}
+
+private fun resolveUrl(baseUrl: String, value: String): String =
+    URI(baseUrl).resolve(value.trim()).toString()
 
 fun parseTimetable(html: String): TimetableData {
     val document = Jsoup.parse(html)
@@ -106,8 +340,10 @@ fun parseExams(html: String, requestedTerm: String? = null): ExamData {
 fun parseScores(html: String, requestedTerm: String? = null): ScoreData {
     val document = Jsoup.parse(html)
     val (options, currentTerm) = parseSelectOptions(document, "zxjxjhh")
-    val rows = document.selectFirst("table.table, table")?.let(::tableRows).orEmpty()
-    val items = rows.drop(1).mapNotNull { cells ->
+    val rows = document.selectFirst("table.table, table")?.select("> tbody > tr, > tr").orEmpty()
+    val items = rows.drop(1).mapNotNull { row ->
+        val cellNodes = row.select("> th, > td")
+        val cells = cellNodes.map { normalizeSpace(it.text()) }
         if (cells.size < 7) return@mapNotNull null
         ScoreItem(
             term = requestedTerm ?: cells.getOrNull(1) ?: currentTerm,
@@ -117,9 +353,115 @@ fun parseScores(html: String, requestedTerm: String? = null): ScoreData {
             bonusScore = cells.getOrNull(5),
             teacher = cells.getOrNull(6),
             detail = cells.getOrNull(7),
+            detailPath = cellNodes.getOrNull(7)?.let(::extractScoreDetailPath),
         )
     }
     return ScoreData(currentTerm = requestedTerm ?: currentTerm, availableTerms = options, items = items)
+}
+
+private fun extractScoreDetailPath(cell: Element): String? {
+    val candidates = mutableListOf<String>()
+    cell.select("a").forEach { link ->
+        listOf("href", "data-url", "data-href").forEach { attr ->
+            normalizeSpace(link.attr(attr)).takeIf { it.isNotBlank() }?.let(candidates::add)
+        }
+        normalizeSpace(link.attr("onclick")).takeIf { it.isNotBlank() }?.let(candidates::add)
+    }
+    candidates += cell.html()
+
+    for (candidate in candidates) {
+        cleanScoreDetailCandidate(candidate)?.let { return it }
+        Regex("""["']([^"']*(?:score|cj|grade)[^"']*)["']""", RegexOption.IGNORE_CASE)
+            .findAll(candidate)
+            .forEach { match ->
+                cleanScoreDetailCandidate(match.groupValues[1])?.let { return it }
+            }
+    }
+    return null
+}
+
+private fun cleanScoreDetailCandidate(value: String): String? {
+    var cleaned = normalizeSpace(value)
+    if (cleaned.isBlank() || cleaned == "#" || cleaned.startsWith("javascript:void", ignoreCase = true) || cleaned.startsWith("void(", ignoreCase = true)) {
+        return null
+    }
+    if (cleaned.startsWith("javascript:", ignoreCase = true)) {
+        cleaned = cleaned.substringAfter(':')
+    }
+    val urlMatch = Regex("""(https?://aa\.bjtu\.edu\.cn/[^\s"'<>]+|/[^\s"'<>]*(?:score|cj|grade)[^\s"'<>]*)""", RegexOption.IGNORE_CASE)
+        .find(cleaned)
+    if (urlMatch != null) return urlMatch.value.trimEnd(')', ';', ',')
+    if (Regex("""(?:score|cj|grade)""", RegexOption.IGNORE_CASE).containsMatchIn(cleaned) && !Regex("""\s""").containsMatchIn(cleaned)) {
+        return cleaned.trimEnd(')', ';', ',')
+    }
+    return null
+}
+
+fun parseScoreDetail(html: String): ScoreDetailData {
+    val document = Jsoup.parse(html)
+    val title = scoreDetailTitle(document)
+    val fields = mutableListOf<ScoreDetailField>()
+    val tables = mutableListOf<ScoreDetailTable>()
+    val seenFields = mutableSetOf<Pair<String, String>>()
+
+    fun addField(label: String, value: String) {
+        val cleanedLabel = normalizeSpace(label).trimEnd(':', '：')
+        val cleanedValue = normalizeSpace(value)
+        if (cleanedLabel.isBlank() || cleanedValue.isBlank()) return
+        val key = cleanedLabel to cleanedValue
+        if (!seenFields.add(key)) return
+        fields += ScoreDetailField(label = cleanedLabel, value = cleanedValue)
+    }
+
+    document.select("table").forEach { table ->
+        val rows = tableRows(table)
+        if (rows.isEmpty()) return@forEach
+
+        rows.forEach { row ->
+            if (row.size >= 2 && row.size % 2 == 0) {
+                row.chunked(2).forEach { pair ->
+                    if (pair[0].length <= 32) addField(pair[0], pair[1])
+                }
+            }
+        }
+
+        val headerCells = table.selectFirst("tr")?.select("> th, > td").orEmpty()
+        val hasHeader = headerCells.isNotEmpty() && headerCells.all { it.tagName().equals("th", ignoreCase = true) }
+        val headers = if (hasHeader) rows.first() else emptyList()
+        val bodyRows = if (hasHeader) rows.drop(1) else rows
+        val isFieldTable = !hasHeader && rows.all { row -> row.size >= 2 && row.size % 2 == 0 }
+        if (bodyRows.isNotEmpty() && !isFieldTable) {
+            tables += ScoreDetailTable(
+                title = tableTitle(table),
+                headers = headers,
+                rows = bodyRows,
+            )
+        }
+    }
+
+    val rawText = normalizeSpace(document.text()).let { if (it.length > 4000) "${it.take(4000)}..." else it }
+    return ScoreDetailData(
+        title = title,
+        fields = fields,
+        tables = tables,
+        rawText = rawText.ifBlank { null },
+    )
+}
+
+private fun scoreDetailTitle(document: Element): String? {
+    listOf(".modal-title", "h1", "h2", "h3", "legend", "title").forEach { selector ->
+        val text = normalizeSpace(document.selectFirst(selector)?.text())
+        if (text.isNotBlank()) return text
+    }
+    return null
+}
+
+private fun tableTitle(table: Element): String? {
+    normalizeSpace(table.selectFirst("caption")?.text()).takeIf { it.isNotBlank() }?.let { return it }
+    val heading = table.previousElementSiblings().firstOrNull { sibling ->
+        sibling.tagName().lowercase() in setOf("h1", "h2", "h3", "h4", "legend")
+    }
+    return normalizeSpace(heading?.text()).takeIf { it.isNotBlank() }
 }
 
 fun parseStudentStatusProfile(html: String): StudentProfileData {

@@ -33,6 +33,19 @@ class InlineLoginRequest(BaseModel):
     captcha: str = Field(min_length=1, max_length=16)
 
 
+class AutoLoginRequest(BaseModel):
+    loginname: str | None = Field(default=None, min_length=1, max_length=128)
+    password: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class AutoLoginResponse(BaseModel):
+    status: str
+    message: str | None = None
+    attempts: int = 0
+    session: SessionStatusResponse | None = None
+    captcha: SessionCaptchaResponse | None = None
+
+
 class TermOption(BaseModel):
     value: str
     label: str
@@ -52,6 +65,63 @@ class CourseEntry(BaseModel):
     building: str | None = None
     room: str | None = None
     location_text: str | None = None
+
+
+class CourseSelectionCourse(BaseModel):
+    key: str
+    status: str
+    selected: bool = False
+    course_name: str
+    course_code: str | None = None
+    section: str | None = None
+    remaining: int | None = None
+    remaining_text: str | None = None
+    credit: str | None = None
+    course_type: str | None = None
+    exam_type: str | None = None
+    teacher: str | None = None
+    time_location: str | None = None
+    note: str | None = None
+
+
+class CourseSelectionData(BaseModel):
+    selected_courses: list[CourseSelectionCourse] = Field(default_factory=list)
+    available_courses: list[CourseSelectionCourse] = Field(default_factory=list)
+    can_submit: bool = False
+    submit_error: str | None = None
+
+
+class CourseSelectionCaptchaChallenge(BaseModel):
+    challenge_id: str
+    image_data_url: str
+    prompt: str | None = None
+    fetched_at: str
+
+
+class CourseSelectionAttemptRequest(BaseModel):
+    course_key: str | None = Field(default=None, max_length=256)
+    course_name: str | None = Field(default=None, max_length=256)
+    captcha_challenge_id: str | None = Field(default=None, max_length=128)
+    captcha: str | None = Field(default=None, max_length=32)
+
+
+class CourseSelectionDropRequest(BaseModel):
+    course_key: str | None = Field(default=None, max_length=256)
+    course_name: str | None = Field(default=None, max_length=256)
+
+
+class CourseSelectionReplaceRequest(BaseModel):
+    target_course_key: str | None = Field(default=None, max_length=256)
+    target_course_name: str | None = Field(default=None, max_length=256)
+    drop_course_key: str | None = Field(default=None, max_length=256)
+    drop_course_name: str | None = Field(default=None, max_length=256)
+
+
+class CourseSelectionAttemptResult(BaseModel):
+    status: str
+    message: str | None = None
+    course: CourseSelectionCourse | None = None
+    captcha_challenge: CourseSelectionCaptchaChallenge | None = None
 
 
 class TimetableData(BaseModel):
@@ -86,12 +156,31 @@ class ScoreItem(BaseModel):
     bonus_score: str | None = None
     teacher: str | None = None
     detail: str | None = None
+    detail_path: str | None = None
 
 
 class ScoreData(BaseModel):
     current_term: str | None = None
     available_terms: list[TermOption] = Field(default_factory=list)
     items: list[ScoreItem] = Field(default_factory=list)
+
+
+class ScoreDetailField(BaseModel):
+    label: str
+    value: str
+
+
+class ScoreDetailTable(BaseModel):
+    title: str | None = None
+    headers: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
+
+
+class ScoreDetailData(BaseModel):
+    title: str | None = None
+    fields: list[ScoreDetailField] = Field(default_factory=list)
+    tables: list[ScoreDetailTable] = Field(default_factory=list)
+    raw_text: str | None = None
 
 
 class CalendarItem(BaseModel):
@@ -287,6 +376,137 @@ class EmptyRoomData(BaseModel):
     periods: list[int] = Field(default_factory=list)
     slots: list[EmptyRoomSlotHeader] = Field(default_factory=list)
     rooms: list[EmptyRoomRow] = Field(default_factory=list)
+
+
+class MailFolder(BaseModel):
+    folder_id: str
+    name: str
+    message_count: int = 0
+    unread_count: int = 0
+    message_size: int = 0
+    unread_size: int = 0
+    system: bool = False
+
+
+class MailMessageSummary(BaseModel):
+    message_id: str
+    folder_id: str
+    subject: str = ""
+    from_text: str = ""
+    to_text: str = ""
+    sender: str | None = None
+    sent_at: str | None = None
+    received_at: str | None = None
+    modified_at: str | None = None
+    size: int = 0
+    read: bool = False
+    attached: bool = False
+    priority: int | None = None
+    summary: str | None = None
+
+
+class MailAttachment(BaseModel):
+    attachment_id: str
+    filename: str
+    content_type: str | None = None
+    size: int = 0
+    part: str
+
+
+class MailMessageDetail(BaseModel):
+    message_id: str
+    folder_id: str
+    subject: str = ""
+    from_text: str = ""
+    to_text: str = ""
+    sender: str | None = None
+    sent_at: str | None = None
+    received_at: str | None = None
+    modified_at: str | None = None
+    size: int = 0
+    read: bool = False
+    attached: bool = False
+    priority: int | None = None
+    summary: str | None = None
+    from_list: list[str] = Field(default_factory=list)
+    to_list: list[str] = Field(default_factory=list)
+    cc_list: list[str] = Field(default_factory=list)
+    bcc_list: list[str] = Field(default_factory=list)
+    html_content: str = ""
+    headers: dict[str, Any] = Field(default_factory=dict)
+    attachments: list[MailAttachment] = Field(default_factory=list)
+
+
+class MailDeleteRequest(BaseModel):
+    message_ids: list[str] = Field(min_length=1, max_length=100)
+    mboxa: str = ""
+
+
+class MailDeleteResponse(BaseModel):
+    status: str
+    message_ids: list[str] = Field(default_factory=list)
+    target_folder_id: str = "4"
+    upstream: dict[str, Any] = Field(default_factory=dict)
+
+
+class MailAttachmentUploadResponse(BaseModel):
+    status: str
+    compose_id: str
+    attachment: MailAttachment
+    upstream: dict[str, Any] = Field(default_factory=dict)
+
+
+class MailComposeAttachment(BaseModel):
+    attachment_id: str
+    filename: str
+    size: int = 0
+    content_type: str | None = None
+    type: str = "upload"
+    security_level: str | None = None
+
+
+class MailComposeBaseRequest(BaseModel):
+    compose_id: str | None = None
+    account: str | None = None
+    to: list[str] = Field(default_factory=list, max_length=200)
+    cc: list[str] = Field(default_factory=list, max_length=200)
+    bcc: list[str] = Field(default_factory=list, max_length=200)
+    subject: str = Field(default="", max_length=512)
+    content: str | None = None
+    html_content: str | None = None
+    is_html: bool = True
+    attachments: list[MailComposeAttachment] = Field(default_factory=list, max_length=100)
+    save_sent_copy: bool = True
+    request_read_receipt: bool = False
+    schedule_date: str | None = None
+    show_one_rcpt: bool = False
+    forbid_download: bool = False
+    mboxa: str = ""
+
+
+class MailSendRequest(MailComposeBaseRequest):
+    autosave_hit_counter: bool = True
+
+
+class MailDraftSaveRequest(MailComposeBaseRequest):
+    pass
+
+
+class MailComposeResponse(BaseModel):
+    status: str
+    compose_id: str
+    draft_id: str | None = None
+    sent_message_id: str | None = None
+    upstream: dict[str, Any] = Field(default_factory=dict)
+
+
+class MailContactSuggestion(BaseModel):
+    contact_id: str | None = None
+    display_name: str = ""
+    email: str = ""
+    type: str | None = None
+    location: str | None = None
+    raw: dict[str, Any] = Field(default_factory=dict)
 
 
 class ModuleEnvelope(BaseModel):

@@ -4,7 +4,7 @@ import { NH2, NP, NTag, NInput, NButton, NTable, NAlert, NSpace } from 'naive-ui
 import { useModuleData } from '../composables/useModuleData'
 import { useSession } from '../composables/useSession'
 
-const { payloads, moduleErrors, loadEmptyRooms } = useModuleData()
+const { payloads, moduleErrors, loadCalendar, loadEmptyRooms } = useModuleData()
 const { isSessionReady } = useSession()
 
 const filters = reactive({
@@ -14,13 +14,57 @@ const filters = reactive({
   room: ''
 })
 
+function textValue(value) {
+  return value == null ? '' : `${value}`.trim()
+}
+
+function emptyRoomsPayloadWeek() {
+  return textValue(payloads.emptyRooms?.source_params?.week || payloads.emptyRooms?.data?.query?.week)
+}
+
+function currentCalendarWeek() {
+  return textValue(payloads.calendar?.data?.current_week)
+}
+
+function applyDefaultWeek() {
+  if (!textValue(filters.week)) {
+    filters.week = currentCalendarWeek() || emptyRoomsPayloadWeek()
+  }
+}
+
+function syncWeekFromPayload() {
+  const week = emptyRoomsPayloadWeek()
+  if (week) {
+    filters.week = week
+  }
+}
+
+async function prepareDefaultWeek() {
+  if (!payloads.calendar?.data) {
+    try {
+      await loadCalendar()
+    } catch {
+      // The empty-rooms API resolves the current teaching week server-side too.
+    }
+  }
+  applyDefaultWeek()
+}
+
 async function handleLoad() {
+  await prepareDefaultWeek()
   await loadEmptyRooms(filters)
+  syncWeekFromPayload()
 }
 
 onMounted(async () => {
-  if (isSessionReady.value && !payloads.emptyRooms?.data) {
-    await loadEmptyRooms()
+  if (isSessionReady.value) {
+    await prepareDefaultWeek()
+    const payloadWeek = emptyRoomsPayloadWeek()
+    const targetWeek = textValue(filters.week)
+    if (!payloads.emptyRooms?.data || !payloadWeek || (targetWeek && payloadWeek !== targetWeek)) {
+      await loadEmptyRooms(filters)
+    }
+    syncWeekFromPayload()
   }
 })
 </script>

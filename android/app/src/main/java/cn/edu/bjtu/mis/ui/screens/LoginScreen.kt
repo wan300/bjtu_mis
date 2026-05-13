@@ -2,7 +2,9 @@ package cn.edu.bjtu.mis.ui.screens
 
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,17 +15,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,10 +36,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import cn.edu.bjtu.mis.data.repository.SessionRepository
+import cn.edu.bjtu.mis.model.AutoLoginStatus
 import kotlinx.coroutines.launch
 
 @Composable
@@ -48,6 +57,7 @@ fun LoginScreen(
     var captchaText by remember { mutableStateOf("") }
     var captchaDataUrl by remember { mutableStateOf<String?>(null) }
     var fetchedAt by remember { mutableStateOf<String?>(null) }
+    var showManualCaptcha by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -66,27 +76,102 @@ fun LoginScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        loadCaptcha()
+    fun submitAutoLogin() {
+        scope.launch {
+            busy = true
+            error = null
+            runCatching { sessionRepository.loginAuto(loginName, password) }
+                .onSuccess { result ->
+                    when (result.status) {
+                        AutoLoginStatus.Ready -> onLoggedIn()
+                        AutoLoginStatus.ManualRequired -> {
+                            showManualCaptcha = true
+                            captchaDataUrl = result.captcha?.imageDataUrl
+                            fetchedAt = result.captcha?.fetchedAt
+                            captchaText = ""
+                            error = result.message
+                        }
+                        AutoLoginStatus.AutoFailed -> error = result.message ?: "自动登录失败"
+                    }
+                }
+                .onFailure { error = it.message ?: "自动登录失败" }
+            busy = false
+        }
+    }
+
+    fun submitManualLogin() {
+        scope.launch {
+            busy = true
+            error = null
+            runCatching { sessionRepository.login(loginName, password, captchaText) }
+                .onSuccess { onLoggedIn() }
+                .onFailure {
+                    error = it.message ?: "登录失败"
+                    showManualCaptcha = true
+                    loadCaptcha()
+                }
+            busy = false
+        }
     }
 
     Box(
         Modifier
             .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(Color(0xFFEAF4FF), Color(0xFFF6F8FC), Color.White),
+                ),
+            )
             .padding(18.dp),
         contentAlignment = Alignment.Center,
     ) {
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 420.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = MaterialTheme.shapes.large,
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text("BJTU MIS", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
-                    Text("校园信息本地采集与离线查看", style = MaterialTheme.typography.bodyMedium)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(58.dp)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color(0xFF045BC8), Color(0xFF0B74F6)),
+                                ),
+                                MaterialTheme.shapes.large,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "北",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Text(
+                        "BJTU MIS",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "校园信息本地采集与离线查看",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 OutlinedTextField(
                     value = loginName,
@@ -95,6 +180,8 @@ fun LoginScreen(
                     label = { Text("学号 / 工号") },
                     singleLine = true,
                     enabled = !busy,
+                    shape = MaterialTheme.shapes.medium,
+                    colors = loginTextFieldColors(),
                 )
                 OutlinedTextField(
                     value = password,
@@ -104,65 +191,91 @@ fun LoginScreen(
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     enabled = !busy,
+                    shape = MaterialTheme.shapes.medium,
+                    colors = loginTextFieldColors(),
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = captchaText,
-                        onValueChange = { captchaText = it },
-                        modifier = Modifier.weight(1f),
-                        label = { Text("验证码") },
-                        singleLine = true,
-                        enabled = !busy,
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    CaptchaImage(
-                        dataUrl = captchaDataUrl,
-                        modifier = Modifier
-                            .width(132.dp)
-                            .height(48.dp)
-                            .clickable(enabled = !busy) { loadCaptcha() },
-                    )
-                }
-                if (!fetchedAt.isNullOrBlank()) {
-                    Text("验证码更新时间：$fetchedAt", style = MaterialTheme.typography.bodySmall)
+                if (showManualCaptcha) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = captchaText,
+                            onValueChange = { captchaText = it },
+                            modifier = Modifier.weight(1f),
+                            label = { Text("验证码") },
+                            singleLine = true,
+                            enabled = !busy,
+                            shape = MaterialTheme.shapes.medium,
+                            colors = loginTextFieldColors(),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        CaptchaImage(
+                            dataUrl = captchaDataUrl,
+                            modifier = Modifier
+                                .width(118.dp)
+                                .height(48.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium)
+                                .clickable(enabled = !busy) { loadCaptcha() },
+                        )
+                    }
+                    if (!fetchedAt.isNullOrBlank()) {
+                        Text("验证码更新时间：$fetchedAt", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
                 if (!error.isNullOrBlank()) {
                     Text(error.orEmpty(), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                 }
                 Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !busy && loginName.isNotBlank() && password.isNotBlank() && captchaText.isNotBlank(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    enabled = !busy &&
+                        loginName.isNotBlank() &&
+                        password.isNotBlank() &&
+                        (!showManualCaptcha || captchaText.isNotBlank()),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     onClick = {
-                        scope.launch {
-                            busy = true
-                            error = null
-                            runCatching { sessionRepository.login(loginName, password, captchaText) }
-                                .onSuccess { onLoggedIn() }
-                                .onFailure {
-                                    error = it.message ?: "登录失败"
-                                    loadCaptcha()
-                                }
-                            busy = false
+                        if (showManualCaptcha) {
+                            submitManualLogin()
+                        } else {
+                            submitAutoLogin()
                         }
                     },
                 ) {
                     if (busy) {
-                        CircularProgressIndicator(Modifier.width(18.dp).height(18.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
                     } else {
-                        Text("登录")
+                        Text(if (showManualCaptcha) "提交验证码登录" else "自动登录")
                     }
                 }
-                OutlinedButton(
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !busy,
-                    onClick = { loadCaptcha() },
-                ) {
-                    Text("刷新验证码")
+                if (showManualCaptcha) {
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !busy,
+                        shape = MaterialTheme.shapes.medium,
+                        onClick = { loadCaptcha() },
+                    ) {
+                        Text("刷新验证码")
+                    }
                 }
             }
         }
     }
 }
+
+@Composable
+private fun loginTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = MaterialTheme.colorScheme.primary,
+    focusedLabelColor = MaterialTheme.colorScheme.primary,
+    cursorColor = MaterialTheme.colorScheme.primary,
+    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+    focusedContainerColor = MaterialTheme.colorScheme.surface,
+    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+)
 
 @Composable
 private fun CaptchaImage(dataUrl: String?, modifier: Modifier = Modifier) {

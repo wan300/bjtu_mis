@@ -32,6 +32,13 @@ def utcnow_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _clean_text_param(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,7 +65,7 @@ class SyncService:
                 ve = VEProvider(client)
 
                 calendar = await self._fetch_and_store("calendar", ve.fetch_calendar, summary, error_parts)
-                current_week = calendar.get("data", {}).get("current_week") if calendar else None
+                current_week = _clean_text_param(calendar.get("data", {}).get("current_week")) if calendar else None
                 current_term = calendar.get("data", {}).get("current_term") if calendar else None
 
                 await self._fetch_and_store("profile", aa.fetch_student_profile, summary, error_parts)
@@ -86,7 +93,7 @@ class SyncService:
                     aa.fetch_empty_rooms,
                     summary,
                     error_parts,
-                    week=current_week or 8,
+                    week=current_week,
                 )
         except SessionExpiredError as exc:
             finished_at = utcnow_iso()
@@ -179,8 +186,29 @@ class SyncService:
             }
         return latest
 
+    def is_sync_running(self) -> bool:
+        return self.settings.sync_lock_path.exists()
+
+    async def run_sync_safely(self) -> None:
+        try:
+            await self.run_sync()
+        except SyncAlreadyRunningError:
+            return
+        except SessionExpiredError:
+            return
+        except Exception:
+            logger.exception("Background sync failed")
+
     def get_snapshot(self, module_key: str) -> dict[str, Any] | None:
         return self.db.get_snapshot(module_key)
+
+    def get_snapshots(self) -> dict[str, dict[str, Any]]:
+        return self.db.get_snapshots()
+
+    def get_current_calendar_week(self) -> str | None:
+        snapshot = self.get_snapshot("calendar")
+        data = snapshot.get("data", {}) if snapshot else {}
+        return _clean_text_param(data.get("current_week"))
 
     async def fetch_live_module(self, module_key: str, **params) -> dict[str, Any]:
         try:
@@ -211,11 +239,23 @@ class SyncService:
                         search=params.get("search"),
                     )
                 elif module_key == "empty_rooms":
+                    term = _clean_text_param(params.get("term"))
+                    week = _clean_text_param(params.get("week"))
+                    building = _clean_text_param(params.get("building"))
+                    room = _clean_text_param(params.get("room"))
+                    if week is None and term is None and building is None and room is None:
+                        week = self.get_current_calendar_week()
+                        if week is None:
+                            try:
+                                calendar = await ve.fetch_calendar()
+                                week = _clean_text_param(calendar.data.current_week)
+                            except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+                                logger.warning("Current teaching week lookup failed, falling back to AA default: %s", exc)
                     envelope = await aa.fetch_empty_rooms(
-                        term=params.get("term"),
-                        week=params.get("week"),
-                        building=params.get("building"),
-                        room=params.get("room"),
+                        term=term,
+                        week=week,
+                        building=building,
+                        room=room,
                     )
                 else:
                     raise KeyError(f"Unsupported module: {module_key}")

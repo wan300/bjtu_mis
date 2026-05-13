@@ -1,6 +1,7 @@
 package cn.edu.bjtu.mis.data.network
 
 import cn.edu.bjtu.mis.data.AppJson
+import cn.edu.bjtu.mis.data.perf.PerfTrace
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
@@ -8,6 +9,8 @@ import okhttp3.FormBody
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -37,6 +40,13 @@ data class FileResponse(
     val file: File,
     val headers: Headers,
     val bytesWritten: Long,
+)
+
+data class MultipartFilePart(
+    val formName: String,
+    val fileName: String,
+    val content: ByteArray,
+    val contentType: String? = null,
 )
 
 class BjtuHttpClient(
@@ -75,6 +85,7 @@ class BjtuHttpClient(
     suspend fun postForm(
         url: String,
         form: Map<String, String>,
+        params: Map<String, String?> = emptyMap(),
         headers: Map<String, String> = emptyMap(),
     ): TextResponse {
         val body = FormBody.Builder().apply {
@@ -82,7 +93,34 @@ class BjtuHttpClient(
         }.build()
         return executeText(
             Request.Builder()
-                .url(url)
+                .url(buildUrl(url, params))
+                .headers(headers.toHeaders())
+                .post(body)
+                .build()
+        )
+    }
+
+    suspend fun postMultipart(
+        url: String,
+        files: List<MultipartFilePart>,
+        params: Map<String, String?> = emptyMap(),
+        headers: Map<String, String> = emptyMap(),
+    ): TextResponse {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .apply {
+                files.forEach { file ->
+                    addFormDataPart(
+                        file.formName,
+                        file.fileName,
+                        file.content.toRequestBody(file.contentType?.toMediaTypeOrNull()),
+                    )
+                }
+            }
+            .build()
+        return executeText(
+            Request.Builder()
+                .url(buildUrl(url, params))
                 .headers(headers.toHeaders())
                 .post(body)
                 .build()
@@ -94,11 +132,12 @@ class BjtuHttpClient(
         json: String,
         params: Map<String, String?> = emptyMap(),
         headers: Map<String, String> = emptyMap(),
+        contentType: String = "application/json; charset=utf-8",
     ): TextResponse = executeText(
         Request.Builder()
             .url(buildUrl(url, params))
             .headers(headers.toHeaders())
-            .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .post(json.toRequestBody(contentType.toMediaType()))
             .build()
     )
 
@@ -202,7 +241,13 @@ class BjtuHttpClient(
 
     private fun executeCall(request: Request) =
         try {
-            client.newCall(request).execute()
+            val startedAt = PerfTrace.nowMillis()
+            client.newCall(request).execute().also { response ->
+                PerfTrace.mark(
+                    "http",
+                    "${request.method} ${request.url.host}${request.url.encodedPath} ${response.code} ${PerfTrace.nowMillis() - startedAt}ms",
+                )
+            }
         } catch (error: UnknownHostException) {
             throw IOException(
                 "无法解析域名 ${request.url.host}。请检查模拟器网络、系统 Private DNS，或连接可访问北交大 MIS 的网络后重试。",

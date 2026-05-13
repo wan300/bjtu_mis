@@ -1,5 +1,20 @@
 <script setup>
-import { NConfigProvider, NDialogProvider, NMessageProvider } from 'naive-ui'
+import { useRouter } from 'vue-router'
+import { NButton, NCard, NConfigProvider, NDialogProvider, NMessageProvider, NModal, NP, NSpace } from 'naive-ui'
+import { useSession } from './composables/useSession'
+
+const router = useRouter()
+const {
+  autoReloginFailure,
+  busy,
+  continueSavedAutoLogin,
+  dismissAutoReloginFailure
+} = useSession()
+
+function goToLogin() {
+  dismissAutoReloginFailure()
+  router.push('/login')
+}
 
 const themeOverrides = {
   common: {
@@ -69,7 +84,31 @@ const themeOverrides = {
     <NMessageProvider>
       <NDialogProvider>
         <router-view />
+        <NModal v-model:show="autoReloginFailure.visible" :mask-closable="true">
+          <NCard class="auto-login-modal" title="自动重新登录失败" :bordered="false" role="dialog" aria-modal="true">
+            <NP>{{ autoReloginFailure.message || '已连续重试 3 次，当前会话仍不可用。' }}</NP>
+            <template #footer>
+              <NSpace justify="end">
+                <NButton :disabled="busy.login" @click="dismissAutoReloginFailure">
+                  稍后处理
+                </NButton>
+                <NButton :disabled="busy.login" @click="goToLogin">
+                  重新登录
+                </NButton>
+                <NButton type="primary" :loading="busy.login" @click="continueSavedAutoLogin">
+                  继续重试
+                </NButton>
+              </NSpace>
+            </template>
+          </NCard>
+        </NModal>
       </NDialogProvider>
     </NMessageProvider>
   </NConfigProvider>
 </template>
+
+<style scoped>
+.auto-login-modal {
+  width: min(420px, calc(100vw - 32px));
+}
+</style>

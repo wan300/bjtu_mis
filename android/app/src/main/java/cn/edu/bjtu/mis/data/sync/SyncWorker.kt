@@ -19,6 +19,7 @@ class SyncWorker(
         val app = applicationContext as BjtuMisApplication
         return runCatching {
             app.container.syncRepository.runSync()
+            runCatching { app.container.homeworkReminderRunner.checkSnapshot() }
             Result.success()
         }.getOrElse {
             Result.retry()
