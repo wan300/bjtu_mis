@@ -10,13 +10,19 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+interface SessionCookieStore {
+    fun save(plainText: String)
+    fun load(): String?
+    fun clear()
+}
+
 class SecureCookieStore(
     context: Context,
     private val alias: String = "bjtu_mis_cookie_key",
-) {
+) : SessionCookieStore {
     private val file: File = File(context.filesDir, "session_cookies.bin")
 
-    fun save(plainText: String) {
+    override fun save(plainText: String) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
         val iv = cipher.iv
@@ -24,7 +30,7 @@ class SecureCookieStore(
         file.writeBytes(iv + encrypted)
     }
 
-    fun load(): String? {
+    override fun load(): String? {
         if (!file.exists()) return null
         val payload = file.readBytes()
         if (payload.size <= IV_SIZE) return null
@@ -37,7 +43,7 @@ class SecureCookieStore(
         }.getOrNull()
     }
 
-    fun clear() {
+    override fun clear() {
         file.delete()
     }
 

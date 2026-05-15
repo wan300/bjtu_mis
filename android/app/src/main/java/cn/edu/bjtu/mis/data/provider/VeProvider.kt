@@ -484,6 +484,7 @@ class VeProvider(private val client: BjtuHttpClient) {
         courseSchedId: String,
         userId: String? = null,
         timeTableId: String? = null,
+        videoId: String? = null,
     ): CourseReplayPlaybackInfo {
         ensureStrictFlow("course replay playback")
         val currentTerm = term ?: parseCalendarTerms(
@@ -507,7 +508,12 @@ class VeProvider(private val client: BjtuHttpClient) {
         if (userIdCandidates.isEmpty()) {
             throw IllegalStateException("无法获取课程回放播放身份，请刷新课程回放后重试")
         }
-        val (payload, platformUserId) = getCourseReplayDetailPayload(courseSchedId, userIdCandidates)
+        val (payload, platformUserId) = getCourseReplayDetailPayload(
+            courseSchedId = courseSchedId,
+            userIdCandidates = userIdCandidates,
+            timeTableId = timeTableId,
+            videoId = videoId,
+        )
         return parseCourseReplayPlayback(
             payload = payload,
             courseSchedId = courseSchedId,
@@ -522,23 +528,37 @@ class VeProvider(private val client: BjtuHttpClient) {
     private suspend fun getCourseReplayDetailPayload(
         courseSchedId: String,
         userIdCandidates: List<String>,
+        timeTableId: String? = null,
+        videoId: String? = null,
     ): Pair<JsonObject, String> {
         var lastError: Throwable? = null
-        userIdCandidates.forEach { candidate ->
-            try {
-                val payload = getJsonObject(
-                    "/ve/back/rp/common/teachCalendar.shtml",
-                    mapOf(
-                        "method" to "toDisplyCourseSchedDetail",
-                        "courseSchedId" to courseSchedId,
-                        "userLevel" to "1",
-                        "userId" to candidate,
-                    ),
+        val hasLessonIdentity = !videoId.isNullOrBlank() || !timeTableId.isNullOrBlank()
+        val detailParamVariants = buildList {
+            add(
+                courseReplayDetailParams(
+                    courseSchedId = courseSchedId,
+                    userId = "",
+                    videoId = videoId,
+                    timeTableId = timeTableId,
                 )
-                return payload to candidate
-            } catch (error: Throwable) {
-                lastError = error
-                if (!isCourseReplayUserIdRejected(error)) throw error
+            )
+            if (hasLessonIdentity) {
+                add(courseReplayDetailParams(courseSchedId = courseSchedId, userId = ""))
+            }
+        }
+
+        detailParamVariants.forEach { baseParams ->
+            userIdCandidates.forEach { candidate ->
+                try {
+                    val payload = getJsonObject(
+                        "/ve/back/rp/common/teachCalendar.shtml",
+                        baseParams + ("userId" to candidate),
+                    )
+                    return payload to candidate
+                } catch (error: Throwable) {
+                    lastError = error
+                    if (!isCourseReplayUserIdRejected(error)) throw error
+                }
             }
         }
         if (lastError?.let(::isCourseReplayUserIdRejected) == true) {
@@ -951,7 +971,12 @@ class VeProvider(private val client: BjtuHttpClient) {
         ) {
             return
         }
-        throw IllegalStateException("VE payload $path STATUS=${payload.text("STATUS")} ERRMSG=${payload.text("ERRMSG") ?: payload.text("message").orEmpty()}")
+        throw VePayloadStatusException(
+            path = path,
+            status = payload.text("STATUS").orEmpty(),
+            errorMessage = payload.text("ERRMSG") ?: payload.text("message").orEmpty(),
+            params = params,
+        )
     }
 
     private fun rememberSession(response: TextResponse) {
@@ -1133,7 +1158,37 @@ internal fun courseReplayUserIdCandidates(
         .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
         .distinct()
 
+internal fun courseReplayDetailParams(
+    courseSchedId: String,
+    userId: String,
+    videoId: String? = null,
+    timeTableId: String? = null,
+): Map<String, String?> = buildMap {
+    put("method", "toDisplyCourseSchedDetail")
+    put("courseSchedId", courseSchedId.trim())
+    put("userLevel", "1")
+    put("userId", userId.trim())
+    videoId?.trim()?.takeIf(String::isNotBlank)?.let { put("videoId", it) }
+    timeTableId?.trim()?.takeIf(String::isNotBlank)?.let {
+        put("uuid", it)
+        put("timeTableId", it)
+        put("timetableId", it)
+    }
+}
+
+private class VePayloadStatusException(
+    val path: String,
+    val status: String,
+    val errorMessage: String,
+    val params: Map<String, String?>,
+) : IllegalStateException("VE payload $path STATUS=$status ERRMSG=$errorMessage")
+
 private fun isCourseReplayUserIdRejected(error: Throwable): Boolean {
+    if (error is VePayloadStatusException) {
+        return error.path == "/ve/back/rp/common/teachCalendar.shtml" &&
+            error.params["method"] == "toDisplyCourseSchedDetail" &&
+            error.status.trim() == "4"
+    }
     val message = error.message.orEmpty()
     return message.contains("/ve/back/rp/common/teachCalendar.shtml") &&
         Regex("""STATUS\s*=\s*4""", RegexOption.IGNORE_CASE).containsMatchIn(message)

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -95,8 +96,7 @@ val navigationTargets = listOf(
     NavigationTarget(ModuleKeys.EmptyRooms, "空教室"),
 )
 
-private val AppBlue = Color(0xFF0B74F6)
-private val AppBlueDark = Color(0xFF045BC8)
+private val DefaultPrimaryTint = Color(0xFF0B74F6)
 private val AppCyan = Color(0xFF18B7D8)
 
 private data class DashboardAction(
@@ -132,7 +132,7 @@ private val ServiceGroups = listOf(
         title = "教学学习",
         subtitle = "课程、作业与学习资源",
         entries = listOf(
-            ServiceEntry(ModuleKeys.Timetable, "课表", "本周课程", Icons.Filled.Schedule, Color(0xFF0B74F6)),
+            ServiceEntry(ModuleKeys.Timetable, "课表", "本周课程", Icons.Filled.Schedule, DefaultPrimaryTint),
             ServiceEntry(ModuleKeys.Homework, "作业", "作业提交", Icons.Filled.Assignment, Color(0xFF2AA876)),
             ServiceEntry(ModuleKeys.CourseResources, "课程资源", "资料下载", Icons.Filled.LibraryBooks, Color(0xFF7C58C2)),
             ServiceEntry(ModuleKeys.CourseReplay, "课程回放", "课堂回看", Icons.Filled.PlayCircle, Color(0xFFFF8A00)),
@@ -143,7 +143,7 @@ private val ServiceGroups = listOf(
         title = "成绩考务",
         subtitle = "成绩、考试与培养进度",
         entries = listOf(
-            ServiceEntry(ModuleKeys.AcademicProgress, "学业进度", "培养完成情况", Icons.Filled.TrendingUp, Color(0xFF0B74F6)),
+            ServiceEntry(ModuleKeys.AcademicProgress, "学业进度", "培养完成情况", Icons.Filled.TrendingUp, DefaultPrimaryTint),
             ServiceEntry(ModuleKeys.HistoryScores, "历史成绩", "历年成绩", Icons.Filled.School, Color(0xFF6E62D6)),
             ServiceEntry(ModuleKeys.Scores, "主修成绩", "本学期成绩", Icons.Filled.Grade, Color(0xFFE46B2D)),
             ServiceEntry(ModuleKeys.Exams, "考务", "考试安排", Icons.Filled.EventAvailable, Color(0xFFD64B6B)),
@@ -153,7 +153,7 @@ private val ServiceGroups = listOf(
         title = "信息工具",
         subtitle = "日程、邮箱与空间查询",
         entries = listOf(
-            ServiceEntry(ModuleKeys.Calendar, "学年日历", "校历安排", Icons.Filled.CalendarMonth, Color(0xFF0B74F6)),
+            ServiceEntry(ModuleKeys.Calendar, "学年日历", "校历安排", Icons.Filled.CalendarMonth, DefaultPrimaryTint),
             ServiceEntry(ModuleKeys.Mail, "邮箱", "校内邮件", Icons.Filled.Email, Color(0xFF2F8DD8)),
             ServiceEntry(ModuleKeys.EmptyRooms, "空教室", "教室余量", Icons.Filled.MeetingRoom, Color(0xFF00A6A6)),
         ),
@@ -174,6 +174,7 @@ fun OverviewScreen(
     sessionDetail: String,
     onNavigate: (String) -> Unit,
     onOpenServices: () -> Unit,
+    extendIntoStatusBar: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<LoadState<OverviewDashboard>>(LoadState.Loading) }
@@ -233,6 +234,7 @@ fun OverviewScreen(
                 sessionDetail = sessionDetail,
                 dateLabel = dateLabel,
                 syncing = syncing,
+                extendIntoStatusBar = extendIntoStatusBar,
                 onSync = {
                     scope.launch {
                         syncing = true
@@ -309,7 +311,7 @@ fun ServicesScreen(
 
 private fun dashboardActions(): List<DashboardAction> = listOf(
     DashboardAction("作业", ModuleKeys.Homework, Icons.Filled.Assignment, Color(0xFF2AA876)),
-    DashboardAction("课表", ModuleKeys.Timetable, Icons.Filled.Schedule, Color(0xFF0B74F6)),
+    DashboardAction("课表", ModuleKeys.Timetable, Icons.Filled.Schedule, DefaultPrimaryTint),
     DashboardAction("邮箱", ModuleKeys.Mail, Icons.Filled.Email, Color(0xFF2F8DD8)),
     DashboardAction("成绩", ModuleKeys.Scores, Icons.Filled.Grade, Color(0xFFE46B2D)),
     DashboardAction("校历", ModuleKeys.Calendar, Icons.Filled.CalendarMonth, Color(0xFF7C58C2)),
@@ -321,16 +323,19 @@ private fun OverviewHero(
     sessionDetail: String,
     dateLabel: String,
     syncing: Boolean,
+    extendIntoStatusBar: Boolean,
     onSync: () -> Unit,
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(AppBlueDark, AppBlue, Color(0xFF34A1FF)),
+                    colors = listOf(colorScheme.primaryContainer, colorScheme.surfaceVariant),
                 ),
             )
+            .then(if (extendIntoStatusBar) Modifier.statusBarsPadding() else Modifier)
             .padding(horizontal = 20.dp, vertical = 24.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -342,14 +347,14 @@ private fun OverviewHero(
                 Column(Modifier.weight(1f)) {
                     Text(
                         text = "BJTU MIS",
-                        color = Color.White,
+                        color = colorScheme.onPrimaryContainer,
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = "你好，今天是 $dateLabel",
-                        color = Color.White.copy(alpha = 0.88f),
+                        color = colorScheme.onPrimaryContainer.copy(alpha = 0.88f),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -357,8 +362,8 @@ private fun OverviewHero(
                     enabled = !syncing,
                     onClick = onSync,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White,
-                        contentColor = AppBlue,
+                        containerColor = colorScheme.primary,
+                        contentColor = colorScheme.onPrimary,
                     ),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                 ) {
@@ -367,7 +372,7 @@ private fun OverviewHero(
             }
             Text(
                 text = sessionDetail.ifBlank { "校园信息本地采集与离线查看" },
-                color = Color.White.copy(alpha = 0.78f),
+                color = colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -411,6 +416,7 @@ private fun QuickActionItem(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    val tint = themedTint(action.tint)
     Column(
         modifier = modifier
             .height(86.dp)
@@ -423,10 +429,10 @@ private fun QuickActionItem(
         Box(
             modifier = Modifier
                 .size(38.dp)
-                .background(action.tint.copy(alpha = 0.12f), MaterialTheme.shapes.medium),
+                .background(tint.copy(alpha = 0.12f), MaterialTheme.shapes.medium),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(action.icon, contentDescription = null, tint = action.tint, modifier = Modifier.size(22.dp))
+            Icon(action.icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.height(8.dp))
         Text(
@@ -451,7 +457,7 @@ private fun DashboardStatusCard(
         modifier = modifier,
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            StatusPill(status, AppBlue)
+            StatusPill(status, MaterialTheme.colorScheme.primary)
             StatusPill("${dashboard.snapshots.size} 个模块快照", AppCyan)
         }
         dashboard.latest.errorText?.takeIf { it.isNotBlank() }?.let {
@@ -495,11 +501,11 @@ private fun TodoCard(
                         Box(
                             modifier = Modifier
                                 .width(52.dp)
-                                .background(AppBlue.copy(alpha = 0.1f), MaterialTheme.shapes.small)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), MaterialTheme.shapes.small)
                                 .padding(vertical = 6.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(todo.tag, style = MaterialTheme.typography.labelMedium, color = AppBlue)
+                            Text(todo.tag, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                         }
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
@@ -554,11 +560,11 @@ private fun ScheduleRow(item: CalendarItem) {
         Column(
             modifier = Modifier
                 .width(62.dp)
-                .background(AppBlue.copy(alpha = 0.1f), MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), MaterialTheme.shapes.small)
                 .padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(item.date.takeLast(5), style = MaterialTheme.typography.labelLarge, color = AppBlue)
+            Text(item.date.takeLast(5), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             item.week?.let {
                 Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -576,6 +582,7 @@ private fun ScheduleRow(item: CalendarItem) {
 
 @Composable
 private fun TeachingBanner(modifier: Modifier = Modifier) {
+    val colorScheme = MaterialTheme.colorScheme
     InfoCard(title = "教学服务", subtitle = "课表、资源、作业、考务都在同一处聚合", modifier = modifier) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -596,29 +603,29 @@ private fun TeachingBanner(modifier: Modifier = Modifier) {
             Canvas(modifier = Modifier.size(width = 104.dp, height = 88.dp)) {
                 val strokeWidth = 4.dp.toPx()
                 drawRoundRect(
-                    color = Color(0xFFDCEBFF),
+                    color = colorScheme.primaryContainer,
                     topLeft = Offset(size.width * 0.08f, size.height * 0.1f),
                     size = Size(size.width * 0.72f, size.height * 0.62f),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx(), 8.dp.toPx()),
                 )
-                drawCircle(Color.White, radius = size.minDimension * 0.22f, center = Offset(size.width * 0.68f, size.height * 0.38f))
+                drawCircle(colorScheme.surface, radius = size.minDimension * 0.22f, center = Offset(size.width * 0.68f, size.height * 0.38f))
                 drawCircle(AppCyan, radius = size.minDimension * 0.14f, center = Offset(size.width * 0.68f, size.height * 0.38f))
                 drawLine(
-                    color = AppBlue,
+                    color = colorScheme.primary,
                     start = Offset(size.width * 0.18f, size.height * 0.28f),
                     end = Offset(size.width * 0.48f, size.height * 0.28f),
                     strokeWidth = strokeWidth,
                     cap = StrokeCap.Round,
                 )
                 drawLine(
-                    color = AppBlue.copy(alpha = 0.72f),
+                    color = colorScheme.primary.copy(alpha = 0.72f),
                     start = Offset(size.width * 0.18f, size.height * 0.45f),
                     end = Offset(size.width * 0.42f, size.height * 0.45f),
                     strokeWidth = strokeWidth,
                     cap = StrokeCap.Round,
                 )
                 drawRoundRect(
-                    color = Color(0xFFBFE8FF),
+                    color = colorScheme.secondaryContainer,
                     topLeft = Offset(size.width * 0.18f, size.height * 0.72f),
                     size = Size(size.width * 0.64f, size.height * 0.12f),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx(), 8.dp.toPx()),
@@ -650,6 +657,7 @@ private fun ServiceGrid(entries: List<ServiceEntry>, onNavigate: (String) -> Uni
 
 @Composable
 private fun ServiceTile(entry: ServiceEntry, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val tint = themedTint(entry.tint)
     Column(
         modifier = modifier
             .height(92.dp)
@@ -662,10 +670,10 @@ private fun ServiceTile(entry: ServiceEntry, modifier: Modifier = Modifier, onCl
         Box(
             modifier = Modifier
                 .size(36.dp)
-                .background(entry.tint.copy(alpha = 0.12f), MaterialTheme.shapes.medium),
+                .background(tint.copy(alpha = 0.12f), MaterialTheme.shapes.medium),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(entry.icon, contentDescription = null, tint = entry.tint, modifier = Modifier.size(21.dp))
+            Icon(entry.icon, contentDescription = null, tint = tint, modifier = Modifier.size(21.dp))
         }
         Spacer(Modifier.height(7.dp))
         Text(
@@ -685,6 +693,10 @@ private fun ServiceTile(entry: ServiceEntry, modifier: Modifier = Modifier, onCl
         )
     }
 }
+
+@Composable
+private fun themedTint(tint: Color): Color =
+    if (tint == DefaultPrimaryTint) MaterialTheme.colorScheme.primary else tint
 
 private fun dashboardTodos(dashboard: OverviewDashboard): List<DashboardTodo> {
     val homeworkTodos = dashboard.homework

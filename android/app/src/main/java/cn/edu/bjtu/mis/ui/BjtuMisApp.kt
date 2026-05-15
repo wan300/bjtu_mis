@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,6 +21,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -65,12 +67,13 @@ import cn.edu.bjtu.mis.ui.screens.ScoresScreen
 import cn.edu.bjtu.mis.ui.screens.ServicesScreen
 import cn.edu.bjtu.mis.ui.screens.TimetableScreen
 import cn.edu.bjtu.mis.ui.screens.navigationTargets
+import cn.edu.bjtu.mis.ui.theme.AppThemeOption
+import cn.edu.bjtu.mis.ui.theme.BjtuMisSystemBars
 import kotlinx.coroutines.launch
 
 private const val RouteHome = "overview"
 private const val RouteServices = "services"
 private val MainRoutes = setOf(RouteHome, RouteServices, ModuleKeys.Profile)
-private val AppBlue = Color(0xFF0B74F6)
 
 private data class BottomTab(
     val route: String,
@@ -95,6 +98,7 @@ private val BottomTabs = listOf(
 @Composable
 fun BjtuMisApp(
     container: AppContainer,
+    themeOption: AppThemeOption = AppThemeOption.Default,
     requestedRoute: String? = null,
     onRouteHandled: () -> Unit = {},
     onExit: () -> Unit,
@@ -144,21 +148,15 @@ fun BjtuMisApp(
                 ready = true
             }
 
-            val status = container.sessionRepository.status(SessionValidationPolicy.UseRecentOrValidate)
-            var isReady = status.state == SessionState.Ready
-            var autoLoggedIn = false
-            sessionDetail = status.detail.orEmpty().ifBlank { sessionDetail }
-            if (!isReady) {
-                val autoLogin = container.sessionRepository.loginAuto()
-                if (autoLogin.status == AutoLoginStatus.Ready) {
-                    isReady = true
-                    autoLoggedIn = true
-                    sessionDetail = autoLogin.session?.detail ?: autoLogin.message.orEmpty()
-                    showAutoLoginFailedDialog = false
-                } else if (autoLogin.status == AutoLoginStatus.AutoFailed && autoLogin.attempts > 0) {
-                    autoLoginFailedMessage = autoLogin.message ?: "自动重新登录失败。"
-                    showAutoLoginFailedDialog = true
-                }
+            val session = container.sessionRepository.recoverSession(SessionValidationPolicy.UseRecentOrValidate)
+            val isReady = session.status == AutoLoginStatus.Ready
+            val autoLoggedIn = isReady && session.attempts > 0
+            sessionDetail = session.session?.detail ?: session.message.orEmpty().ifBlank { sessionDetail }
+            if (isReady) {
+                showAutoLoginFailedDialog = false
+            } else if (session.status == AutoLoginStatus.AutoFailed && session.attempts > 0) {
+                autoLoginFailedMessage = session.message ?: "自动重新登录失败。"
+                showAutoLoginFailedDialog = true
             }
             if (isReady) {
                 ready = true
@@ -173,7 +171,7 @@ fun BjtuMisApp(
     fun continueAutoLoginRetry() {
         scope.launch {
             autoLoginRetrying = true
-            val result = container.sessionRepository.loginAuto()
+            val result = container.sessionRepository.recoverSession(SessionValidationPolicy.Fresh)
             if (result.status == AutoLoginStatus.Ready) {
                 ready = true
                 sessionDetail = result.session?.detail ?: result.message.orEmpty()
@@ -276,8 +274,21 @@ fun BjtuMisApp(
                 )
             }
 
+            val extendHomeIntoStatusBar = themeOption == AppThemeOption.MascotGold && current == RouteHome
+            if (extendHomeIntoStatusBar) {
+                BjtuMisSystemBars(
+                    statusBarColor = Color.Transparent,
+                    navigationBarColor = MaterialTheme.colorScheme.surface,
+                    useDarkStatusBarIcons = false,
+                    useDarkNavigationBarIcons = false,
+                    decorFitsSystemWindows = false,
+                    restoreDecorFitsSystemWindowsOnDispose = true,
+                )
+            }
+
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
+                contentWindowInsets = if (extendHomeIntoStatusBar) WindowInsets(0.dp) else ScaffoldDefaults.contentWindowInsets,
                 topBar = {
                     when {
                         current == RouteServices -> MainTitleBar("服务")
@@ -306,6 +317,7 @@ fun BjtuMisApp(
                             sessionDetail = sessionDetail,
                             onNavigate = ::navigateModule,
                             onOpenServices = { navigateMain(RouteServices) },
+                            extendIntoStatusBar = extendHomeIntoStatusBar,
                         )
                         RouteServices -> ServicesScreen(
                             moduleRepository = container.moduleRepository,
@@ -314,6 +326,10 @@ fun BjtuMisApp(
                         ModuleKeys.Profile -> MainScreenPadding {
                             ProfileScreen(
                                 repository = container.moduleRepository,
+                                selectedTheme = themeOption,
+                                onThemeSelected = { nextTheme ->
+                                    scope.launch { container.themeStore.save(nextTheme) }
+                                },
                                 onLogout = {
                                     container.sessionRepository.logout()
                                     SessionKeepAliveForegroundService.stop(context)
@@ -389,13 +405,14 @@ private fun ModuleRoute(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MainTitleBar(title: String) {
+    val colorScheme = MaterialTheme.colorScheme
     CenterAlignedTopAppBar(
         title = {
-            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold)
+            Text(title, color = colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
         },
         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-            containerColor = AppBlue,
-            titleContentColor = Color.White,
+            containerColor = colorScheme.primary,
+            titleContentColor = colorScheme.onPrimary,
         ),
     )
 }
@@ -403,27 +420,29 @@ private fun MainTitleBar(title: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DetailTitleBar(title: String, onBack: () -> Unit) {
+    val colorScheme = MaterialTheme.colorScheme
     CenterAlignedTopAppBar(
         title = {
-            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold)
+            Text(title, color = colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
         },
         navigationIcon = {
             IconButton(onClick = onBack) {
-                ShellLineIcon(ShellIcon.Back, color = Color.White)
+                ShellLineIcon(ShellIcon.Back, color = colorScheme.onPrimary)
             }
         },
         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-            containerColor = AppBlue,
-            titleContentColor = Color.White,
-            navigationIconContentColor = Color.White,
+            containerColor = colorScheme.primary,
+            titleContentColor = colorScheme.onPrimary,
+            navigationIconContentColor = colorScheme.onPrimary,
         ),
     )
 }
 
 @Composable
 private fun AppBottomBar(current: String, onSelect: (String) -> Unit) {
+    val colorScheme = MaterialTheme.colorScheme
     NavigationBar(
-        containerColor = Color.White,
+        containerColor = colorScheme.surface,
         tonalElevation = 8.dp,
     ) {
         BottomTabs.forEach { tab ->
@@ -432,16 +451,16 @@ private fun AppBottomBar(current: String, onSelect: (String) -> Unit) {
                 selected = selected,
                 onClick = { onSelect(tab.route) },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = AppBlue,
-                    selectedTextColor = AppBlue,
-                    indicatorColor = Color(0xFFE4F0FF),
-                    unselectedIconColor = Color(0xFF8A94A6),
-                    unselectedTextColor = Color(0xFF5E6470),
+                    selectedIconColor = colorScheme.primary,
+                    selectedTextColor = colorScheme.primary,
+                    indicatorColor = colorScheme.primaryContainer,
+                    unselectedIconColor = colorScheme.onSurfaceVariant,
+                    unselectedTextColor = colorScheme.onSurfaceVariant,
                 ),
                 icon = {
                     ShellLineIcon(
                         icon = tab.icon,
-                        color = if (selected) AppBlue else Color(0xFF8A94A6),
+                        color = if (selected) colorScheme.primary else colorScheme.onSurfaceVariant,
                     )
                 },
                 label = {
@@ -506,12 +525,17 @@ private fun ShellLineIcon(icon: ShellIcon, color: Color, modifier: Modifier = Mo
 
 @Composable
 private fun Splash() {
+    val colorScheme = MaterialTheme.colorScheme
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color(0xFF045BC8), AppBlue, Color(0xFF34A1FF)),
+                    colors = listOf(
+                        colorScheme.background,
+                        colorScheme.primaryContainer,
+                        colorScheme.background,
+                    ),
                 ),
             ),
         contentAlignment = Alignment.Center,
@@ -522,14 +546,14 @@ private fun Splash() {
         ) {
             Text(
                 text = "MIS 教学服务系统",
-                color = Color.White,
+                color = colorScheme.onBackground,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
             )
-            CircularProgressIndicator(color = Color.White)
+            CircularProgressIndicator(color = colorScheme.primary)
             Text(
                 text = "正在检查本地会话…",
-                color = Color.White.copy(alpha = 0.86f),
+                color = colorScheme.onBackground.copy(alpha = 0.86f),
                 style = MaterialTheme.typography.bodyMedium,
             )
         }

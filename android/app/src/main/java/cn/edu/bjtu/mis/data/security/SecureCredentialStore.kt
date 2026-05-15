@@ -20,13 +20,19 @@ data class LoginCredentials(
     val password: String,
 )
 
+interface CredentialStore {
+    fun save(credentials: LoginCredentials)
+    fun load(): LoginCredentials?
+    fun clear()
+}
+
 class SecureCredentialStore(
     context: Context,
     private val alias: String = "bjtu_mis_login_credentials_key",
-) {
+) : CredentialStore {
     private val file: File = File(context.filesDir, "login_credentials.bin")
 
-    fun save(credentials: LoginCredentials) {
+    override fun save(credentials: LoginCredentials) {
         val plainText = AppJson.encodeToString(credentials)
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
@@ -34,7 +40,7 @@ class SecureCredentialStore(
         file.writeBytes(payload)
     }
 
-    fun load(): LoginCredentials? {
+    override fun load(): LoginCredentials? {
         if (!file.exists()) return null
         val payload = file.readBytes()
         if (payload.size <= IV_SIZE) return null
@@ -50,7 +56,7 @@ class SecureCredentialStore(
         }.getOrNull()
     }
 
-    fun clear() {
+    override fun clear() {
         file.delete()
     }
 

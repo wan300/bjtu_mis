@@ -144,6 +144,7 @@ import cn.edu.bjtu.mis.ui.components.KeyValue
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
 import cn.edu.bjtu.mis.ui.components.SectionTitle
+import cn.edu.bjtu.mis.ui.theme.AppThemeOption
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -195,10 +196,23 @@ private fun SecondaryModuleLinks(
 @Composable
 fun ProfileScreen(
     repository: ModuleRepository,
+    selectedTheme: AppThemeOption = AppThemeOption.Default,
+    onThemeSelected: (AppThemeOption) -> Unit = {},
     onLogout: () -> Unit,
     onNavigate: (String) -> Unit,
 ) {
-    DataScreen(title = "我的", loader = { repository.profile() }) { envelope ->
+    DataScreen(
+        title = "我的",
+        loader = { repository.profile() },
+        leadingContent = {
+            item {
+                ThemePreferenceCard(
+                    selectedTheme = selectedTheme,
+                    onThemeSelected = onThemeSelected,
+                )
+            }
+        },
+    ) { envelope ->
         val profile = envelope.data
         item { ProfileHeaderCard(profile) }
         item {
@@ -258,6 +272,82 @@ fun ProfileScreen(
                 Text("退出登录")
             }
         }
+    }
+}
+
+@Composable
+private fun ThemePreferenceCard(
+    selectedTheme: AppThemeOption,
+    onThemeSelected: (AppThemeOption) -> Unit,
+) {
+    InfoCard(title = "主题", subtitle = "切换应用配色") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ThemeSegment(
+                option = AppThemeOption.Default,
+                label = "当前主题",
+                swatches = listOf(Color(0xFF0B74F6), Color.White),
+                selected = selectedTheme == AppThemeOption.Default,
+                onClick = onThemeSelected,
+                modifier = Modifier.weight(1f),
+            )
+            ThemeSegment(
+                option = AppThemeOption.MascotGold,
+                label = "暖金黑",
+                swatches = listOf(Color(0xFF171A24), Color(0xFFE4B96A)),
+                selected = selectedTheme == AppThemeOption.MascotGold,
+                onClick = onThemeSelected,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ThemeSegment(
+    option: AppThemeOption,
+    label: String,
+    swatches: List<Color>,
+    selected: Boolean,
+    onClick: (AppThemeOption) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val container = if (selected) colorScheme.primaryContainer else Color.Transparent
+    val content = if (selected) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant
+
+    Row(
+        modifier = modifier
+            .background(container, MaterialTheme.shapes.small)
+            .clickable { onClick(option) }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy((-4).dp)) {
+            swatches.forEach { color ->
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .background(color, CircleShape)
+                        .border(1.dp, colorScheme.outline.copy(alpha = 0.55f), CircleShape),
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = content,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1321,7 +1411,7 @@ private fun CalendarMonthOverviewCard(
         subtitle = month.format(CalendarMonthTitleFormatter),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            CalendarMetric("作业截止", monthHomework.size.toString(), Color(0xFF0B74F6), Modifier.weight(1f))
+            CalendarMetric("作业截止", monthHomework.size.toString(), MaterialTheme.colorScheme.primary, Modifier.weight(1f))
             CalendarMetric("未提交", unsubmittedHomework.toString(), Color(0xFFD64B6B), Modifier.weight(1f))
             CalendarMetric("已提交", doneHomework.toString(), Color(0xFF2AA876), Modifier.weight(1f))
             CalendarMetric("待办", openTodos.toString(), Color(0xFF7C58C2), Modifier.weight(1f))
@@ -1431,7 +1521,7 @@ private fun AcademicMonthDayCell(
                 val submitted = homeworkCalendarStatusLabel(item) == "已提交"
                 add(
                     CalendarCellChip(
-                        text = "${if (submitted) "已提交" else "未提交"} ${item.title}",
+                        text = item.title,
                         color = if (submitted) Color(0xFF2AA876) else Color(0xFFD64B6B),
                     )
                 )
@@ -1439,7 +1529,7 @@ private fun AcademicMonthDayCell(
             todos.forEach { todo ->
                 add(
                     CalendarCellChip(
-                        text = "${if (todo.done) "已完成" else "待办"} ${todo.title}",
+                        text = todo.title,
                         color = if (todo.done) Color(0xFF6B7280) else Color(0xFF7C58C2),
                     )
                 )
@@ -1481,12 +1571,13 @@ private fun CalendarCellChipView(chip: CalendarCellChip) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(chip.color.copy(alpha = 0.12f), MaterialTheme.shapes.small)
-            .padding(horizontal = 4.dp, vertical = 2.dp),
+            .background(chip.color.copy(alpha = 0.16f), MaterialTheme.shapes.small)
+            .padding(horizontal = 5.dp, vertical = 2.dp),
     ) {
         Text(
             chip.text,
             style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
             color = chip.color,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1551,7 +1642,7 @@ private fun CalendarDayDetail(
                             color = if (homeworkCalendarStatusLabel(item) == "已提交") Color(0xFF2AA876) else Color(0xFFD64B6B),
                         )
                         item.submissionStatus?.takeIf { it.isNotBlank() }?.let {
-                            CalendarStatusPill(text = it, color = Color(0xFF0B74F6))
+                            CalendarStatusPill(text = it, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
@@ -4342,6 +4433,7 @@ private fun <T> DataScreen(
     title: String,
     refreshKey: Any? = Unit,
     loader: suspend () -> ModuleEnvelope<T>,
+    leadingContent: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {},
     content: androidx.compose.foundation.lazy.LazyListScope.(ModuleEnvelope<T>) -> Unit,
 ) {
     var state by remember(refreshKey) { mutableStateOf<LoadState<ModuleEnvelope<T>>>(LoadState.Loading) }
@@ -4353,6 +4445,7 @@ private fun <T> DataScreen(
     }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        leadingContent()
         when (val current = state) {
             LoadState.Loading, is LoadState.Error -> item { LoadingOrError(current) }
             is LoadState.Data -> content(current.value)

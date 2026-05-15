@@ -7,6 +7,14 @@ plugins {
     alias(libs.plugins.chaquopy)
 }
 
+val packagedAbis = providers.gradleProperty("targetAbis")
+    .map { value ->
+        value.split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+    }
+    .getOrElse(listOf("arm64-v8a"))
+
 android {
     namespace = "cn.edu.bjtu.mis"
     compileSdk = 35
@@ -21,13 +29,14 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += packagedAbis
         }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

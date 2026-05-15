@@ -1,15 +1,14 @@
 package cn.edu.bjtu.mis.data.provider
 
-import android.util.Base64
 import cn.edu.bjtu.mis.data.captcha.CaptchaAnswerSolver
 import cn.edu.bjtu.mis.data.captcha.CaptchaSolveException
 import cn.edu.bjtu.mis.data.network.AppCookieJar
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.data.parser.normalizeSpace
 import cn.edu.bjtu.mis.data.perf.PerfTrace
+import cn.edu.bjtu.mis.data.security.CredentialStore
 import cn.edu.bjtu.mis.data.security.LoginCredentials
-import cn.edu.bjtu.mis.data.security.SecureCredentialStore
-import cn.edu.bjtu.mis.data.security.SecureCookieStore
+import cn.edu.bjtu.mis.data.security.SessionCookieStore
 import cn.edu.bjtu.mis.model.AutoLoginResult
 import cn.edu.bjtu.mis.model.AutoLoginStatus
 import cn.edu.bjtu.mis.model.SessionCaptcha
@@ -20,14 +19,27 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
+import java.net.URI
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 
 enum class SessionValidationPolicy {
     Fresh,
     UseRecentOrValidate,
 }
+
+data class SessionEndpoints(
+    val misHomeUrl: String = ProviderConstants.MIS_HOME_URL,
+    val misAaBridgeUrl: String = ProviderConstants.MIS_AA_BRIDGE_URL,
+    val aaTimetableUrl: String = ProviderConstants.AA_TIMETABLE_URL,
+    val bksyVeBridgeUrl: String = ProviderConstants.BKSY_VE_BRIDGE_URL,
+    val casLoginPath: String = "/auth/login",
+    val casOrigin: String = "https://cas.bjtu.edu.cn",
+    val misReferer: String = "https://mis.bjtu.edu.cn/",
+    val bksyReferer: String = "https://bksy.bjtu.edu.cn/",
+)
 
 internal data class SessionValidationRecord(
     val status: SessionStatus,
@@ -63,14 +75,16 @@ internal class SessionValidationCache(
 }
 
 class SessionManager(
-    private val cookieStore: SecureCookieStore,
-    private val credentialStore: SecureCredentialStore,
+    private val cookieStore: SessionCookieStore,
+    private val credentialStore: CredentialStore,
     private val cookieJar: AppCookieJar,
     private val httpClient: BjtuHttpClient,
     private val captchaSolver: CaptchaAnswerSolver,
+    private val endpoints: SessionEndpoints = SessionEndpoints(),
 ) {
     private val mutex = Mutex()
     private val validationMutex = Mutex()
+    private val reauthMutex = Mutex()
     private val validationCache = SessionValidationCache(
         ttlMillis = TimeUnit.MINUTES.toMillis(5),
         nowMillis = { PerfTrace.nowMillis() },
@@ -80,7 +94,7 @@ class SessionManager(
     suspend fun fetchInlineLoginCaptcha(): SessionCaptcha = mutex.withLock {
         validationCache.clear()
         cookieJar.clear()
-        val loginPage = httpClient.getText(ProviderConstants.MIS_HOME_URL)
+        val loginPage = httpClient.getText(endpoints.misHomeUrl)
         if (!isCasLoginUrl(loginPage.url)) {
             throw SessionExpiredException("当前会话似乎已登录，请直接同步或先退出登录。")
         }
@@ -92,7 +106,7 @@ class SessionManager(
         )
         val mimeType = captcha.headers["Content-Type"]?.substringBefore(";")?.trim().orEmpty()
             .ifBlank { "image/jpeg" }
-        val encoded = Base64.encodeToString(captcha.body, Base64.NO_WRAP)
+        val encoded = Base64.getEncoder().encodeToString(captcha.body)
         val dataUrl = "data:$mimeType;base64,$encoded"
         inlineLoginState = state.copy(
             cookiesJson = cookieJar.encodeSnapshot(),
@@ -122,7 +136,7 @@ class SessionManager(
             ),
             headers = mapOf(
                 "Referer" to state.referer,
-                "Origin" to "https://cas.bjtu.edu.cn",
+                "Origin" to endpoints.casOrigin,
             ),
         )
 
@@ -204,7 +218,7 @@ class SessionManager(
     private fun currentCaptchaBytes(): ByteArray {
         val encoded = inlineLoginState?.captchaImageBase64
             ?: throw CaptchaSolveException("验证码图片上下文缺失。")
-        return runCatching { Base64.decode(encoded, Base64.DEFAULT) }
+        return runCatching { Base64.getDecoder().decode(encoded) }
             .getOrElse { throw CaptchaSolveException("验证码图片上下文损坏。", it) }
     }
 
@@ -243,18 +257,21 @@ class SessionManager(
             ?: return SessionStatus(SessionState.WaitingForLogin, "未找到可用会话，请先登录。")
         cookieJar.restoreFromJson(payload)
         return runCatching {
-            val response = httpClient.getText(ProviderConstants.MIS_HOME_URL)
-            val aaReady = ensureAaSessionReady()
-            when {
-                isCasLoginUrl(response.url) -> SessionStatus(SessionState.Expired, "会话已过期，请重新登录。")
-                !aaReady.first -> SessionStatus(SessionState.Expired, aaReady.second)
-                aaReady.second != null -> {
-                    cookieStore.save(cookieJar.encodeSnapshot())
-                    SessionStatus(SessionState.Ready, "会话可用：${aaReady.second}")
-                }
-                else -> {
-                    cookieStore.save(cookieJar.encodeSnapshot())
-                    SessionStatus(SessionState.Ready, "会话可用。")
+            val response = httpClient.getText(endpoints.misHomeUrl)
+            if (isCasLoginUrl(response.url)) {
+                SessionStatus(SessionState.Expired, "会话已过期，请重新登录。")
+            } else {
+                val aaReady = ensureAaSessionReady()
+                when {
+                    !aaReady.first -> SessionStatus(SessionState.Expired, aaReady.second)
+                    aaReady.second != null -> {
+                        cookieStore.save(cookieJar.encodeSnapshot())
+                        SessionStatus(SessionState.Ready, "会话可用：${aaReady.second}")
+                    }
+                    else -> {
+                        cookieStore.save(cookieJar.encodeSnapshot())
+                        SessionStatus(SessionState.Ready, "会话可用。")
+                    }
                 }
             }
         }.getOrElse { error ->
@@ -262,16 +279,57 @@ class SessionManager(
         }
     }
 
+    suspend fun recoverSession(
+        policy: SessionValidationPolicy = SessionValidationPolicy.UseRecentOrValidate,
+    ): AutoLoginResult {
+        val current = validateSession(policy)
+        if (current.state == SessionState.Ready) {
+            return AutoLoginResult(
+                status = AutoLoginStatus.Ready,
+                message = current.detail,
+                attempts = 0,
+                session = current,
+            )
+        }
+
+        return reauthMutex.withLock {
+            if (policy == SessionValidationPolicy.UseRecentOrValidate) {
+                validationCache.getFresh()?.let { afterLock ->
+                    return@withLock AutoLoginResult(
+                        status = AutoLoginStatus.Ready,
+                        message = afterLock.detail,
+                        attempts = 0,
+                        session = afterLock,
+                    )
+                }
+            }
+            validationCache.clear()
+            loginAuto()
+        }
+    }
+
     suspend fun <T> withAuthenticatedClient(
         policy: SessionValidationPolicy = SessionValidationPolicy.UseRecentOrValidate,
         block: suspend (BjtuHttpClient) -> T,
     ): T {
-        val status = validateSession(policy)
-        if (status.state != SessionState.Ready) {
-            throw SessionExpiredException(status.detail ?: "会话未准备好。")
+        val recovered = recoverSession(policy)
+        if (recovered.status != AutoLoginStatus.Ready) {
+            throw SessionExpiredException(recovered.message ?: "会话未准备好，自动重新登录失败。")
         }
-        return block(httpClient).also {
-            cookieStore.save(cookieJar.encodeSnapshot())
+
+        return try {
+            block(httpClient).also {
+                cookieStore.save(cookieJar.encodeSnapshot())
+            }
+        } catch (error: SessionExpiredException) {
+            validationCache.clear()
+            val retried = recoverSession(SessionValidationPolicy.Fresh)
+            if (retried.status != AutoLoginStatus.Ready) {
+                throw SessionExpiredException(retried.message ?: error.message ?: "会话已过期，自动重新登录失败。")
+            }
+            block(httpClient).also {
+                cookieStore.save(cookieJar.encodeSnapshot())
+            }
         }
     }
 
@@ -298,7 +356,7 @@ class SessionManager(
     }
 
     private suspend fun checkAaSessionState(): Pair<String, String?> = runCatching {
-        val response = httpClient.getText(ProviderConstants.AA_TIMETABLE_URL)
+        val response = httpClient.getText(endpoints.aaTimetableUrl)
         val head = response.body.take(4096)
         when {
             response.url.contains("/client/login/") || isAaLoginPage(response.url, head) -> "login_required" to null
@@ -308,18 +366,18 @@ class SessionManager(
 
     private suspend fun bootstrapAaSession(): Boolean = runCatching {
         val bridge = httpClient.getText(
-            ProviderConstants.MIS_AA_BRIDGE_URL,
-            headers = mapOf("Referer" to ProviderConstants.MIS_HOME_URL),
+            endpoints.misAaBridgeUrl,
+            headers = mapOf("Referer" to endpoints.misHomeUrl),
         )
         val loginUrl = extractAaClientLoginUrl(bridge.body) ?: return false
-        httpClient.getText(loginUrl, headers = mapOf("Referer" to "https://mis.bjtu.edu.cn/"))
+        httpClient.getText(loginUrl, headers = mapOf("Referer" to endpoints.misReferer))
         true
     }.getOrDefault(false)
 
     private suspend fun bootstrapVeSessionBestEffort(): Boolean = runCatching {
         httpClient.getText(
-            ProviderConstants.BKSY_VE_BRIDGE_URL,
-            headers = mapOf("Referer" to "https://bksy.bjtu.edu.cn/"),
+            endpoints.bksyVeBridgeUrl,
+            headers = mapOf("Referer" to endpoints.bksyReferer),
         )
         true
     }.getOrDefault(false)
@@ -365,14 +423,17 @@ class SessionManager(
             ?.let { "登录失败：$it 校验未通过。" }
     }
 
-    private fun isCasLoginUrl(url: String): Boolean =
-        url.contains("cas.bjtu.edu.cn/auth/login")
+    private fun isCasLoginUrl(url: String): Boolean {
+        if (url.contains("cas.bjtu.edu.cn${endpoints.casLoginPath}")) return true
+        val path = runCatching { URI(url).path }.getOrNull().orEmpty()
+        return path == endpoints.casLoginPath || path.startsWith("${endpoints.casLoginPath}/")
+    }
 
     private fun isAaLoginPage(url: String, bodyHead: String): Boolean =
         url.contains("/client/login/") || (bodyHead.contains("用户登录") && bodyHead.contains("教学支撑平台"))
 
     private fun extractAaClientLoginUrl(html: String): String? =
-        Regex("https://aa\\.bjtu\\.edu\\.cn/client/login/[^\\s\"'<]+").find(html)?.value
+        Regex("https?://[^\\s\"'<]+/client/login/[^\\s\"'<]+").find(html)?.value
 
     private fun nowIso(): String =
         OffsetDateTime.now(ZoneOffset.UTC).withNano(0).toString()

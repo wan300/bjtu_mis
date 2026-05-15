@@ -42,6 +42,7 @@ import cn.edu.bjtu.mis.data.repository.SessionRepository
 import cn.edu.bjtu.mis.data.repository.SyncRepository
 import cn.edu.bjtu.mis.data.security.SecureCookieStore
 import cn.edu.bjtu.mis.data.security.SecureCredentialStore
+import cn.edu.bjtu.mis.ui.theme.AppThemeStore
 
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
@@ -116,6 +117,9 @@ class AppContainer(context: Context) {
     }
     val agentSecretStore: AgentSecretStore by lazy {
         PerfTrace.measure("AppContainer.agentSecretStore") { AgentSecretStore(appContext) }
+    }
+    val themeStore: AppThemeStore by lazy {
+        PerfTrace.measure("AppContainer.themeStore") { AppThemeStore(appContext) }
     }
     val agentWorkspaceManager: WorkspaceManager by lazy {
         PerfTrace.measure("AppContainer.agentWorkspaceManager") { WorkspaceManager(appContext) }

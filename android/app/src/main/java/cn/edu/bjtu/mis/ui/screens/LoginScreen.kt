@@ -39,9 +39,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.data.repository.SessionRepository
 import cn.edu.bjtu.mis.model.AutoLoginStatus
 import kotlinx.coroutines.launch
@@ -119,7 +121,11 @@ fun LoginScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color(0xFFEAF4FF), Color(0xFFF6F8FC), Color.White),
+                    colors = listOf(
+                        MaterialTheme.colorScheme.background,
+                        MaterialTheme.colorScheme.surfaceVariant,
+                        MaterialTheme.colorScheme.background,
+                    ),
                 ),
             )
             .padding(18.dp),
@@ -143,24 +149,12 @@ fun LoginScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Box(
+                    Image(
+                        painter = painterResource(R.drawable.loading_mascot),
+                        contentDescription = "BJTU MIS",
                         modifier = Modifier
-                            .size(58.dp)
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color(0xFF045BC8), Color(0xFF0B74F6)),
-                                ),
-                                MaterialTheme.shapes.large,
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "北",
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
+                            .size(72.dp),
+                    )
                     Text(
                         "BJTU MIS",
                         style = MaterialTheme.typography.headlineMedium,

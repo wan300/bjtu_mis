@@ -10,6 +10,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import cn.edu.bjtu.mis.BjtuMisApplication
+import cn.edu.bjtu.mis.model.AutoLoginStatus
 import java.util.concurrent.TimeUnit
 
 class SessionKeepAliveWorker(
@@ -19,8 +20,12 @@ class SessionKeepAliveWorker(
     override suspend fun doWork(): Result {
         val app = applicationContext as BjtuMisApplication
         return runCatching {
-            app.container.sessionRepository.status()
-            Result.success()
+            val result = app.container.sessionRepository.recoverSession()
+            when {
+                result.status == AutoLoginStatus.Ready -> Result.success()
+                result.attempts == 0 -> Result.success()
+                else -> Result.retry()
+            }
         }.getOrElse {
             Result.retry()
         }

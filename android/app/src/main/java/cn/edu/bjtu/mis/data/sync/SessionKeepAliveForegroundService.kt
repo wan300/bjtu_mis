@@ -18,7 +18,7 @@ import androidx.core.content.ContextCompat
 import cn.edu.bjtu.mis.BjtuMisApplication
 import cn.edu.bjtu.mis.MainActivity
 import cn.edu.bjtu.mis.R
-import cn.edu.bjtu.mis.model.SessionState
+import cn.edu.bjtu.mis.model.AutoLoginStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -81,16 +81,19 @@ class SessionKeepAliveForegroundService : Service() {
                 }
 
                 var shouldStop = false
-                val message = runCatching { sessionRepository.status() }
+                val message = runCatching { sessionRepository.recoverSession() }
                     .fold(
-                        onSuccess = { status ->
-                            when (status.state) {
-                                SessionState.Ready -> "MIS 会话可用，最近保活 ${formatNow()}"
-                                SessionState.WaitingForLogin -> {
+                        onSuccess = { result ->
+                            when {
+                                result.status == AutoLoginStatus.Ready && result.attempts > 0 ->
+                                    "MIS 已自动重新登录，最近保活 ${formatNow()}"
+                                result.status == AutoLoginStatus.Ready ->
+                                    "MIS 会话可用，最近保活 ${formatNow()}"
+                                result.attempts == 0 -> {
                                     shouldStop = true
                                     "未找到可用登录态"
                                 }
-                                SessionState.Expired -> "MIS 会话需要重新登录，点按返回应用"
+                                else -> "自动重新登录失败：${result.message ?: "未知错误"}"
                             }
                         },
                         onFailure = { error ->

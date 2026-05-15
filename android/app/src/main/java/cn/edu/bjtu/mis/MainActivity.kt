@@ -5,9 +5,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.withFrameNanos
 import cn.edu.bjtu.mis.ui.BjtuMisApp
+import cn.edu.bjtu.mis.ui.theme.AppThemeOption
 import cn.edu.bjtu.mis.ui.theme.BjtuMisTheme
 
 class MainActivity : ComponentActivity() {
@@ -18,13 +21,15 @@ class MainActivity : ComponentActivity() {
         requestedRoute.value = intent.openRoute()
         val app = application as BjtuMisApplication
         setContent {
+            val themeOption by app.container.themeStore.theme.collectAsState(initial = AppThemeOption.Default)
             LaunchedEffect(Unit) {
                 withFrameNanos { }
                 app.startDeferredStartupTasks()
             }
-            BjtuMisTheme {
+            BjtuMisTheme(themeOption = themeOption) {
                 BjtuMisApp(
                     container = app.container,
+                    themeOption = themeOption,
                     requestedRoute = requestedRoute.value,
                     onRouteHandled = { requestedRoute.value = null },
                     onExit = { finish() },

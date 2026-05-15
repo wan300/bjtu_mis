@@ -1,5 +1,10 @@
 # Local environment
+.venv/
 android/local.properties
+
+# Automation captures and runtime state
+captures/
+runtime/
 
 # Gradle / Android build outputs
 android/.gradle/

@@ -82,6 +82,10 @@ class SessionRepository(
         policy: SessionValidationPolicy = SessionValidationPolicy.Fresh,
     ): SessionStatus = sessionManager.validateSession(policy)
 
+    suspend fun recoverSession(
+        policy: SessionValidationPolicy = SessionValidationPolicy.UseRecentOrValidate,
+    ): AutoLoginResult = sessionManager.recoverSession(policy)
+
     suspend fun captcha(): SessionCaptcha = sessionManager.fetchInlineLoginCaptcha()
 
     suspend fun login(loginName: String, password: String, captcha: String): SessionStatus =
@@ -207,6 +211,7 @@ class SyncRepository(
             )
             envelope
         }.getOrElse { error ->
+            if (error is SessionExpiredException) throw error
             summary[moduleKey] = SyncModuleSummary(status = "error", error = error.message)
             errors += "$moduleKey: ${error.message}"
             null
@@ -624,9 +629,17 @@ class CourseReplayRepository(
         courseSchedId: String,
         userId: String? = null,
         timeTableId: String? = null,
+        videoId: String? = null,
     ): CourseReplayPlaybackInfo =
         sessionManager.withAuthenticatedClient {
-            VeProvider(it).fetchCourseReplayPlayback(term, courseId, courseSchedId, userId, timeTableId)
+            VeProvider(it).fetchCourseReplayPlayback(
+                term = term,
+                courseId = courseId,
+                courseSchedId = courseSchedId,
+                userId = userId,
+                timeTableId = timeTableId,
+                videoId = videoId,
+            )
         }
 
     suspend fun reportListen(

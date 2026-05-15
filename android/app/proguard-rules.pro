@@ -1,1 +1,2 @@
 -keep class kotlinx.serialization.** { *; }
+-dontwarn com.gemalto.jp2.JP2Decoder
