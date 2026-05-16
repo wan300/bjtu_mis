@@ -243,6 +243,8 @@ fun parseCourseResourceListing(
             name = name,
             extension = obj.firstText("RP_PRIX", "rp_prix", "extName", "ext_name")?.lowercase(),
             size = obj.firstText("rpSize", "rp_size"),
+            playUrl = obj.firstText("play_url", "playUrl"),
+            resUrl = obj.firstText("res_url", "resUrl"),
             uploadedAt = obj.firstText("inputTime", "input_time", "created_at"),
             teacherName = obj.firstText("teacherName", "teacher_name"),
             downloadCount = obj.firstInt("downloadNum", "download_num"),

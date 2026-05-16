@@ -1,17 +1,8 @@
 package cn.edu.bjtu.mis.ui.screens
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.net.Uri
-import android.os.Build
 import android.provider.OpenableColumns
-import android.webkit.CookieManager
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -61,7 +52,6 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -89,15 +79,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import cn.edu.bjtu.mis.data.repository.CourseResourceRepository
 import cn.edu.bjtu.mis.data.agent.repository.AgentRepository
 import cn.edu.bjtu.mis.data.homework.HomeworkStatusKind
 import cn.edu.bjtu.mis.data.homework.homeworkCalendarStatusLabel
 import cn.edu.bjtu.mis.data.homework.homeworkDueDate
 import cn.edu.bjtu.mis.data.homework.homeworkStatusKind
+import cn.edu.bjtu.mis.data.repository.DocumentPreview
 import cn.edu.bjtu.mis.data.repository.HomeworkAttachmentPreview
-import cn.edu.bjtu.mis.data.repository.HomeworkAttachmentPreviewCookie
 import cn.edu.bjtu.mis.data.repository.HomeworkAttachmentRepository
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
 import cn.edu.bjtu.mis.model.AcademicCalendarTerm
@@ -107,6 +96,7 @@ import cn.edu.bjtu.mis.model.AcademicMonthDay
 import cn.edu.bjtu.mis.model.AcademicProgressData
 import cn.edu.bjtu.mis.model.CalendarData
 import cn.edu.bjtu.mis.model.CourseEntry
+import cn.edu.bjtu.mis.model.CourseResourceItem
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.CoverageLevel
 import cn.edu.bjtu.mis.model.DEFAULT_USER_COURSE_MAX_WEEK
@@ -2394,208 +2384,16 @@ private fun HomeworkAttachmentPreviewScreen(
     onClose: () -> Unit,
     onDownload: () -> Unit,
 ) {
-    var refreshNonce by remember(target.preview.url) { mutableStateOf(0) }
-    var loading by remember(target.preview.url) { mutableStateOf(true) }
-    var webError by remember(target.preview.url) { mutableStateOf<String?>(null) }
     val downloadBusy = busyKey == homeworkAttachmentActionKey("download", target.attachment)
-
-    BackHandler(onBack = onClose)
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-    ) {
-        Surface(shadowElevation = 2.dp, color = MaterialTheme.colorScheme.surface) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(onClick = onClose) {
-                        Text("关闭")
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            target.attachment.filename,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            target.homework.title,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    OutlinedButton(
-                        enabled = !downloadBusy,
-                        onClick = {
-                            webError = null
-                            refreshNonce += 1
-                        },
-                    ) {
-                        Text("刷新")
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Button(enabled = !downloadBusy, onClick = onDownload) {
-                        Text(if (downloadBusy) "下载中" else "下载")
-                    }
-                }
-            }
-        }
-
-        if (loading) {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
-        }
-
-        val message = webError ?: error?.takeIf { it.isNotBlank() }
-        if (!message.isNullOrBlank()) {
-            Text(
-                message,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-
-        AndroidView(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            factory = { context ->
-                WebView(context).apply {
-                    configureHomeworkPreviewWebView(
-                        onLoadingChange = { loading = it },
-                        onError = { webError = it },
-                    )
-                }
-            },
-            update = { webView ->
-                val loadKey = "${target.preview.url}#$refreshNonce"
-                if (webView.tag != loadKey) {
-                    webView.tag = loadKey
-                    webError = null
-                    loading = true
-                    if (target.preview.url.isHttpPreviewUrl()) {
-                        webView.injectHomeworkPreviewCookies(target.preview)
-                        webView.loadUrl(target.preview.url)
-                    } else {
-                        loading = false
-                        webError = "不支持的预览链接：${target.preview.url}"
-                    }
-                }
-            },
-        )
-    }
-}
-
-private fun WebView.configureHomeworkPreviewWebView(
-    onLoadingChange: (Boolean) -> Unit,
-    onError: (String) -> Unit,
-) {
-    settings.javaScriptEnabled = true
-    settings.domStorageEnabled = true
-    settings.allowFileAccess = false
-    settings.allowContentAccess = false
-    settings.loadWithOverviewMode = true
-    settings.useWideViewPort = true
-    settings.builtInZoomControls = true
-    settings.displayZoomControls = false
-    settings.javaScriptCanOpenWindowsAutomatically = false
-    settings.setSupportMultipleWindows(false)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-    }
-    webViewClient = object : WebViewClient() {
-        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-            val uri = request?.url ?: return false
-            val scheme = uri.scheme?.lowercase()
-            return if (scheme == "http" || scheme == "https") {
-                false
-            } else {
-                onError("应用内预览不支持该链接：$uri")
-                true
-            }
-        }
-
-        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-            onLoadingChange(true)
-        }
-
-        override fun onPageFinished(view: WebView?, url: String?) {
-            onLoadingChange(false)
-        }
-
-        override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-            if (request?.isForMainFrame == true) {
-                onLoadingChange(false)
-                onError(error?.description?.toString()?.takeIf { it.isNotBlank() } ?: "预览加载失败")
-            }
-        }
-    }
-}
-
-private fun WebView.injectHomeworkPreviewCookies(preview: HomeworkAttachmentPreview) {
-    val cookieManager = CookieManager.getInstance()
-    cookieManager.setAcceptCookie(true)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-        cookieManager.setAcceptThirdPartyCookies(this, true)
-    }
-    preview.cookies.forEach { cookie ->
-        val targetUrl = cookie.toWebViewCookieUrl(preview.url)
-        val value = cookie.toWebViewCookieString()
-        if (targetUrl.isNotBlank() && value.isNotBlank()) {
-            cookieManager.setCookie(targetUrl, value)
-        }
-    }
-    cookieManager.flush()
-}
-
-private fun HomeworkAttachmentPreviewCookie.toWebViewCookieUrl(fallbackUrl: String): String {
-    val host = domain.trim().trimStart('.')
-    if (host.isBlank()) return fallbackUrl
-    val fallbackScheme = Uri.parse(fallbackUrl).scheme?.lowercase()
-    val scheme = when {
-        secure -> "https"
-        fallbackScheme == "http" || fallbackScheme == "https" -> fallbackScheme
-        else -> "https"
-    }
-    val safePath = path.takeIf { it.startsWith("/") } ?: "/"
-    return "$scheme://$host$safePath"
-}
-
-private fun HomeworkAttachmentPreviewCookie.toWebViewCookieString(): String =
-    buildString {
-        append(name)
-        append('=')
-        append(value)
-        if (!hostOnly && domain.isNotBlank()) {
-            append("; Domain=")
-            append(domain.trim())
-        }
-        append("; Path=")
-        append(path.ifBlank { "/" })
-        if (secure) append("; Secure")
-        if (httpOnly) append("; HttpOnly")
-    }
-
-private fun String.isHttpPreviewUrl(): Boolean {
-    val scheme = Uri.parse(this).scheme?.lowercase()
-    return scheme == "http" || scheme == "https"
+    DocumentPreviewScreen(
+        title = target.attachment.filename,
+        subtitle = target.homework.title,
+        preview = target.preview,
+        downloadBusy = downloadBusy,
+        error = error,
+        onClose = onClose,
+        onDownload = onDownload,
+    )
 }
 
 private data class HomeworkCourseGroup(
@@ -4054,7 +3852,53 @@ private fun CourseDetailPanel(
     val context = LocalContext.current
     val panelKey = courseSelectionKey(entries)
     var downloading by remember(panelKey) { mutableStateOf<String?>(null) }
+    var previewing by remember(panelKey) { mutableStateOf<String?>(null) }
+    var previewTarget by remember(panelKey) { mutableStateOf<TimetableResourcePreviewTarget?>(null) }
     var downloadError by remember(panelKey) { mutableStateOf<String?>(null) }
+
+    fun downloadResource(resource: CourseResourceItem, actionKey: String) {
+        scope.launch {
+            downloading = actionKey
+            downloadError = null
+            runCatching { courseResourceRepository.download(resource.rpId, resource.name, resource.extension) }
+                .onSuccess {
+                    if (!openFile(context, it)) {
+                        downloadError = "已下载，但未找到可打开该文件的应用"
+                    }
+                }
+                .onFailure { downloadError = it.message ?: "下载失败" }
+            downloading = null
+        }
+    }
+
+    fun previewResource(entry: CourseEntry, resource: CourseResourceItem, actionKey: String) {
+        scope.launch {
+            previewing = actionKey
+            downloadError = null
+            runCatching { courseResourceRepository.preview(resource) }
+                .onSuccess { preview ->
+                    previewTarget = TimetableResourcePreviewTarget(entry.courseName, resource, actionKey, preview)
+                }
+                .onFailure { downloadError = it.message ?: "预览失败" }
+            previewing = null
+        }
+    }
+
+    previewTarget?.let { target ->
+        DocumentPreviewScreen(
+            title = target.resource.name,
+            subtitle = listOfNotNull(target.courseName, target.resource.teacherName).joinToString(" · "),
+            preview = target.preview,
+            downloadBusy = downloading == target.actionKey,
+            error = downloadError,
+            onClose = {
+                previewTarget = null
+                downloadError = null
+            },
+            onDownload = { downloadResource(target.resource, target.actionKey) },
+        )
+        return
+    }
 
     LazyColumn(modifier = modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         entries.forEachIndexed { index, entry ->
@@ -4156,19 +4000,16 @@ private fun CourseDetailPanel(
                                 title = resource.name,
                                 subtitle = resource.uploadedAt,
                                 trailing = {
-                                    if (resource.canDownload) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        OutlinedButton(
+                                            enabled = downloading == null && previewing == null,
+                                            onClick = { previewResource(entry, resource, downloadKey) },
+                                        ) {
+                                            Text(if (previewing == downloadKey) "预览中" else "预览")
+                                        }
                                         Button(
-                                            enabled = downloading == null,
-                                            onClick = {
-                                                scope.launch {
-                                                    downloading = downloadKey
-                                                    downloadError = null
-                                                    runCatching { courseResourceRepository.download(resource.rpId, resource.name, resource.extension) }
-                                                        .onSuccess { openFile(context, it) }
-                                                        .onFailure { downloadError = it.message ?: "下载失败" }
-                                                    downloading = null
-                                                }
-                                            },
+                                            enabled = resource.canDownload && downloading == null && previewing == null,
+                                            onClick = { downloadResource(resource, downloadKey) },
                                         ) {
                                             Text(if (downloading == downloadKey) "下载中" else "下载")
                                         }
@@ -4190,6 +4031,13 @@ private fun CourseDetailPanel(
         }
     }
 }
+
+private data class TimetableResourcePreviewTarget(
+    val courseName: String,
+    val resource: CourseResourceItem,
+    val actionKey: String,
+    val preview: DocumentPreview,
+)
 
 private data class TimetableDayColumn(
     val index: Int,

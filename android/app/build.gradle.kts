@@ -53,6 +53,9 @@ android {
         jvmTarget = "17"
     }
 
+    androidResources {
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~"
+    }
 }
 
 ksp {
@@ -67,7 +70,12 @@ chaquopy {
 }
 
 dependencies {
+    implementation(project(":capacitor-android"))
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.coordinatorlayout)
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.fragment)
+    implementation(libs.androidx.webkit)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -88,6 +96,7 @@ dependencies {
     implementation(libs.media3.exoplayer.hls)
     implementation(libs.media3.ui)
     implementation(libs.media3.datasource.okhttp)
+    implementation(libs.cordova.android)
 
     ksp(libs.androidx.room.compiler)
 

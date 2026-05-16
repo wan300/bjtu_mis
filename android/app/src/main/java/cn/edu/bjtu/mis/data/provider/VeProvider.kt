@@ -20,6 +20,7 @@ import cn.edu.bjtu.mis.data.parser.parseVeUserInfo
 import cn.edu.bjtu.mis.model.CalendarData
 import cn.edu.bjtu.mis.model.CourseReplayData
 import cn.edu.bjtu.mis.model.CourseReplayPlaybackInfo
+import cn.edu.bjtu.mis.model.CourseResourceItem
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.CourseSummary
 import cn.edu.bjtu.mis.model.CoverageLevel
@@ -45,6 +46,7 @@ import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.util.Base64
 
 class VeProvider(private val client: BjtuHttpClient) {
     private var sessionId: String? = null
@@ -382,6 +384,35 @@ class VeProvider(private val client: BjtuHttpClient) {
         val rpUrl = payload.text("rpUrl") ?: payload.text("url") ?: throw IllegalStateException("资源下载地址缺失。")
         val downloadUrl = if (rpUrl.startsWith("http")) rpUrl else "${ProviderConstants.VE_BASE_URL}/ve/${rpUrl.trimStart('/')}"
         return client.downloadToFile(downloadUrl, target, headers = mapOf("Referer" to coursePlatformReferer))
+    }
+
+    suspend fun previewCourseResource(resource: CourseResourceItem): String {
+        ensureStrictFlow("course resource preview")
+        val previewId = resource.resId?.trim().orEmpty().ifBlank { resource.rpId.trim() }
+        val payloadResult = if (previewId.isNotBlank()) {
+            runCatching {
+                getJsonObject(
+                    "/ve/back/coursePlatform/dataSynAction.shtml",
+                    mapOf(
+                        "method" to "getFilePlayUrl",
+                        "id" to previewId,
+                        "type" to "2",
+                    ),
+                )
+            }
+        } else {
+            Result.failure(IllegalStateException("资源缺少预览标识"))
+        }
+        payloadResult.getOrNull()
+            ?.text("url")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return normalizeCourseResourcePreviewUrl(it) }
+
+        resource.playUrl
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return buildCourseResourceOnlinePreviewUrl(it) }
+
+        throw payloadResult.exceptionOrNull() ?: IllegalStateException("暂无预览地址")
     }
 
     suspend fun downloadHomeworkAttachment(
@@ -916,6 +947,7 @@ class VeProvider(private val client: BjtuHttpClient) {
             path == "/ve/back/coursePlatform/homeWork.shtml" && method == "queryStudentCourseNote" -> true
             path == "/ve/back/coursePlatform/courseResource.shtml" && method == "stuQueryUploadResourceForCourseList" -> true
             path == "/ve/back/coursePlatform/dataSynAction.shtml" && method == "queryStuViewUrl" -> true
+            path == "/ve/back/coursePlatform/dataSynAction.shtml" && method == "getFilePlayUrl" -> true
             path == "/ve/back/coursePlatform/userInfo.shtml" && method == "getUserInfo" -> true
             path == "/ve/back/rp/common/teachCalendar.shtml" && method in setOf("toDisplyTeachCourses", "toDisplyCourseSchedDetail") -> true
             else -> false
@@ -1157,6 +1189,36 @@ internal fun courseReplayUserIdCandidates(
     listOf(detailUserId, contextUserId, preferredUserId, listenUserId)
         .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
         .distinct()
+
+internal fun normalizeCourseResourcePreviewUrl(url: String): String {
+    val clean = url.trim()
+    return when {
+        clean.startsWith("http://", ignoreCase = true) || clean.startsWith("https://", ignoreCase = true) -> clean
+        clean.startsWith("/onlinePreview", ignoreCase = true) -> "${ProviderConstants.VE_KK_PREVIEW_BASE_URL}$clean"
+        clean.startsWith("/kk/", ignoreCase = true) -> "http://123.121.147.7:1936$clean"
+        clean.startsWith("/rp/", ignoreCase = true) -> buildCourseResourceOnlinePreviewUrl(clean)
+        else -> buildCourseResourceOnlinePreviewUrl(clean)
+    }
+}
+
+internal fun buildCourseResourceOnlinePreviewUrl(playUrl: String): String {
+    val fileUrl = courseResourcePreviewFileUrl(playUrl)
+    val encoded = URLEncoder.encode(
+        Base64.getEncoder().encodeToString(fileUrl.toByteArray(StandardCharsets.UTF_8)),
+        StandardCharsets.UTF_8.name(),
+    )
+    return "${ProviderConstants.VE_KK_PREVIEW_BASE_URL}/onlinePreview?url=$encoded"
+}
+
+internal fun courseResourcePreviewFileUrl(playUrl: String): String {
+    val clean = playUrl.trim()
+    return when {
+        clean.startsWith("http://", ignoreCase = true) || clean.startsWith("https://", ignoreCase = true) -> clean
+        clean.startsWith("/kk/", ignoreCase = true) -> "http://123.121.147.7:1936$clean"
+        clean.startsWith("/") -> "${ProviderConstants.VE_KK_PREVIEW_BASE_URL}$clean"
+        else -> "${ProviderConstants.VE_KK_PREVIEW_BASE_URL}/$clean"
+    }
+}
 
 internal fun courseReplayDetailParams(
     courseSchedId: String,

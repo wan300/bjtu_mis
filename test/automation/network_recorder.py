@@ -178,7 +178,13 @@ def is_inert_page_url(url: str | None) -> bool:
     return (url or "").lower() in INERT_PAGE_URLS
 
 
-async def select_recording_page(context: Any, start_url: str | None, fallback_url: str) -> tuple[Any, str]:
+async def select_recording_page(
+    context: Any,
+    start_url: str | None,
+    fallback_url: str,
+    *,
+    open_fallback_url: bool = False,
+) -> tuple[Any, str]:
     if start_url:
         page = await context.new_page()
         await page.goto(start_url)
@@ -190,8 +196,12 @@ async def select_recording_page(context: Any, start_url: str | None, fallback_ur
             return page, "preserved_existing_page"
 
     page = pages[0] if pages else await context.new_page()
-    await page.goto(fallback_url)
-    return page, "opened_default_start_url"
+    if open_fallback_url:
+        await page.goto(fallback_url)
+        return page, "opened_default_start_url"
+    if pages:
+        return page, "preserved_inert_page"
+    return page, "opened_blank_page"
 
 
 def is_sensitive_name(name: str) -> bool:
@@ -416,6 +426,8 @@ async def record_mail_traffic(
     label: str = "mail",
     max_response_bytes: int = 512 * 1024,
     max_request_chars: int = 128 * 1024,
+    open_fallback_url: bool = False,
+    close_browser: bool = True,
 ) -> CaptureResult:
     if async_playwright is None:
         raise RuntimeError("Playwright is required for recording. Install it with: python -m pip install playwright")
@@ -428,9 +440,11 @@ async def record_mail_traffic(
     lock = FileLock(settings.login_lock_path, stale_after_seconds=60 * 60 * 8)
     lock.acquire()
     closed = asyncio.Event()
+    browser_closed = asyncio.Event()
     loop = asyncio.get_running_loop()
     request_ids: dict[int, int] = {}
     request_counter = 0
+    recording_enabled = True
 
     def next_request_id() -> int:
         nonlocal request_counter
@@ -466,7 +480,12 @@ async def record_mail_traffic(
         "started_at": utcnow_iso(),
         "start_url": start_url,
         "fallback_url": settings.mis_home_url,
-        "page_policy": "Preserve an existing non-blank browser page unless --start-url is provided.",
+        "open_fallback_url": open_fallback_url,
+        "close_browser": close_browser,
+        "page_policy": (
+            "Preserve an existing browser page; blank/new-tab pages are not navigated "
+            "unless --open-fallback-url is provided."
+        ),
         "network_log": str(network_log),
         "profile_dir": str(settings.profile_dir),
         "max_response_bytes": max_response_bytes,
@@ -488,9 +507,16 @@ async def record_mail_traffic(
                 viewport={"width": 1440, "height": 900},
                 user_agent=settings.user_agent,
             )
-            context.on("close", lambda: closed.set())
+
+            def on_context_close() -> None:
+                closed.set()
+                browser_closed.set()
+
+            context.on("close", on_context_close)
 
             def on_request(request: Request) -> None:
+                if not recording_enabled:
+                    return
                 request_id = next_request_id()
                 request_ids[id(request)] = request_id
                 parsed_url = urlparse(request.url)
@@ -511,11 +537,16 @@ async def record_mail_traffic(
                 )
 
             async def log_response(response: Response) -> None:
+                if not recording_enabled:
+                    return
                 request = response.request
                 request_id = request_ids.get(id(request))
                 if request_id is None:
                     request_id = next_request_id()
                     request_ids[id(request)] = request_id
+                body = await response_body_summary(response, max_response_bytes)
+                if not recording_enabled:
+                    return
                 writer.write(
                     {
                         "event": "response",
@@ -524,7 +555,7 @@ async def record_mail_traffic(
                         "status": response.status,
                         "status_text": response.status_text,
                         "headers": sanitize_headers(dict(response.headers)),
-                        "body": await response_body_summary(response, max_response_bytes),
+                        "body": body,
                     }
                 )
 
@@ -532,6 +563,8 @@ async def record_mail_traffic(
                 asyncio.create_task(log_response(response))
 
             def on_request_failed(request: Request) -> None:
+                if not recording_enabled:
+                    return
                 request_id = request_ids.get(id(request))
                 failure = request.failure
                 if callable(failure):
@@ -553,7 +586,12 @@ async def record_mail_traffic(
             if sys.stdin and sys.stdin.isatty():
                 threading.Thread(target=marker_thread, daemon=True).start()
 
-            page, page_action = await select_recording_page(context, start_url, settings.mis_home_url)
+            page, page_action = await select_recording_page(
+                context,
+                start_url,
+                settings.mis_home_url,
+                open_fallback_url=open_fallback_url,
+            )
             manifest["initial_page_url"] = getattr(page, "url", "")
             manifest["initial_page_action"] = page_action
             manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -572,8 +610,14 @@ async def record_mail_traffic(
                 except TimeoutError:
                     continue
 
+            recording_enabled = False
             await context.storage_state(path=str(settings.session_state_path))
-            await context.close()
+            if close_browser:
+                if not browser_closed.is_set():
+                    await context.close()
+            elif not browser_closed.is_set():
+                print("Recording stopped. Close the browser window manually to finish the command.")
+                await browser_closed.wait()
     finally:
         writer.write({"event": "capture_finished", "finished_at": utcnow_iso()})
         writer.close()

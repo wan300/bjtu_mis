@@ -23,6 +23,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Open this URL in a new tab before recording. Defaults to preserving the current browser page.",
     )
+    record_mail.add_argument(
+        "--open-fallback-url",
+        action="store_true",
+        help="If no non-blank page exists, navigate a blank page to BJTU_MIS_HOME_URL.",
+    )
+    record_mail.add_argument(
+        "--keep-browser-open",
+        action="store_true",
+        help="After recording stops, wait for manual browser close instead of closing it automatically.",
+    )
     record_mail.add_argument("--label", default="mail", help="Capture directory label under captures/logs")
     record_mail.add_argument(
         "--max-response-bytes",
@@ -65,6 +75,8 @@ async def run_command(args: argparse.Namespace) -> int:
             label=args.label,
             max_response_bytes=args.max_response_bytes,
             max_request_chars=args.max_request_chars,
+            open_fallback_url=args.open_fallback_url,
+            close_browser=not args.keep_browser_open,
         )
         print(f"Capture saved: {result.output_dir}")
         print(f"Network log: {result.network_log}")

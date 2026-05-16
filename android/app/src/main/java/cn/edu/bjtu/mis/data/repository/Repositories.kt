@@ -24,6 +24,7 @@ import cn.edu.bjtu.mis.model.AutoLoginResult
 import cn.edu.bjtu.mis.model.CalendarData
 import cn.edu.bjtu.mis.model.CourseReplayData
 import cn.edu.bjtu.mis.model.CourseReplayPlaybackInfo
+import cn.edu.bjtu.mis.model.CourseResourceItem
 import cn.edu.bjtu.mis.model.CourseSelectionAttemptResult
 import cn.edu.bjtu.mis.model.CourseSelectionData
 import cn.edu.bjtu.mis.model.CourseResourcesData
@@ -495,6 +496,18 @@ class CourseResourceRepository(
             VeProvider(client).downloadCourseResource(rpId, target).file
         }
 
+    suspend fun preview(resource: CourseResourceItem): DocumentPreview {
+        if (!courseResourcePreviewSupported(resource)) {
+            throw IllegalStateException("该文件暂不支持在线预览，请下载后查看")
+        }
+        return sessionManager.withAuthenticatedClient { client ->
+            DocumentPreview(
+                url = VeProvider(client).previewCourseResource(resource),
+                cookies = client.cookieJar.snapshot().map { it.toDocumentPreviewCookie() },
+            )
+        }
+    }
+
     private fun safeDownloadFileName(filename: String, extension: String?, rpId: String): String {
         val safeName = filename
             .trim()
@@ -533,7 +546,7 @@ class HomeworkAttachmentRepository(
         return sessionManager.withAuthenticatedClient { client ->
             HomeworkAttachmentPreview(
                 url = VeProvider(client).previewHomeworkAttachment(homeworkId, attachmentId),
-                cookies = client.cookieJar.snapshot().map { it.toHomeworkAttachmentPreviewCookie() },
+                cookies = client.cookieJar.snapshot().map { it.toDocumentPreviewCookie() },
             )
         }
     }
@@ -548,12 +561,12 @@ class HomeworkAttachmentRepository(
     }
 }
 
-data class HomeworkAttachmentPreview(
+data class DocumentPreview(
     val url: String,
-    val cookies: List<HomeworkAttachmentPreviewCookie>,
+    val cookies: List<DocumentPreviewCookie>,
 )
 
-data class HomeworkAttachmentPreviewCookie(
+data class DocumentPreviewCookie(
     val name: String,
     val value: String,
     val domain: String,
@@ -563,8 +576,12 @@ data class HomeworkAttachmentPreviewCookie(
     val hostOnly: Boolean,
 )
 
-private fun Cookie.toHomeworkAttachmentPreviewCookie(): HomeworkAttachmentPreviewCookie =
-    HomeworkAttachmentPreviewCookie(
+typealias HomeworkAttachmentPreview = DocumentPreview
+
+typealias HomeworkAttachmentPreviewCookie = DocumentPreviewCookie
+
+private fun Cookie.toDocumentPreviewCookie(): DocumentPreviewCookie =
+    DocumentPreviewCookie(
         name = name,
         value = value,
         domain = domain,
@@ -576,6 +593,18 @@ private fun Cookie.toHomeworkAttachmentPreviewCookie(): HomeworkAttachmentPrevie
 
 internal fun homeworkAttachmentPreviewSupported(filename: String): Boolean =
     filename.substringAfterLast('.', "").lowercase() !in setOf("zip", "rar", "7z")
+
+internal fun courseResourcePreviewSupported(resource: CourseResourceItem): Boolean =
+    courseResourcePreviewSupported(resource.extension?.takeIf { it.isNotBlank() } ?: resource.name)
+
+internal fun courseResourcePreviewSupported(filenameOrExtension: String): Boolean {
+    val extension = if (filenameOrExtension.contains('.')) {
+        filenameOrExtension.substringAfterLast('.', "")
+    } else {
+        filenameOrExtension
+    }.trim().trimStart('.').lowercase()
+    return extension !in setOf("zip", "rar", "7z", "exe", "apk")
+}
 
 internal fun safeHomeworkAttachmentFileName(filename: String, attachmentId: String): String {
     val safeId = attachmentId

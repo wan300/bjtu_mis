@@ -17,7 +17,8 @@ python -m playwright install chromium
 python test\automation\cli.py record-mail
 ```
 
-By default, the recorder keeps the currently open non-blank browser page and only attaches network logging.
+By default, the recorder keeps the currently open browser page and only attaches network logging.
+If the profile only has a blank/new-tab page, it will keep that page blank and wait for manual navigation.
 
 如果已经知道邮件入口 URL，可以指定起始页：
 
@@ -26,6 +27,12 @@ python test\automation\cli.py record-mail --start-url "https://mis.bjtu.edu.cn/h
 ```
 
 When `--start-url` is provided, the URL is opened in a new tab so the existing page is not overwritten.
+
+如需恢复旧行为，在没有非空白页时自动打开默认入口：
+
+```powershell
+python test\automation\cli.py record-mail --open-fallback-url
+```
 
 录制文件会写入：
 
@@ -75,6 +82,14 @@ MARK 解除拉黑
 ```text
 q
 ```
+
+默认情况下，输入 `q` 后脚本会关闭本次 Playwright 启动的录制浏览器。若希望停止录制后保留浏览器窗口，请使用：
+
+```powershell
+python test\automation\cli.py record-mail --keep-browser-open
+```
+
+此模式下输入 `q` 后会停止记录请求，但命令会等你手动关闭浏览器后再退出。
 
 ## 5. 分析接口
 

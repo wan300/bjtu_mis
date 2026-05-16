@@ -80,6 +80,38 @@ async def test_select_recording_page_opens_explicit_start_url_in_new_tab() -> No
     assert current_page.brought_to_front is False
 
 
+@pytest.mark.asyncio
+async def test_select_recording_page_preserves_blank_page_without_fallback_navigation() -> None:
+    blank_page = FakePage("about:blank")
+    context = FakeContext([blank_page])
+
+    page, action = await select_recording_page(context, None, "https://fallback.example.edu/")
+
+    assert page is blank_page
+    assert action == "preserved_inert_page"
+    assert context.created_pages == []
+    assert blank_page.goto_urls == []
+
+
+@pytest.mark.asyncio
+async def test_select_recording_page_can_open_fallback_url_when_requested() -> None:
+    blank_page = FakePage("about:blank")
+    context = FakeContext([blank_page])
+
+    page, action = await select_recording_page(
+        context,
+        None,
+        "https://fallback.example.edu/",
+        open_fallback_url=True,
+    )
+
+    assert page is blank_page
+    assert page.url == "https://fallback.example.edu/"
+    assert action == "opened_default_start_url"
+    assert context.created_pages == []
+    assert blank_page.goto_urls == ["https://fallback.example.edu/"]
+
+
 def test_analyze_mail_capture_covers_core_operations(tmp_path: Path) -> None:
     network_log = tmp_path / "network.jsonl"
     events = [

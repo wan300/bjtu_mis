@@ -9,6 +9,7 @@ object ProviderConstants {
     const val AA_TIMETABLE_URL = "$AA_BASE_URL/course_selection/courseselect/stuschedule/"
     const val AA_NOTICE_URL = "$AA_BASE_URL/notice/item/"
     const val VE_BASE_URL = "http://123.121.147.7:88"
+    const val VE_KK_PREVIEW_BASE_URL = "http://123.121.147.7:1936/kk"
     const val VE_COURSE_PLATFORM_PATH = "/ve/back/coursePlatform/coursePlatform.shtml"
     const val VE_COURSE_PLATFORM_BASE_URL = "$VE_BASE_URL$VE_COURSE_PLATFORM_PATH"
     const val VE_HOMEWORK_COURSE_TO_PAGE = "10460"

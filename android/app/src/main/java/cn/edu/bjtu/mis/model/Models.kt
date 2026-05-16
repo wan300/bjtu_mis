@@ -357,6 +357,8 @@ data class CourseResourceItem(
     val name: String,
     val extension: String? = null,
     val size: String? = null,
+    val playUrl: String? = null,
+    val resUrl: String? = null,
     val uploadedAt: String? = null,
     val teacherName: String? = null,
     val downloadCount: Int? = null,

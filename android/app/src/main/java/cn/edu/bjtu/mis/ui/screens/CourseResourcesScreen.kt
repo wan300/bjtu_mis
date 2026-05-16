@@ -31,6 +31,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import cn.edu.bjtu.mis.data.repository.CourseResourceRepository
+import cn.edu.bjtu.mis.data.repository.DocumentPreview
+import cn.edu.bjtu.mis.model.CourseResourceItem
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.ModuleEnvelope
 import cn.edu.bjtu.mis.ui.components.InfoCard
@@ -50,6 +52,8 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
     var search by remember { mutableStateOf("") }
     var state by remember { mutableStateOf<LoadState<ModuleEnvelope<CourseResourcesData>>>(LoadState.Loading) }
     var downloading by remember { mutableStateOf<String?>(null) }
+    var previewing by remember { mutableStateOf<String?>(null) }
+    var previewTarget by remember { mutableStateOf<CourseResourcesPreviewTarget?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     fun load(nextFolder: String = folderId, nextCourse: String = selectedCourseId) {
@@ -68,7 +72,49 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
         }
     }
 
+    fun downloadResource(resource: CourseResourceItem) {
+        scope.launch {
+            downloading = resource.rpId
+            error = null
+            runCatching { repository.download(resource.rpId, resource.name, resource.extension) }
+                .onSuccess {
+                    if (!openFile(context, it)) {
+                        error = "已下载，但未找到可打开该文件的应用"
+                    }
+                }
+                .onFailure { error = it.message ?: "下载失败" }
+            downloading = null
+        }
+    }
+
+    fun previewResource(resource: CourseResourceItem) {
+        scope.launch {
+            previewing = resource.rpId
+            error = null
+            runCatching { repository.preview(resource) }
+                .onSuccess { preview -> previewTarget = CourseResourcesPreviewTarget(resource, preview) }
+                .onFailure { error = it.message ?: "预览失败" }
+            previewing = null
+        }
+    }
+
     LaunchedEffect(Unit) { load() }
+
+    previewTarget?.let { target ->
+        DocumentPreviewScreen(
+            title = target.resource.name,
+            subtitle = target.resource.teacherName,
+            preview = target.preview,
+            downloadBusy = downloading == target.resource.rpId,
+            error = error,
+            onClose = {
+                previewTarget = null
+                error = null
+            },
+            onDownload = { downloadResource(target.resource) },
+        )
+        return
+    }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
@@ -144,20 +190,19 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
                             KeyValue("下载", resource.downloadCount?.toString(), Modifier.weight(1f))
                         }
                         KeyValue("教师", resource.teacherName)
-                        Button(
-                            enabled = resource.canDownload && downloading == null,
-                            onClick = {
-                                scope.launch {
-                                    downloading = resource.rpId
-                                    error = null
-                                    runCatching { repository.download(resource.rpId, resource.name, resource.extension) }
-                                        .onSuccess { openFile(context, it) }
-                                        .onFailure { error = it.message ?: "下载失败" }
-                                    downloading = null
-                                }
-                            },
-                        ) {
-                            Text(if (downloading == resource.rpId) "下载中" else "下载")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                enabled = previewing == null && downloading == null,
+                                onClick = { previewResource(resource) },
+                            ) {
+                                Text(if (previewing == resource.rpId) "预览中" else "预览")
+                            }
+                            Button(
+                                enabled = resource.canDownload && downloading == null && previewing == null,
+                                onClick = { downloadResource(resource) },
+                            ) {
+                                Text(if (downloading == resource.rpId) "下载中" else "下载")
+                            }
                         }
                     }
                 }
@@ -215,3 +260,8 @@ internal fun openFile(context: android.content.Context, file: File): Boolean {
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     return runCatching { context.startActivity(Intent.createChooser(intent, "打开文件")) }.isSuccess
 }
+
+private data class CourseResourcesPreviewTarget(
+    val resource: CourseResourceItem,
+    val preview: DocumentPreview,
+)

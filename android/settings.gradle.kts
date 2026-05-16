@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "BjtuMisAndroid"
 include(":app")
+include(":capacitor-android")

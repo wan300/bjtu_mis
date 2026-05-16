@@ -203,7 +203,15 @@ class ParserTest {
             """
             {
               "bagList": [{"id": 8, "bag_name": "课堂材料"}],
-              "resList": [{"rpId": 1001, "resId": 2001, "rpName": "GraphQL.pdf", "extName": "PDF", "stu_download": 2}],
+              "resList": [{
+                "rpId": 1001,
+                "resId": 2001,
+                "rpName": "GraphQL.pdf",
+                "extName": "PDF",
+                "stu_download": 2,
+                "play_url": "/rp/2026/03/17/swf/demo.pdf",
+                "res_url": "/rp/2026/03/17/demo.pdf"
+              }],
               "STATUS": "0"
             }
             """.trimIndent()
@@ -211,6 +219,8 @@ class ParserTest {
         val (folders, resources) = parseCourseResourceListing(payload, "0")
         assertEquals("8", folders.first().folderId)
         assertEquals("1001", resources.first().rpId)
+        assertEquals("/rp/2026/03/17/swf/demo.pdf", resources.first().playUrl)
+        assertEquals("/rp/2026/03/17/demo.pdf", resources.first().resUrl)
         assertTrue(resources.first().canDownload)
     }
 

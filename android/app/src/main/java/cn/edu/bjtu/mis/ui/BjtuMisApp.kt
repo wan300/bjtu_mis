@@ -18,10 +18,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -61,6 +61,7 @@ import cn.edu.bjtu.mis.ui.screens.ExamsScreen
 import cn.edu.bjtu.mis.ui.screens.HomeworkScreen
 import cn.edu.bjtu.mis.ui.screens.LoginScreen
 import cn.edu.bjtu.mis.ui.screens.MailScreen
+import cn.edu.bjtu.mis.ui.screens.OpenWebUiAgentScreen
 import cn.edu.bjtu.mis.ui.screens.OverviewScreen
 import cn.edu.bjtu.mis.ui.screens.ProfileScreen
 import cn.edu.bjtu.mis.ui.screens.ScoresScreen
@@ -73,7 +74,8 @@ import kotlinx.coroutines.launch
 
 private const val RouteHome = "overview"
 private const val RouteServices = "services"
-private val MainRoutes = setOf(RouteHome, RouteServices, ModuleKeys.Profile)
+private const val RouteOpenWebUiAgent = "openwebui_agent"
+private val MainRoutes = setOf(RouteHome, RouteServices, RouteOpenWebUiAgent, ModuleKeys.Profile)
 
 private data class BottomTab(
     val route: String,
@@ -84,6 +86,7 @@ private data class BottomTab(
 private enum class ShellIcon {
     Home,
     Grid,
+    Agent,
     Person,
     Back,
 }
@@ -91,6 +94,7 @@ private enum class ShellIcon {
 private val BottomTabs = listOf(
     BottomTab(RouteHome, "首页", ShellIcon.Home),
     BottomTab(RouteServices, "服务", ShellIcon.Grid),
+    BottomTab(RouteOpenWebUiAgent, "Agent", ShellIcon.Agent),
     BottomTab(ModuleKeys.Profile, "我的", ShellIcon.Person),
 )
 
@@ -113,6 +117,7 @@ fun BjtuMisApp(
     var showAutoLoginFailedDialog by remember { mutableStateOf(false) }
     var autoLoginFailedMessage by remember { mutableStateOf("") }
     var autoLoginRetrying by remember { mutableStateOf(false) }
+    var openWebUiBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
 
     fun startSessionKeepAlive() {
         runCatching { SessionKeepAliveForegroundService.start(context) }
@@ -192,7 +197,7 @@ fun BjtuMisApp(
         if (ready == true && !route.isNullOrBlank()) {
             current = route
             mainTab = when (route) {
-                RouteHome, RouteServices, ModuleKeys.Profile -> route
+                RouteHome, RouteServices, RouteOpenWebUiAgent, ModuleKeys.Profile -> route
                 else -> RouteServices
             }
             showExitDialog = false
@@ -245,6 +250,7 @@ fun BjtuMisApp(
         true -> {
             BackHandler {
                 when {
+                    current == RouteOpenWebUiAgent && openWebUiBackHandler?.invoke() == true -> Unit
                     current !in MainRoutes -> current = mainTab
                     current != RouteHome -> navigateMain(RouteHome)
                     else -> showExitDialog = true
@@ -275,20 +281,22 @@ fun BjtuMisApp(
             }
 
             val extendHomeIntoStatusBar = themeOption == AppThemeOption.MascotGold && current == RouteHome
-            if (extendHomeIntoStatusBar) {
-                BjtuMisSystemBars(
-                    statusBarColor = Color.Transparent,
-                    navigationBarColor = MaterialTheme.colorScheme.surface,
-                    useDarkStatusBarIcons = false,
-                    useDarkNavigationBarIcons = false,
-                    decorFitsSystemWindows = false,
-                    restoreDecorFitsSystemWindowsOnDispose = true,
-                )
-            }
+            val isOpenWebUiAgent = current == RouteOpenWebUiAgent
+            BjtuMisSystemBars(
+                statusBarColor = when {
+                    extendHomeIntoStatusBar -> Color.Transparent
+                    isOpenWebUiAgent -> Color(0xFF171717)
+                    else -> MaterialTheme.colorScheme.primary
+                },
+                navigationBarColor = MaterialTheme.colorScheme.surface,
+                useDarkStatusBarIcons = !isOpenWebUiAgent && themeOption != AppThemeOption.MascotGold,
+                useDarkNavigationBarIcons = themeOption != AppThemeOption.MascotGold,
+                decorFitsSystemWindows = !extendHomeIntoStatusBar,
+            )
 
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
-                contentWindowInsets = if (extendHomeIntoStatusBar) WindowInsets(0.dp) else ScaffoldDefaults.contentWindowInsets,
+                contentWindowInsets = WindowInsets(0.dp),
                 topBar = {
                     when {
                         current == RouteServices -> MainTitleBar("服务")
@@ -301,7 +309,11 @@ fun BjtuMisApp(
                 },
                 bottomBar = {
                     if (current in MainRoutes) {
-                        AppBottomBar(current = current, onSelect = ::navigateMain)
+                        AppBottomBar(
+                            current = current,
+                            useWindowInsets = extendHomeIntoStatusBar,
+                            onSelect = ::navigateMain,
+                        )
                     }
                 },
             ) { padding ->
@@ -322,6 +334,10 @@ fun BjtuMisApp(
                         RouteServices -> ServicesScreen(
                             moduleRepository = container.moduleRepository,
                             onNavigate = ::navigateModule,
+                        )
+                        RouteOpenWebUiAgent -> OpenWebUiAgentScreen(
+                            repository = container.moduleRepository,
+                            onBackHandlerChanged = { openWebUiBackHandler = it },
                         )
                         ModuleKeys.Profile -> MainScreenPadding {
                             ProfileScreen(
@@ -410,6 +426,7 @@ private fun MainTitleBar(title: String) {
         title = {
             Text(title, color = colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
         },
+        windowInsets = WindowInsets(0.dp),
         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
             containerColor = colorScheme.primary,
             titleContentColor = colorScheme.onPrimary,
@@ -430,6 +447,7 @@ private fun DetailTitleBar(title: String, onBack: () -> Unit) {
                 ShellLineIcon(ShellIcon.Back, color = colorScheme.onPrimary)
             }
         },
+        windowInsets = WindowInsets(0.dp),
         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
             containerColor = colorScheme.primary,
             titleContentColor = colorScheme.onPrimary,
@@ -439,11 +457,16 @@ private fun DetailTitleBar(title: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun AppBottomBar(current: String, onSelect: (String) -> Unit) {
+private fun AppBottomBar(
+    current: String,
+    useWindowInsets: Boolean,
+    onSelect: (String) -> Unit,
+) {
     val colorScheme = MaterialTheme.colorScheme
     NavigationBar(
         containerColor = colorScheme.surface,
         tonalElevation = 8.dp,
+        windowInsets = if (useWindowInsets) NavigationBarDefaults.windowInsets else WindowInsets(0.dp),
     ) {
         BottomTabs.forEach { tab ->
             val selected = current == tab.route
@@ -504,6 +527,32 @@ private fun ShellLineIcon(icon: ShellIcon, color: Color, modifier: Modifier = Mo
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()),
                     )
                 }
+            }
+            ShellIcon.Agent -> {
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(size.width * 0.2f, size.height * 0.28f),
+                    size = Size(size.width * 0.6f, size.height * 0.46f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(7.dp.toPx(), 7.dp.toPx()),
+                    style = stroke,
+                )
+                drawLine(
+                    color = color,
+                    start = Offset(size.width * 0.5f, size.height * 0.28f),
+                    end = Offset(size.width * 0.5f, size.height * 0.14f),
+                    strokeWidth = stroke.width,
+                    cap = StrokeCap.Round,
+                )
+                drawCircle(color, radius = size.minDimension * 0.045f, center = Offset(size.width * 0.5f, size.height * 0.11f))
+                drawCircle(color, radius = size.minDimension * 0.035f, center = Offset(size.width * 0.39f, size.height * 0.48f))
+                drawCircle(color, radius = size.minDimension * 0.035f, center = Offset(size.width * 0.61f, size.height * 0.48f))
+                drawLine(
+                    color = color,
+                    start = Offset(size.width * 0.4f, size.height * 0.62f),
+                    end = Offset(size.width * 0.6f, size.height * 0.62f),
+                    strokeWidth = stroke.width,
+                    cap = StrokeCap.Round,
+                )
             }
             ShellIcon.Person -> {
                 drawCircle(color, radius = size.minDimension * 0.16f, center = Offset(size.width * 0.5f, size.height * 0.34f), style = stroke)
