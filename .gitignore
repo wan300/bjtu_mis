@@ -22,8 +22,8 @@ desktop.ini
 **/.idea/caches/
 
 # Automation captures and runtime state
-captures/
-runtime/
+/captures/
+/runtime/
 .github/java-upgrade/
 
 # Gradle / Android build outputs
@@ -45,6 +45,13 @@ android/app/release/
 android/app/src/main/assets/capacitor.config.json
 android/app/src/main/assets/capacitor.plugins.json
 android/app/src/main/assets/public/
+
+# Embedded Open WebUI source is tracked; generated frontend state is not
+android/open-webui/node_modules/
+android/open-webui/build/
+android/open-webui/.svelte-kit/
+android/open-webui/static/pyodide/*
+!android/open-webui/static/pyodide/pyodide-lock.json
 
 # JVM and archive outputs
 *.jar

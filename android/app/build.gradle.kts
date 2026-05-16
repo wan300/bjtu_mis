@@ -15,6 +15,78 @@ val packagedAbis = providers.gradleProperty("targetAbis")
     }
     .getOrElse(listOf("arm64-v8a"))
 
+val openWebUiDir = rootProject.layout.projectDirectory.dir("open-webui")
+val openWebUiBuildDir = openWebUiDir.dir("build")
+val openWebUiAssetsDir = layout.projectDirectory.dir("src/main/assets/public")
+val npmExecutable = if (System.getProperty("os.name").lowercase().contains("windows")) {
+    "npm.cmd"
+} else {
+    "npm"
+}
+
+val npmCiOpenWebUi by tasks.registering(Exec::class) {
+    group = "openwebui"
+    description = "Install Open WebUI frontend dependencies."
+    workingDir = openWebUiDir.asFile
+    commandLine(npmExecutable, "ci")
+
+    inputs.files(
+        openWebUiDir.file("package.json"),
+        openWebUiDir.file("package-lock.json"),
+    )
+    outputs.dir(openWebUiDir.dir("node_modules"))
+}
+
+val buildOpenWebUi by tasks.registering(Exec::class) {
+    group = "openwebui"
+    description = "Build Open WebUI frontend assets for the Android WebView."
+    dependsOn(npmCiOpenWebUi)
+    workingDir = openWebUiDir.asFile
+    commandLine(npmExecutable, "run", "build")
+    environment("ENABLE_MOBILE_CLIENT", "true")
+    environment("ENABLE_MOBILE_NATIVE_FEATURES", "true")
+
+    inputs.property("ENABLE_MOBILE_CLIENT", "true")
+    inputs.property("ENABLE_MOBILE_NATIVE_FEATURES", "true")
+    inputs.files(
+        openWebUiDir.file("package.json"),
+        openWebUiDir.file("package-lock.json"),
+        openWebUiDir.file("svelte.config.js"),
+        openWebUiDir.file("vite.config.ts"),
+        openWebUiDir.file("tsconfig.json"),
+        openWebUiDir.file("postcss.config.js"),
+        openWebUiDir.file("tailwind.config.js"),
+    )
+    inputs.dir(openWebUiDir.dir("src"))
+    inputs.files(fileTree(openWebUiDir.dir("static")) {
+        exclude("pyodide/**")
+    })
+    outputs.dir(openWebUiBuildDir)
+    outputs.dir(openWebUiDir.dir("static/pyodide"))
+}
+
+val syncOpenWebUiAssets by tasks.registering(Copy::class) {
+    group = "openwebui"
+    description = "Sync generated Open WebUI assets into Android packaged assets."
+    dependsOn(buildOpenWebUi)
+
+    from(openWebUiBuildDir) {
+        exclude("**/*.map")
+    }
+    into(openWebUiAssetsDir)
+
+    doFirst {
+        delete(openWebUiAssetsDir.asFile)
+    }
+    doLast {
+        val outputDir = openWebUiAssetsDir.asFile
+        outputDir.mkdirs()
+        listOf("cordova.js", "cordova_plugins.js").forEach { shim ->
+            outputDir.resolve(shim).writeBytes(ByteArray(0))
+        }
+    }
+}
+
 android {
     namespace = "cn.edu.bjtu.mis"
     compileSdk = 35
@@ -112,4 +184,8 @@ dependencies {
     testImplementation(libs.jsoup)
     testImplementation(libs.kotlinx.serialization.json)
     testImplementation(libs.androidx.room.testing)
+}
+
+tasks.named("preBuild") {
+    dependsOn(syncOpenWebUiAssets)
 }
