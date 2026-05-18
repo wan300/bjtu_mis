@@ -15,6 +15,7 @@ import cn.edu.bjtu.mis.data.agent.tools.WorkspaceImportSource
 import cn.edu.bjtu.mis.data.agent.tools.agentGeneratedFilePreviewKind
 import cn.edu.bjtu.mis.data.agent.tools.guessAgentGeneratedFileMimeType
 import cn.edu.bjtu.mis.data.agent.tools.listGeneratedFilesInWorkspace
+import cn.edu.bjtu.mis.data.sync.SessionKeepAliveForegroundService
 import cn.edu.bjtu.mis.model.HomeworkAttachment
 import cn.edu.bjtu.mis.model.HomeworkItem
 import com.getcapacitor.JSObject
@@ -120,6 +121,32 @@ class NativeAgentToolsPlugin : Plugin() {
                 call.reject(error.message ?: "Native agent tool failed", error)
             }
         }
+    }
+
+    @PluginMethod
+    fun beginKeepAlive(call: PluginCall) {
+        val token = call.getString("token")?.trim().orEmpty()
+        if (token.isBlank()) {
+            call.reject("token is required")
+            return
+        }
+
+        val reason = call.getString("reason")?.trim()?.takeIf { it.isNotBlank() }
+            ?: SessionKeepAliveForegroundService.REASON_AGENT
+        SessionKeepAliveForegroundService.acquire(getContext(), reason, token)
+        call.resolve(JSObject().put("active", true))
+    }
+
+    @PluginMethod
+    fun endKeepAlive(call: PluginCall) {
+        val token = call.getString("token")?.trim().orEmpty()
+        if (token.isBlank()) {
+            call.reject("token is required")
+            return
+        }
+
+        SessionKeepAliveForegroundService.release(getContext(), token)
+        call.resolve(JSObject().put("active", false))
     }
 
     @PluginMethod

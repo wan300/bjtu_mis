@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import cn.edu.bjtu.mis.BjtuMisApplication
 import cn.edu.bjtu.mis.MainActivity
 import cn.edu.bjtu.mis.R
+import cn.edu.bjtu.mis.data.sync.SessionKeepAliveForegroundService
 import cn.edu.bjtu.mis.model.CourseSelectionReplaceRule
 import cn.edu.bjtu.mis.model.CourseSelectionRunConfig
 import cn.edu.bjtu.mis.model.CourseSelectionRunState
@@ -32,6 +33,7 @@ class CourseSelectionForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var observerJob: Job? = null
     private var lastCaptchaNotificationId: String? = null
+    private var keepAliveHeld = false
 
     private val runner: CourseSelectionRunner
         get() = (application as BjtuMisApplication).container.courseSelectionRunner
@@ -62,7 +64,8 @@ class CourseSelectionForegroundService : Service() {
                 }
                 startForegroundCompat(buildRunningNotification(runner.state.value))
                 observeRunner()
-                runner.start(config)
+                val started = runner.start(config)
+                if (started || runner.state.value.running) acquireKeepAlive()
             }
         }
         return START_STICKY
@@ -72,6 +75,7 @@ class CourseSelectionForegroundService : Service() {
 
     override fun onDestroy() {
         observerJob?.cancel()
+        releaseKeepAlive()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -88,6 +92,7 @@ class CourseSelectionForegroundService : Service() {
     private fun updateNotifications(state: CourseSelectionRunState) {
         val notificationManager = NotificationManagerCompat.from(this)
         if (!state.running) {
+            releaseKeepAlive()
             notificationManager.cancel(NOTIFICATION_ID_RUNNING)
             notificationManager.cancel(NOTIFICATION_ID_CAPTCHA)
             stopForegroundCompat()
@@ -95,6 +100,7 @@ class CourseSelectionForegroundService : Service() {
             return
         }
 
+        acquireKeepAlive()
         notificationManager.notify(NOTIFICATION_ID_RUNNING, buildRunningNotification(state))
         val challengeId = state.awaitingCaptcha?.challengeId
         if (challengeId == null) {
@@ -104,6 +110,22 @@ class CourseSelectionForegroundService : Service() {
             lastCaptchaNotificationId = challengeId
             notificationManager.notify(NOTIFICATION_ID_CAPTCHA, buildCaptchaNotification(state))
         }
+    }
+
+    private fun acquireKeepAlive() {
+        if (keepAliveHeld) return
+        SessionKeepAliveForegroundService.acquire(
+            context = this,
+            reason = SessionKeepAliveForegroundService.REASON_COURSE_SELECTION,
+            token = KEEP_ALIVE_TOKEN,
+        )
+        keepAliveHeld = true
+    }
+
+    private fun releaseKeepAlive() {
+        if (!keepAliveHeld) return
+        SessionKeepAliveForegroundService.release(this, KEEP_ALIVE_TOKEN)
+        keepAliveHeld = false
     }
 
     private fun buildRunningNotification(state: CourseSelectionRunState) =
@@ -249,6 +271,7 @@ class CourseSelectionForegroundService : Service() {
         private const val REQUEST_OPEN_RUNNING = 3101
         private const val REQUEST_OPEN_CAPTCHA = 3102
         private const val REQUEST_STOP = 3103
+        private const val KEEP_ALIVE_TOKEN = "course_selection"
 
         fun start(context: Context, config: CourseSelectionRunConfig) {
             val intent = Intent(context, CourseSelectionForegroundService::class.java)

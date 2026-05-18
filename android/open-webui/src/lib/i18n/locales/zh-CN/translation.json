@@ -200,6 +200,7 @@
 	"Are you sure you want to delete this message?": "您确认要删除此消息吗？",
 	"Are you sure you want to delete this version? Child versions will be relinked to this version's parent.": "您确认要删除此版本吗？其子版本将重新链接到该版本的上一级。",
 	"Are you sure you want to delete this?": "确定要删除吗？",
+	"Are you sure you want to sign out?": "确定要退出登录吗？",
 	"Are you sure you want to unarchive all archived chats?": "您确认要取消所有已归档的对话吗？",
 	"Arena Models": "模型盲测",
 	"Artifacts": "产物",

@@ -3,6 +3,7 @@ package cn.edu.bjtu.mis.ui.screens
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -33,6 +34,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -112,6 +114,8 @@ import cn.edu.bjtu.mis.openwebui.NativeAgentHomeworkHandoff
 import cn.edu.bjtu.mis.openwebui.NativeAgentHomeworkHandoffStore
 import cn.edu.bjtu.mis.model.ModuleEnvelope
 import cn.edu.bjtu.mis.model.ProgressiveModuleState
+import cn.edu.bjtu.mis.model.ProfileField
+import cn.edu.bjtu.mis.model.ProfileSection
 import cn.edu.bjtu.mis.model.ScoreData
 import cn.edu.bjtu.mis.model.ScoreDetailData
 import cn.edu.bjtu.mis.model.ScoreDetailTable
@@ -138,6 +142,7 @@ import cn.edu.bjtu.mis.ui.components.LoadingOrError
 import cn.edu.bjtu.mis.ui.components.ProgressiveStatus
 import cn.edu.bjtu.mis.ui.components.SectionTitle
 import cn.edu.bjtu.mis.ui.theme.AppThemeOption
+import cn.edu.bjtu.mis.widget.TimetableWidgetProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
@@ -192,159 +197,411 @@ private fun SecondaryModuleLinks(
 fun ProfileScreen(
     repository: ModuleRepository,
     selectedTheme: AppThemeOption = AppThemeOption.Default,
-    onThemeSelected: (AppThemeOption) -> Unit = {},
     onLogout: () -> Unit,
+    onOpenPersonalInfo: () -> Unit,
+    onOpenTrainingInfo: () -> Unit,
+    onOpenTheme: () -> Unit,
     onNavigate: (String) -> Unit,
 ) {
     DataScreen(
         title = "我的",
         loader = { repository.profile() },
-        leadingContent = {
-            item {
-                ThemePreferenceCard(
-                    selectedTheme = selectedTheme,
-                    onThemeSelected = onThemeSelected,
-                )
-            }
-        },
     ) { envelope ->
         val profile = envelope.data
         item { ProfileHeaderCard(profile) }
         item {
-            SectionTitle(
-                title = "资料分区",
-                subtitle = "来自教务系统的个人资料",
+            ProfileSettingsGroup(
+                items = listOf(
+                    ProfileSettingsItem(
+                        title = "人员信息",
+                        subtitle = "姓名、学号与身份资料",
+                        iconLabel = "人",
+                        iconColor = Color(0xFF58C7B4),
+                        onClick = onOpenPersonalInfo,
+                    ),
+                    ProfileSettingsItem(
+                        title = "培养信息",
+                        subtitle = "学院、专业与学籍资料",
+                        iconLabel = "培",
+                        iconColor = Color(0xFF4D8EF7),
+                        onClick = onOpenTrainingInfo,
+                    ),
+                    ProfileSettingsItem(
+                        title = "主题",
+                        subtitle = "切换应用配色",
+                        iconLabel = "题",
+                        iconColor = Color(0xFFE4B96A),
+                        trailingText = themeOptionLabel(selectedTheme),
+                        onClick = onOpenTheme,
+                    ),
+                ),
             )
         }
-        val sections = profile.sections.ifEmpty { listOf(cn.edu.bjtu.mis.model.ProfileSection("基本信息", profile.fields)) }
-        items(sections, key = { it.title }) { section ->
-            InfoCard(section.title) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    section.fields.chunked(2).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
-                            row.forEach { field ->
-                                KeyValue(field.label, field.value, Modifier.weight(1f))
-                            }
-                            if (row.size == 1) {
-                                Spacer(Modifier.weight(1f))
-                            }
-                        }
-                    }
-                }
-            }
-        }
         item {
-            InfoCard(title = "相关入口", subtitle = "只展示当前已实现的个人相关模块") {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(
-                            onClick = { onNavigate(ModuleKeys.AcademicProgress) },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("学业进度")
-                        }
-                        OutlinedButton(
-                            onClick = { onNavigate(ModuleKeys.Scores) },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("主修成绩")
-                        }
-                    }
-                    OutlinedButton(
+            ProfileSettingsGroup(
+                items = listOf(
+                    ProfileSettingsItem(
+                        title = "学业进度",
+                        subtitle = "查看培养完成情况",
+                        iconLabel = "进",
+                        iconColor = Color(0xFF6E62D6),
+                        onClick = { onNavigate(ModuleKeys.AcademicProgress) },
+                    ),
+                    ProfileSettingsItem(
+                        title = "主修成绩",
+                        subtitle = "查看本学期成绩",
+                        iconLabel = "绩",
+                        iconColor = Color(0xFFE46B2D),
+                        onClick = { onNavigate(ModuleKeys.Scores) },
+                    ),
+                    ProfileSettingsItem(
+                        title = "查看课表",
+                        subtitle = "进入本周课程",
+                        iconLabel = "课",
+                        iconColor = Color(0xFF18B7D8),
                         onClick = { onNavigate(ModuleKeys.Timetable) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("查看课表")
-                    }
-                }
-            }
+                    ),
+                ),
+            )
         }
         item {
-            Button(
-                onClick = onLogout,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("退出登录")
-            }
+            ProfileSettingsGroup(
+                items = listOf(
+                    ProfileSettingsItem(
+                        title = "退出登录",
+                        subtitle = "退出当前校园账号",
+                        iconLabel = "退",
+                        iconColor = Color(0xFFD95B5B),
+                        destructive = true,
+                        showChevron = false,
+                        onClick = onLogout,
+                    ),
+                ),
+            )
         }
     }
 }
 
 @Composable
-private fun ThemePreferenceCard(
+fun ProfilePersonalInfoScreen(repository: ModuleRepository) {
+    ProfileInfoDetailScreen(
+        title = "人员信息",
+        repository = repository,
+        kind = ProfileInfoKind.Personal,
+        emptyMessage = "暂无人员信息",
+    )
+}
+
+@Composable
+fun ProfileTrainingInfoScreen(repository: ModuleRepository) {
+    ProfileInfoDetailScreen(
+        title = "培养信息",
+        repository = repository,
+        kind = ProfileInfoKind.Training,
+        emptyMessage = "暂无培养信息",
+    )
+}
+
+@Composable
+fun ProfileThemeScreen(
     selectedTheme: AppThemeOption,
     onThemeSelected: (AppThemeOption) -> Unit,
 ) {
-    InfoCard(title = "主题", subtitle = "切换应用配色") {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium)
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            ThemeSegment(
-                option = AppThemeOption.Default,
-                label = "蓝白色",
-                swatches = listOf(Color(0xFF0B74F6), Color.White),
-                selected = selectedTheme == AppThemeOption.Default,
-                onClick = onThemeSelected,
-                modifier = Modifier.weight(1f),
-            )
-            ThemeSegment(
-                option = AppThemeOption.MascotGold,
-                label = "暖金黑",
-                swatches = listOf(Color(0xFF171A24), Color(0xFFE4B96A)),
-                selected = selectedTheme == AppThemeOption.MascotGold,
-                onClick = onThemeSelected,
-                modifier = Modifier.weight(1f),
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item {
+            ProfileSettingsGroup(
+                items = listOf(
+                    ProfileSettingsItem(
+                        title = "蓝白色",
+                        subtitle = "浅色背景与蓝色主色",
+                        iconLabel = "蓝",
+                        iconColor = Color(0xFF0B74F6),
+                        trailingText = if (selectedTheme == AppThemeOption.Default) "当前" else null,
+                        showChevron = false,
+                        onClick = { onThemeSelected(AppThemeOption.Default) },
+                    ),
+                    ProfileSettingsItem(
+                        title = "暖金黑",
+                        subtitle = "深色背景与暖金主色",
+                        iconLabel = "金",
+                        iconColor = Color(0xFFE4B96A),
+                        trailingText = if (selectedTheme == AppThemeOption.MascotGold) "当前" else null,
+                        showChevron = false,
+                        onClick = { onThemeSelected(AppThemeOption.MascotGold) },
+                    ),
+                ),
             )
         }
     }
 }
 
 @Composable
-private fun ThemeSegment(
-    option: AppThemeOption,
-    label: String,
-    swatches: List<Color>,
-    selected: Boolean,
-    onClick: (AppThemeOption) -> Unit,
-    modifier: Modifier = Modifier,
+private fun ProfileInfoDetailScreen(
+    title: String,
+    repository: ModuleRepository,
+    kind: ProfileInfoKind,
+    emptyMessage: String,
 ) {
+    DataScreen(title = title, loader = { repository.profile() }) { envelope ->
+        val sections = profileDetailSections(envelope.data, kind)
+        if (sections.isEmpty()) {
+            item {
+                InfoCard(emptyMessage, subtitle = "当前教务系统资料中未返回可展示字段") {}
+            }
+        } else {
+            items(sections) { section ->
+                ProfileSectionCard(section)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileSectionCard(section: ProfileSection) {
+    InfoCard(section.title) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            section.fields.chunked(2).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+                    row.forEach { field ->
+                        KeyValue(field.label, field.value, Modifier.weight(1f))
+                    }
+                    if (row.size == 1) {
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class ProfileSettingsItem(
+    val title: String,
+    val subtitle: String? = null,
+    val iconLabel: String,
+    val iconColor: Color,
+    val trailingText: String? = null,
+    val destructive: Boolean = false,
+    val showChevron: Boolean = true,
+    val onClick: () -> Unit,
+)
+
+@Composable
+private fun ProfileSettingsGroup(items: List<ProfileSettingsItem>) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+        tonalElevation = 1.dp,
+    ) {
+        Column {
+            items.forEachIndexed { index, item ->
+                ProfileSettingsRow(item)
+                if (index < items.lastIndex) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 72.dp),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.32f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileSettingsRow(item: ProfileSettingsItem) {
     val colorScheme = MaterialTheme.colorScheme
-    val container = if (selected) colorScheme.primaryContainer else Color.Transparent
-    val content = if (selected) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant
+    val titleColor = if (item.destructive) colorScheme.error else colorScheme.onSurface
+    val subtitleColor = if (item.destructive) colorScheme.error.copy(alpha = 0.78f) else colorScheme.onSurfaceVariant
 
     Row(
-        modifier = modifier
-            .background(container, MaterialTheme.shapes.small)
-            .clickable { onClick(option) }
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .clickable { item.onClick() }
+            .padding(horizontal = 18.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy((-4).dp)) {
-            swatches.forEach { color ->
-                Box(
-                    modifier = Modifier
-                        .size(18.dp)
-                        .background(color, CircleShape)
-                        .border(1.dp, colorScheme.outline.copy(alpha = 0.55f), CircleShape),
+        ProfileSettingsIcon(item.iconLabel, item.iconColor)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = titleColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!item.subtitle.isNullOrBlank()) {
+                Text(
+                    text = item.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = subtitleColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        Spacer(Modifier.width(8.dp))
+        if (!item.trailingText.isNullOrBlank()) {
+            Text(
+                text = item.trailingText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (item.showChevron) {
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.Filled.ChevronRight,
+                contentDescription = null,
+                tint = colorScheme.onSurfaceVariant.copy(alpha = 0.62f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileSettingsIcon(
+    label: String,
+    color: Color,
+) {
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .background(color, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelLarge,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = content,
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
 }
+
+private enum class ProfileInfoKind {
+    Personal,
+    Training,
+}
+
+private fun profileDetailSections(
+    profile: StudentProfileData,
+    kind: ProfileInfoKind,
+): List<ProfileSection> {
+    val sourceSections = profile.sections.ifEmpty { listOf(ProfileSection("基本信息", profile.fields)) }
+    val sectionNeedles = when (kind) {
+        ProfileInfoKind.Personal -> listOf("人员", "个人", "基本", "身份")
+        ProfileInfoKind.Training -> listOf("培养", "学籍", "学习", "专业", "院系")
+    }
+    val matchedSections = sourceSections
+        .filter { section -> section.title.containsAny(sectionNeedles) }
+        .mapNotNull { section ->
+            val fields = distinctProfileFields(section.fields)
+            if (fields.isEmpty()) null else section.copy(fields = fields)
+        }
+    if (matchedSections.isNotEmpty()) return matchedSections
+
+    val allFields = distinctProfileFields(sourceSections.flatMap { it.fields } + profile.fields)
+    val fieldNeedles = when (kind) {
+        ProfileInfoKind.Personal -> listOf(
+            "姓名",
+            "学号",
+            "账号",
+            "性别",
+            "出生",
+            "生日",
+            "拼音",
+            "英文",
+            "民族",
+            "政治",
+            "国籍",
+            "留学生",
+        )
+        ProfileInfoKind.Training -> listOf(
+            "学院",
+            "院系",
+            "专业",
+            "班级",
+            "年级",
+            "培养",
+            "层次",
+            "学籍",
+            "类别",
+            "异动",
+            "方式",
+            "旁听",
+            "语言",
+            "校区",
+        )
+    }
+    val filteredFields = allFields.filter { it.label.containsAny(fieldNeedles) }
+        .ifEmpty { profileFallbackFields(profile, kind) }
+    if (filteredFields.isEmpty()) return emptyList()
+
+    val title = when (kind) {
+        ProfileInfoKind.Personal -> "人员信息"
+        ProfileInfoKind.Training -> "培养信息"
+    }
+    return listOf(ProfileSection(title, distinctProfileFields(filteredFields)))
+}
+
+private fun profileFallbackFields(
+    profile: StudentProfileData,
+    kind: ProfileInfoKind,
+): List<ProfileField> = buildList {
+    fun add(label: String, value: String?) {
+        if (!value.isNullOrBlank()) add(ProfileField(label, value))
+    }
+    when (kind) {
+        ProfileInfoKind.Personal -> {
+            add("姓名", profile.name)
+            add("学号", profile.studentId)
+            add("账号", profile.account)
+            add("性别", profile.gender)
+            add("出生日期", profile.birthday)
+            add("姓名拼音", profile.namePinyin)
+            add("英文姓名", profile.englishName)
+            add("民族", profile.ethnicity)
+            add("政治面貌", profile.politicalStatus)
+            add("国籍", profile.nationality)
+            add("是否留学生", profile.isInternationalStudent)
+        }
+        ProfileInfoKind.Training -> {
+            add("学院", profile.college)
+            add("专业", profile.major)
+            add("班级", profile.className)
+            add("年级", profile.grade)
+            add("培养层次", profile.educationLevel)
+            add("学籍状态", profile.studentStatus ?: profile.hasStudentStatus)
+            add("学生类别", profile.studentCategory)
+            add("异动状态", profile.changeStatus)
+            add("培养方式", profile.cultivationMethod)
+            add("是否旁听生", profile.isAuditor)
+            add("授课语言", profile.studyLanguage)
+            add("校区", profile.campus)
+        }
+    }
+}
+
+private fun distinctProfileFields(fields: List<ProfileField>): List<ProfileField> =
+    fields
+        .filter { it.label.isNotBlank() && it.value.isNotBlank() }
+        .distinctBy { it.label }
+
+private fun String.containsAny(needles: List<String>): Boolean =
+    needles.any { contains(it, ignoreCase = true) }
+
+private fun themeOptionLabel(option: AppThemeOption): String =
+    when (option) {
+        AppThemeOption.Default -> "蓝白色"
+        AppThemeOption.MascotGold -> "暖金黑"
+    }
 
 @Composable
 private fun ProfileHeaderCard(profile: StudentProfileData) {
@@ -454,6 +711,7 @@ fun TimetableScreen(
     courseResourceRepository: CourseResourceRepository,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val isWide = configuration.screenWidthDp >= 840
     var state by remember { mutableStateOf<LoadState<ModuleEnvelope<TimetableData>>>(LoadState.Loading) }
@@ -471,8 +729,22 @@ fun TimetableScreen(
         scope.launch {
             state = LoadState.Loading
             runCatching { repository.timetable() }
-                .onSuccess { state = LoadState.Data(it) }
+                .onSuccess {
+                    state = LoadState.Data(it)
+                    TimetableWidgetProvider.refreshAll(context)
+                }
                 .onFailure { state = LoadState.Error(it.message ?: "加载失败") }
+        }
+    }
+
+    fun addTimetableWidget() {
+        val supported = TimetableWidgetProvider.requestPin(context)
+        if (!supported) {
+            Toast.makeText(
+                context,
+                "当前桌面不支持自动添加，请长按桌面从小组件列表添加",
+                Toast.LENGTH_LONG,
+            ).show()
         }
     }
 
@@ -545,6 +817,7 @@ fun TimetableScreen(
         scope.launch {
             runCatching { repository.saveUserCourse(draft) }
                 .onSuccess {
+                    TimetableWidgetProvider.refreshAll(context)
                     courseEditorSeed = null
                     selectedCourses = emptyList()
                     loadTimetable()
@@ -558,6 +831,7 @@ fun TimetableScreen(
         scope.launch {
             runCatching { repository.deleteUserCourse(localId) }
                 .onSuccess {
+                    TimetableWidgetProvider.refreshAll(context)
                     pendingDeleteCourse = null
                     selectedCourses = emptyList()
                     loadTimetable()
@@ -588,6 +862,7 @@ fun TimetableScreen(
                         currentWeek = currentWeek,
                         selectedCourses = selectedCourses,
                         onSelect = ::loadDetail,
+                        onAddToHomeWidget = ::addTimetableWidget,
                         onAddUserCourse = { day, slot ->
                             courseEditorError = null
                             selectedCourses = emptyList()
@@ -634,6 +909,7 @@ fun TimetableScreen(
                     currentWeek = currentWeek,
                     selectedCourses = selectedCourses,
                     onSelect = ::loadDetail,
+                    onAddToHomeWidget = ::addTimetableWidget,
                     onAddUserCourse = { day, slot ->
                         courseEditorError = null
                         selectedCourses = emptyList()
@@ -3014,6 +3290,7 @@ private fun TimetableList(
     currentWeek: Int?,
     selectedCourses: List<CourseEntry>,
     onSelect: (List<CourseEntry>) -> Unit,
+    onAddToHomeWidget: () -> Unit,
     onAddUserCourse: (TimetableDayColumn, TimetablePeriodSlot) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -3043,6 +3320,17 @@ private fun TimetableList(
                     if (data.days.isNotEmpty()) {
                         AssistChip(onClick = {}, label = { Text("${data.days.size} 天") })
                     }
+                    AssistChip(
+                        onClick = onAddToHomeWidget,
+                        label = { Text("添加到桌面") },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.AddToHomeScreen,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        },
+                    )
                 }
             }
         }

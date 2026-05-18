@@ -24,6 +24,11 @@ import {
 	LOCAL_WEB_SEARCH_TOOL_SPECS,
 	type LocalToolDefinition
 } from './tools/registry';
+import {
+	beginNativeAgentKeepAlive,
+	endNativeAgentKeepAlive,
+	supportsNativeAgentTools
+} from './native-agent-tools';
 
 type JsonRecord = Record<string, any>;
 
@@ -87,6 +92,40 @@ export type LocalProviderRequest = (
 export const DEFAULT_LOCAL_AGENT_MAX_TOOL_CALL_RETRIES = 30;
 export const DEFAULT_LOCAL_WEB_SEARCH_MAX_MODEL_ROUNDS = 4;
 export const DEFAULT_LOCAL_WEB_SEARCH_MAX_TOOL_CALLS = 6;
+const LOCAL_AGENT_KEEP_ALIVE_REASON = 'agent';
+
+const createLocalAgentKeepAliveToken = () => {
+	const randomId =
+		typeof globalThis.crypto?.randomUUID === 'function'
+			? globalThis.crypto.randomUUID()
+			: Math.random().toString(36).slice(2);
+	return `agent-${Date.now()}-${randomId}`;
+};
+
+const startLocalAgentKeepAlive = async (token: string) => {
+	if (!supportsNativeAgentTools()) {
+		return false;
+	}
+
+	try {
+		return await beginNativeAgentKeepAlive({ token, reason: LOCAL_AGENT_KEEP_ALIVE_REASON });
+	} catch (error) {
+		console.warn('Failed to start native Agent keep-alive:', error);
+		return false;
+	}
+};
+
+const stopLocalAgentKeepAlive = async (token: string) => {
+	if (!supportsNativeAgentTools()) {
+		return;
+	}
+
+	try {
+		await endNativeAgentKeepAlive({ token });
+	} catch (error) {
+		console.warn('Failed to stop native Agent keep-alive:', error);
+	}
+};
 
 export const getLocalAgentMaxToolCallRetries = (env: JsonRecord = import.meta.env) => {
 	const parsed = Number(env?.VITE_LOCAL_AGENT_MAX_TOOL_CALL_RETRIES);
@@ -1737,9 +1776,24 @@ export const requestLocalAgentChatCompletion = async ({
 		tools,
 		tool_choice: 'auto'
 	};
+	const keepAliveToken = createLocalAgentKeepAliveToken();
+	let keepAliveStarted = false;
+	let keepAliveReleased = false;
+
+	const beginKeepAlive = async () => {
+		if (keepAliveStarted || keepAliveReleased) return;
+		keepAliveStarted = await startLocalAgentKeepAlive(keepAliveToken);
+	};
+
+	const releaseKeepAlive = async () => {
+		if (!keepAliveStarted || keepAliveReleased) return;
+		keepAliveReleased = true;
+		await stopLocalAgentKeepAlive(keepAliveToken);
+	};
 
 	controller.signal.addEventListener('abort', () => {
 		activeController?.abort();
+		void releaseKeepAlive();
 	});
 
 	const run = async (callbacks?: { emitContentSnapshot: (content: string) => void }) => {
@@ -1933,8 +1987,11 @@ export const requestLocalAgentChatCompletion = async ({
 			return finalizeLocalAgentTurn(buildRetryLimitTurn(maxRetries), context);
 		} finally {
 			context.emitContentSnapshot = undefined;
+			await releaseKeepAlive();
 		}
 	};
+
+	await beginKeepAlive();
 
 	if (providerBody.stream) {
 		return [buildStreamResponse(run, controller), controller];

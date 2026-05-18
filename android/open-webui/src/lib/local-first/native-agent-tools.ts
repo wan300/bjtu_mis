@@ -74,6 +74,8 @@ type NativeAgentToolsPlugin = {
 		toolName: string;
 		arguments?: JsonRecord;
 	}): Promise<JsonRecord>;
+	beginKeepAlive(options: { token: string; reason?: string | null }): Promise<{ active: boolean }>;
+	endKeepAlive(options: { token: string }): Promise<{ active: boolean }>;
 	listGeneratedFiles(options: { workspaceId: string }): Promise<{ files: NativeAgentGeneratedFile[] }>;
 	saveGeneratedFile(options: {
 		workspaceId: string;
@@ -116,6 +118,27 @@ export const executeNativeAgentTool = async (options: {
 }) => {
 	requireNativeAgentTools();
 	return NativeAgentTools.executeTool(options);
+};
+
+export const beginNativeAgentKeepAlive = async (options: {
+	token: string;
+	reason?: string | null;
+}) => {
+	if (!supportsNativeAgentTools()) {
+		return false;
+	}
+
+	await NativeAgentTools.beginKeepAlive(options);
+	return true;
+};
+
+export const endNativeAgentKeepAlive = async (options: { token: string }) => {
+	if (!supportsNativeAgentTools()) {
+		return false;
+	}
+
+	await NativeAgentTools.endKeepAlive(options);
+	return true;
 };
 
 export const listNativeAgentGeneratedFiles = async (

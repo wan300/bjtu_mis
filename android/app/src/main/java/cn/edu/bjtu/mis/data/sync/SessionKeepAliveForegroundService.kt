@@ -30,6 +30,7 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.atomic.AtomicBoolean
 
 class SessionKeepAliveForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -41,25 +42,25 @@ class SessionKeepAliveForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        serviceCreated.set(true)
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            leaseRegistry.clear()
             stopKeepAlive()
             stopSelf()
             return START_NOT_STICKY
         }
 
-        if (startedAtMillis == 0L) startedAtMillis = SystemClock.elapsedRealtime()
-        startForegroundCompat(buildNotification("正在维持 MIS 后台连接"))
-        ensureKeepAliveLoop()
-        return START_STICKY
+        return syncKeepAliveState(startId)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onTimeout(startId: Int, fgsType: Int) {
+        leaseRegistry.clear()
         stopKeepAlive()
         stopSelf(startId)
     }
@@ -67,15 +68,39 @@ class SessionKeepAliveForegroundService : Service() {
     override fun onDestroy() {
         keepAliveJob?.cancel()
         serviceScope.cancel()
+        serviceCreated.set(false)
         super.onDestroy()
+    }
+
+    private fun syncKeepAliveState(startId: Int? = null): Int {
+        if (!leaseRegistry.isActive()) {
+            stopKeepAlive()
+            if (startId == null) {
+                stopSelf()
+            } else {
+                stopSelf(startId)
+            }
+            return START_NOT_STICKY
+        }
+
+        if (startedAtMillis == 0L) startedAtMillis = SystemClock.elapsedRealtime()
+        startForegroundCompat(buildNotification("${activeReasonText()}，正在维持 MIS 后台连接"))
+        ensureKeepAliveLoop()
+        return START_STICKY
     }
 
     private fun ensureKeepAliveLoop() {
         if (keepAliveJob?.isActive == true) return
         keepAliveJob = serviceScope.launch {
             while (isActive) {
+                if (!leaseRegistry.isActive()) {
+                    stopSelf()
+                    break
+                }
+
                 if (SystemClock.elapsedRealtime() - startedAtMillis >= MAX_FOREGROUND_RUNTIME_MS) {
-                    updateNotification("已交给系统定时保活")
+                    leaseRegistry.clear()
+                    updateNotification("保活已达到前台服务时长上限")
                     stopSelf()
                     break
                 }
@@ -102,6 +127,7 @@ class SessionKeepAliveForegroundService : Service() {
                     )
                 updateNotification(message)
                 if (shouldStop) {
+                    leaseRegistry.clear()
                     stopSelf()
                     break
                 }
@@ -153,6 +179,19 @@ class SessionKeepAliveForegroundService : Service() {
             .addAction(R.drawable.ic_menu_24, "停止保活", servicePendingIntent(ACTION_STOP, REQUEST_STOP))
             .build()
 
+    private fun activeReasonText(): String {
+        val reasons = leaseRegistry.snapshot().map { it.reason }.distinct()
+        val hasAgent = REASON_AGENT in reasons
+        val hasCourseSelection = REASON_COURSE_SELECTION in reasons
+        return when {
+            hasAgent && hasCourseSelection -> "Agent 和抢课进行中"
+            hasAgent -> "Agent 执行中"
+            hasCourseSelection -> "抢课进行中"
+            reasons.isNotEmpty() -> "任务进行中"
+            else -> "按需任务进行中"
+        }
+    }
+
     private fun openAppPendingIntent(): PendingIntent {
         val intent = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -186,8 +225,11 @@ class SessionKeepAliveForegroundService : Service() {
         TIME_FORMATTER.format(Instant.now())
 
     companion object {
-        private const val ACTION_START = "cn.edu.bjtu.mis.session_keep_alive.START"
+        private const val ACTION_SYNC = "cn.edu.bjtu.mis.session_keep_alive.SYNC"
         private const val ACTION_STOP = "cn.edu.bjtu.mis.session_keep_alive.STOP"
+
+        const val REASON_AGENT = "agent"
+        const val REASON_COURSE_SELECTION = "course_selection"
 
         private const val CHANNEL_KEEP_ALIVE = "session_keep_alive"
         private const val NOTIFICATION_ID = 2201
@@ -200,15 +242,41 @@ class SessionKeepAliveForegroundService : Service() {
         private val TIME_FORMATTER: DateTimeFormatter =
             DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
 
-        fun start(context: Context) {
+        private val leaseRegistry = KeepAliveLeaseRegistry()
+        private val serviceCreated = AtomicBoolean(false)
+
+        fun acquire(context: Context, reason: String = REASON_AGENT, token: String) {
+            val normalizedToken = token.trim().takeIf { it.isNotBlank() } ?: return
+            val normalizedReason = reason.trim().takeIf { it.isNotBlank() } ?: REASON_AGENT
+            leaseRegistry.acquire(normalizedToken, normalizedReason)
             ContextCompat.startForegroundService(
-                context,
-                Intent(context, SessionKeepAliveForegroundService::class.java).setAction(ACTION_START),
+                context.applicationContext,
+                Intent(context.applicationContext, SessionKeepAliveForegroundService::class.java).setAction(ACTION_SYNC),
             )
         }
 
+        fun release(context: Context, token: String) {
+            val normalizedToken = token.trim().takeIf { it.isNotBlank() } ?: return
+            if (!leaseRegistry.release(normalizedToken)) return
+
+            val appContext = context.applicationContext
+            if (leaseRegistry.isActive()) {
+                ContextCompat.startForegroundService(
+                    appContext,
+                    Intent(appContext, SessionKeepAliveForegroundService::class.java).setAction(ACTION_SYNC),
+                )
+            } else if (serviceCreated.get()) {
+                appContext.startService(Intent(appContext, SessionKeepAliveForegroundService::class.java).setAction(ACTION_SYNC))
+            }
+        }
+
         fun stop(context: Context) {
-            context.startService(Intent(context, SessionKeepAliveForegroundService::class.java).setAction(ACTION_STOP))
+            leaseRegistry.clear()
+            if (serviceCreated.get()) {
+                context.applicationContext.startService(
+                    Intent(context.applicationContext, SessionKeepAliveForegroundService::class.java).setAction(ACTION_STOP),
+                )
+            }
         }
     }
 }

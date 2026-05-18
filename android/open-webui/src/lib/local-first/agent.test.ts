@@ -58,6 +58,8 @@ vi.mock('./native-agent-tools', () => ({
 	supportsNativeAgentTools: vi.fn(() => false),
 	listNativeAgentTools: vi.fn(),
 	executeNativeAgentTool: vi.fn(),
+	beginNativeAgentKeepAlive: vi.fn(),
+	endNativeAgentKeepAlive: vi.fn(),
 	confirmNativeMailSend: vi.fn()
 }));
 
@@ -77,7 +79,9 @@ import {
 import { getCurrentLocation, supportsNativeAndroidTools } from './android-tools';
 import { searchWeb, supportsNativeWebSearch } from './web-search';
 import {
+	beginNativeAgentKeepAlive,
 	confirmNativeMailSend,
+	endNativeAgentKeepAlive,
 	executeNativeAgentTool,
 	listNativeAgentTools,
 	supportsNativeAgentTools
@@ -210,6 +214,8 @@ beforeEach(() => {
 	vi.mocked(supportsNativeWebSearch).mockReturnValue(false);
 	vi.mocked(supportsNativeAgentTools).mockReturnValue(false);
 	vi.mocked(listNativeAgentTools).mockResolvedValue([]);
+	vi.mocked(beginNativeAgentKeepAlive).mockResolvedValue(true);
+	vi.mocked(endNativeAgentKeepAlive).mockResolvedValue(true);
 	vi.mocked(confirmNativeMailSend).mockResolvedValue(undefined);
 	vi.mocked(getLocalSettings).mockResolvedValue({
 		localWebSearch: {
@@ -229,6 +235,94 @@ describe('requestLocalAgentChatCompletion', () => {
 
 	it('uses the local agent loop when code interpreter is enabled', () => {
 		expect(shouldUseLocalAgentLoop({ features: { code_interpreter: true } })).toBe(true);
+	});
+
+	it('starts and stops native keep-alive around a successful local Agent request', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		const requestProvider = vi.fn(async () => [
+			providerJsonResponse({
+				role: 'assistant',
+				content: 'Done.'
+			}),
+			new AbortController()
+		] as [Response, AbortController]);
+
+		const [res] = await requestLocalAgentChatCompletion({
+			body: {},
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+		await res?.json();
+
+		expect(beginNativeAgentKeepAlive).toHaveBeenCalledTimes(1);
+		const token = vi.mocked(beginNativeAgentKeepAlive).mock.calls[0][0].token;
+		expect(vi.mocked(beginNativeAgentKeepAlive).mock.calls[0][0]).toMatchObject({
+			token,
+			reason: 'agent'
+		});
+		expect(endNativeAgentKeepAlive).toHaveBeenCalledTimes(1);
+		expect(endNativeAgentKeepAlive).toHaveBeenCalledWith({ token });
+	});
+
+	it('stops native keep-alive when the provider throws', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		const requestProvider = vi.fn(async () => {
+			throw new Error('provider failed');
+		});
+
+		await expect(
+			requestLocalAgentChatCompletion({
+				body: {},
+				providerBody: baseProviderBody(),
+				requestProvider
+			})
+		).rejects.toThrow('provider failed');
+
+		const token = vi.mocked(beginNativeAgentKeepAlive).mock.calls[0][0].token;
+		expect(endNativeAgentKeepAlive).toHaveBeenCalledWith({ token });
+	});
+
+	it('stops native keep-alive when a streaming local Agent request is aborted', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		const stream = controlledProviderStreamResponse();
+		const requestProvider = vi.fn(async () => [stream.response, new AbortController()] as [
+			Response,
+			AbortController
+		]);
+
+		const [res, controller] = await requestLocalAgentChatCompletion({
+			body: {},
+			providerBody: { ...baseProviderBody(), stream: true },
+			requestProvider
+		});
+		expect(res).toBeTruthy();
+
+		controller.abort();
+		await Promise.resolve();
+
+		const token = vi.mocked(beginNativeAgentKeepAlive).mock.calls[0][0].token;
+		expect(endNativeAgentKeepAlive).toHaveBeenCalledWith({ token });
+		stream.done();
+	});
+
+	it('does not call native keep-alive bridge when native Agent tools are unavailable', async () => {
+		const requestProvider = vi.fn(async () => [
+			providerJsonResponse({
+				role: 'assistant',
+				content: 'Done.'
+			}),
+			new AbortController()
+		] as [Response, AbortController]);
+
+		const [res] = await requestLocalAgentChatCompletion({
+			body: {},
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+		await res?.json();
+
+		expect(beginNativeAgentKeepAlive).not.toHaveBeenCalled();
+		expect(endNativeAgentKeepAlive).not.toHaveBeenCalled();
 	});
 
 	it('injects native tools and loops after a provider tool call', async () => {

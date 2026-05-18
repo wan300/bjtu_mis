@@ -7,4 +7,51 @@
         <item name="android:navigationBarColor">#FFF8F0</item>
         <item name="android:statusBarColor">#FFF8F0</item>
     </style>
+
+    <style name="TimetableWidgetCourseRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="android:background">@drawable/timetable_widget_course_background</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:minHeight">42dp</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingStart">0dp</item>
+        <item name="android:paddingTop">5dp</item>
+        <item name="android:paddingEnd">6dp</item>
+        <item name="android:paddingBottom">5dp</item>
+    </style>
+
+    <style name="TimetableWidgetCourseBar">
+        <item name="android:layout_width">3dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_marginEnd">7dp</item>
+        <item name="android:background">#8B5CF6</item>
+    </style>
+
+    <style name="TimetableWidgetCourseTextColumn">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:orientation">vertical</item>
+    </style>
+
+    <style name="TimetableWidgetCourseTitle">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textColor">#111827</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="TimetableWidgetCourseDetail">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textColor">#667085</item>
+        <item name="android:textSize">12sp</item>
+    </style>
 </resources>

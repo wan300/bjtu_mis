@@ -37,7 +37,7 @@ class BjtuMisApplication : Application() {
                     }
                     launch {
                         SyncWorker.schedule(this@BjtuMisApplication)
-                        SessionKeepAliveWorker.schedule(this@BjtuMisApplication)
+                        SessionKeepAliveWorker.cancel(this@BjtuMisApplication)
                         HomeworkReminderWorker.schedule(this@BjtuMisApplication)
                     }
                 }

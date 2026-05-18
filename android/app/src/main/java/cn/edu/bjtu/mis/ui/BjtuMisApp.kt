@@ -62,7 +62,10 @@ import cn.edu.bjtu.mis.ui.screens.LoginScreen
 import cn.edu.bjtu.mis.ui.screens.MailScreen
 import cn.edu.bjtu.mis.ui.screens.OpenWebUiAgentScreen
 import cn.edu.bjtu.mis.ui.screens.OverviewScreen
+import cn.edu.bjtu.mis.ui.screens.ProfilePersonalInfoScreen
 import cn.edu.bjtu.mis.ui.screens.ProfileScreen
+import cn.edu.bjtu.mis.ui.screens.ProfileThemeScreen
+import cn.edu.bjtu.mis.ui.screens.ProfileTrainingInfoScreen
 import cn.edu.bjtu.mis.ui.screens.ScoresScreen
 import cn.edu.bjtu.mis.ui.screens.ServicesScreen
 import cn.edu.bjtu.mis.ui.screens.TimetableScreen
@@ -74,7 +77,15 @@ import kotlinx.coroutines.launch
 private const val RouteHome = "overview"
 private const val RouteServices = "services"
 private const val LegacyNativeAgentRoute = "agent"
+private const val RouteProfilePersonalInfo = "profile_personal_info"
+private const val RouteProfileTrainingInfo = "profile_training_info"
+private const val RouteProfileTheme = "profile_theme"
 private val MainRoutes = setOf(RouteHome, RouteServices, ModuleKeys.OpenWebUiAgent, ModuleKeys.Profile)
+private val ProfileDetailRouteTitles = mapOf(
+    RouteProfilePersonalInfo to "人员信息",
+    RouteProfileTrainingInfo to "培养信息",
+    RouteProfileTheme to "主题",
+)
 
 private data class BottomTab(
     val route: String,
@@ -118,10 +129,6 @@ fun BjtuMisApp(
     var autoLoginRetrying by remember { mutableStateOf(false) }
     var openWebUiBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
 
-    fun startSessionKeepAlive() {
-        runCatching { SessionKeepAliveForegroundService.start(context) }
-    }
-
     fun startBackgroundQuickSync() {
         scope.launch {
             runCatching { container.syncRepository.runQuickSync() }
@@ -139,10 +146,20 @@ fun BjtuMisApp(
         val target = normalizeRoute(route)
         if (target in MainRoutes) {
             navigateMain(target)
+        } else if (target in ProfileDetailRouteTitles) {
+            current = target
+            mainTab = ModuleKeys.Profile
+            showExitDialog = false
         } else {
             current = target
             showExitDialog = false
         }
+    }
+
+    fun navigateProfileDetail(route: String) {
+        current = route
+        mainTab = ModuleKeys.Profile
+        showExitDialog = false
     }
 
     fun refreshSession() {
@@ -166,7 +183,6 @@ fun BjtuMisApp(
             }
             if (isReady) {
                 ready = true
-                startSessionKeepAlive()
                 if (autoLoggedIn) startBackgroundQuickSync()
             } else if (!hadCachedSession) {
                 ready = false
@@ -182,7 +198,6 @@ fun BjtuMisApp(
                 ready = true
                 sessionDetail = result.session?.detail ?: result.message.orEmpty()
                 showAutoLoginFailedDialog = false
-                startSessionKeepAlive()
                 startBackgroundQuickSync()
             } else {
                 autoLoginFailedMessage = result.message ?: "自动重新登录失败。"
@@ -200,6 +215,7 @@ fun BjtuMisApp(
             current = target
             mainTab = when (target) {
                 RouteHome, RouteServices, ModuleKeys.OpenWebUiAgent, ModuleKeys.Profile -> target
+                in ProfileDetailRouteTitles.keys -> ModuleKeys.Profile
                 else -> RouteServices
             }
             showExitDialog = false
@@ -243,9 +259,12 @@ fun BjtuMisApp(
         false -> LoginScreen(container.sessionRepository) {
             ready = true
             current = requestedRoute?.let(::normalizeRoute) ?: RouteHome
-            mainTab = if (current in MainRoutes) current else RouteServices
+            mainTab = when {
+                current in MainRoutes -> current
+                current in ProfileDetailRouteTitles -> ModuleKeys.Profile
+                else -> RouteServices
+            }
             if (!requestedRoute.isNullOrBlank()) onRouteHandled()
-            startSessionKeepAlive()
             startBackgroundQuickSync()
             refreshSession()
         }
@@ -309,6 +328,13 @@ fun BjtuMisApp(
                     when {
                         current == RouteServices -> MainTitleBar("服务")
                         current == ModuleKeys.Profile -> MainTitleBar("我的")
+                        current in ProfileDetailRouteTitles -> DetailTitleBar(
+                            title = ProfileDetailRouteTitles.getValue(current),
+                            onBack = {
+                                current = ModuleKeys.Profile
+                                mainTab = ModuleKeys.Profile
+                            },
+                        )
                         current !in MainRoutes -> DetailTitleBar(
                             title = navigationTargets.firstOrNull { it.key == current }?.label ?: "服务详情",
                             onBack = { current = mainTab },
@@ -352,15 +378,29 @@ fun BjtuMisApp(
                             ProfileScreen(
                                 repository = container.moduleRepository,
                                 selectedTheme = themeOption,
-                                onThemeSelected = { nextTheme ->
-                                    scope.launch { container.themeStore.save(nextTheme) }
-                                },
                                 onLogout = {
                                     container.sessionRepository.logout()
                                     SessionKeepAliveForegroundService.stop(context)
                                     ready = false
                                 },
+                                onOpenPersonalInfo = { navigateProfileDetail(RouteProfilePersonalInfo) },
+                                onOpenTrainingInfo = { navigateProfileDetail(RouteProfileTrainingInfo) },
+                                onOpenTheme = { navigateProfileDetail(RouteProfileTheme) },
                                 onNavigate = ::navigateModule,
+                            )
+                        }
+                        RouteProfilePersonalInfo -> MainScreenPadding {
+                            ProfilePersonalInfoScreen(container.moduleRepository)
+                        }
+                        RouteProfileTrainingInfo -> MainScreenPadding {
+                            ProfileTrainingInfoScreen(container.moduleRepository)
+                        }
+                        RouteProfileTheme -> MainScreenPadding {
+                            ProfileThemeScreen(
+                                selectedTheme = themeOption,
+                                onThemeSelected = { nextTheme ->
+                                    scope.launch { container.themeStore.save(nextTheme) }
+                                },
                             )
                         }
                         else -> MainScreenPadding {

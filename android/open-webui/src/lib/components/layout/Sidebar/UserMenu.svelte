@@ -21,6 +21,7 @@
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
 	import QuestionMarkCircle from '$lib/components/icons/QuestionMarkCircle.svelte';
@@ -57,6 +58,7 @@
 	export let showActiveUsers = true;
 
 	let showUserStatusModal = false;
+	let showSignOutConfirmDialog = false;
 	let shiftKey = false;
 	let androidClient = false;
 	const localFirst = isLocalFirstClient();
@@ -112,6 +114,14 @@
 		}
 	};
 
+	const signOutHandler = async () => {
+		const res = await userSignOut();
+		user.set(null);
+		localStorage.removeItem('token');
+
+		location.href = res?.redirect_url ?? '/auth';
+	};
+
 	onMount(() => {
 		androidClient = isAndroid();
 
@@ -138,6 +148,14 @@
 	onSave={async () => {
 		user.set(await getSessionUser(localStorage.token));
 	}}
+/>
+
+<ConfirmDialog
+	bind:show={showSignOutConfirmDialog}
+	title={$i18n.t('Sign Out')}
+	message={$i18n.t('Are you sure you want to sign out?')}
+	confirmLabel={$i18n.t('Sign Out')}
+	onConfirm={signOutHandler}
 />
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -651,13 +669,9 @@
 				<button
 					class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
 					type="button"
-					on:click={async () => {
-						const res = await userSignOut();
-						user.set(null);
-						localStorage.removeItem('token');
-
-						location.href = res?.redirect_url ?? '/auth';
+					on:click={() => {
 						show = false;
+						showSignOutConfirmDialog = true;
 					}}
 				>
 					<div class=" self-center mr-3">

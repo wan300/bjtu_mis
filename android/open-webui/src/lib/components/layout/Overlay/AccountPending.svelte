@@ -3,12 +3,19 @@
 	import { marked } from 'marked';
 
 	import { getAdminDetails } from '$lib/apis/auths';
-	import { onMount, tick, getContext } from 'svelte';
+	import { onMount, getContext } from 'svelte';
 	import { config } from '$lib/stores';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	const i18n = getContext('i18n');
 
 	let adminDetails = null;
+	let showSignOutConfirmDialog = false;
+
+	const signOutHandler = () => {
+		localStorage.removeItem('token');
+		location.href = '/auth';
+	};
 
 	onMount(async () => {
 		adminDetails = await getAdminDetails(localStorage.token).catch((err) => {
@@ -17,6 +24,14 @@
 		});
 	});
 </script>
+
+<ConfirmDialog
+	bind:show={showSignOutConfirmDialog}
+	title={$i18n.t('Sign Out')}
+	message={$i18n.t('Are you sure you want to sign out?')}
+	confirmLabel={$i18n.t('Sign Out')}
+	onConfirm={signOutHandler}
+/>
 
 <div class="fixed w-full h-full flex z-999">
 	<div
@@ -69,9 +84,8 @@
 
 					<button
 						class="text-xs text-center w-full mt-2 text-gray-400 underline"
-						on:click={async () => {
-							localStorage.removeItem('token');
-							location.href = '/auth';
+						on:click={() => {
+							showSignOutConfirmDialog = true;
 						}}>{$i18n.t('Sign Out')}</button
 					>
 				</div>

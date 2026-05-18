@@ -9,6 +9,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import cn.edu.bjtu.mis.BjtuMisApplication
+import cn.edu.bjtu.mis.widget.TimetableWidgetProvider
 import java.util.concurrent.TimeUnit
 
 class SyncWorker(
@@ -19,6 +20,7 @@ class SyncWorker(
         val app = applicationContext as BjtuMisApplication
         return runCatching {
             app.container.syncRepository.runSync()
+            runCatching { TimetableWidgetProvider.updateAllNow(applicationContext) }
             runCatching { app.container.homeworkReminderRunner.checkSnapshot() }
             Result.success()
         }.getOrElse {
