@@ -80,7 +80,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import cn.edu.bjtu.mis.data.repository.CourseResourceRepository
-import cn.edu.bjtu.mis.data.agent.repository.AgentRepository
 import cn.edu.bjtu.mis.data.homework.HomeworkStatusKind
 import cn.edu.bjtu.mis.data.homework.homeworkCalendarStatusLabel
 import cn.edu.bjtu.mis.data.homework.homeworkDueDate
@@ -109,7 +108,10 @@ import cn.edu.bjtu.mis.model.HomeworkData
 import cn.edu.bjtu.mis.model.HomeworkItem
 import cn.edu.bjtu.mis.model.HomeworkUploadFile
 import cn.edu.bjtu.mis.model.ModuleKeys
+import cn.edu.bjtu.mis.openwebui.NativeAgentHomeworkHandoff
+import cn.edu.bjtu.mis.openwebui.NativeAgentHomeworkHandoffStore
 import cn.edu.bjtu.mis.model.ModuleEnvelope
+import cn.edu.bjtu.mis.model.ProgressiveModuleState
 import cn.edu.bjtu.mis.model.ScoreData
 import cn.edu.bjtu.mis.model.ScoreDetailData
 import cn.edu.bjtu.mis.model.ScoreDetailTable
@@ -133,9 +135,12 @@ import cn.edu.bjtu.mis.ui.components.InfoCard
 import cn.edu.bjtu.mis.ui.components.KeyValue
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
+import cn.edu.bjtu.mis.ui.components.ProgressiveStatus
 import cn.edu.bjtu.mis.ui.components.SectionTitle
 import cn.edu.bjtu.mis.ui.theme.AppThemeOption
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -280,7 +285,7 @@ private fun ThemePreferenceCard(
         ) {
             ThemeSegment(
                 option = AppThemeOption.Default,
-                label = "当前主题",
+                label = "蓝白色",
                 swatches = listOf(Color(0xFF0B74F6), Color.White),
                 selected = selectedTheme == AppThemeOption.Default,
                 onClick = onThemeSelected,
@@ -780,17 +785,10 @@ fun ScoresScreen(repository: ModuleRepository, history: Boolean = false) {
         }
     }
 
-    DataScreen(
-        title = title,
-        refreshKey = if (history) requestedTerm else listOf(requestedTerm, requestedScoreType, refreshNonce),
-        loader = {
-            if (history) {
-                repository.historyScores(selectedHistoryTerm)
-            } else {
-                repository.scores(term = selectedScoreTerm, ctype = requestedScoreType)
-            }
-        },
-    ) { envelope ->
+    fun androidx.compose.foundation.lazy.LazyListScope.scoreContent(
+        envelope: ModuleEnvelope<ScoreData>,
+        loading: Boolean,
+    ) {
         val data = envelope.data
         val currentTerm = data.currentTerm
         if (history) {
@@ -828,7 +826,7 @@ fun ScoresScreen(repository: ModuleRepository, history: Boolean = false) {
                 AssistChip(onClick = {}, label = { Text(currentTerm) })
             }
         }
-        if (data.items.isEmpty()) {
+        if (data.items.isEmpty() && !loading) {
             item {
                 InfoCard("暂无$title") {
                     Text("当前没有可展示的${title}记录。", style = MaterialTheme.typography.bodyMedium)
@@ -858,6 +856,24 @@ fun ScoresScreen(repository: ModuleRepository, history: Boolean = false) {
                     }
                 }
             }
+        }
+    }
+
+    if (history) {
+        ProgressiveDataScreen(
+            title = title,
+            refreshKey = requestedTerm,
+            loader = { repository.historyScoresProgressive(selectedHistoryTerm) },
+        ) { progressiveState, envelope ->
+            scoreContent(envelope, progressiveState.loading)
+        }
+    } else {
+        DataScreen(
+            title = title,
+            refreshKey = listOf(requestedTerm, requestedScoreType, refreshNonce),
+            loader = { repository.scores(term = selectedScoreTerm, ctype = requestedScoreType) },
+        ) { envelope ->
+            scoreContent(envelope, loading = false)
         }
     }
 
@@ -2020,8 +2036,8 @@ private fun academicCalendarDateLabel(week: AcademicCalendarWeek, date: LocalDat
 fun HomeworkScreen(
     repository: ModuleRepository,
     attachmentRepository: HomeworkAttachmentRepository,
-    agentRepository: AgentRepository,
     onNavigate: (String) -> Unit,
+    onOpenAgent: () -> Unit,
 ) {
     var status by remember { mutableStateOf("all") }
     var expiredStatus by remember { mutableStateOf("expired") }
@@ -2035,7 +2051,6 @@ fun HomeworkScreen(
     var attachmentBusyKey by remember { mutableStateOf<String?>(null) }
     var attachmentError by remember { mutableStateOf<String?>(null) }
     var previewTarget by remember { mutableStateOf<HomeworkAttachmentPreviewTarget?>(null) }
-    var agentTarget by remember { mutableStateOf<HomeworkItem?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -2168,27 +2183,19 @@ fun HomeworkScreen(
         )
     }
 
-    agentTarget?.let { target ->
-        AgentTaskDialog(
-            homework = target,
-            repository = agentRepository,
-            onDismiss = { agentTarget = null },
-        )
-    }
-
     val homeworkFilter = if (status == "expired") expiredStatus else status
-    DataScreen(
+    ProgressiveDataScreen(
         title = "作业",
         refreshKey = Triple(status, expiredStatus, refreshNonce),
-        loader = { repository.homework(homeworkFilter) },
-    ) { envelope ->
+        loader = { repository.homeworkProgressive(homeworkFilter) },
+    ) { progressiveState, envelope ->
         val data = envelope.data
         val currentTerm = data.currentTerm
         val groups = groupHomeworkItems(data.items)
         item {
             SecondaryModuleLinks(
                 title = "作业相关",
-                links = listOf(ModuleKeys.Agent to "作业助手"),
+                links = listOf(ModuleKeys.OpenWebUiAgent to "作业助手"),
                 onNavigate = onNavigate,
             )
         }
@@ -2235,7 +2242,7 @@ fun HomeworkScreen(
                 )
             }
         }
-        if (groups.isEmpty()) {
+        if (groups.isEmpty() && !progressiveState.loading) {
             item {
                 InfoCard("暂无作业") {
                     Text("当前没有可展示的作业记录。", style = MaterialTheme.typography.bodyMedium)
@@ -2270,7 +2277,10 @@ fun HomeworkScreen(
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             OutlinedButton(
                                 enabled = item.homeworkId != null,
-                                onClick = { agentTarget = item },
+                                onClick = {
+                                    NativeAgentHomeworkHandoffStore.set(NativeAgentHomeworkHandoff(item))
+                                    onOpenAgent()
+                                },
                             ) {
                                 Text("Agent 协助")
                             }
@@ -4297,6 +4307,46 @@ private fun <T> DataScreen(
         when (val current = state) {
             LoadState.Loading, is LoadState.Error -> item { LoadingOrError(current) }
             is LoadState.Data -> content(current.value)
+        }
+    }
+}
+
+@Composable
+private fun <T> ProgressiveDataScreen(
+    title: String,
+    refreshKey: Any? = Unit,
+    loader: () -> Flow<ProgressiveModuleState<T>>,
+    leadingContent: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {},
+    content: androidx.compose.foundation.lazy.LazyListScope.(ProgressiveModuleState<T>, ModuleEnvelope<T>) -> Unit,
+) {
+    var state by remember(refreshKey) { mutableStateOf(ProgressiveModuleState<T>()) }
+    LaunchedEffect(refreshKey) {
+        state = ProgressiveModuleState<T>()
+        runCatching {
+            loader().collect { state = it }
+        }.onFailure { error ->
+            state = state.copy(
+                loading = false,
+                complete = true,
+                errors = state.errors + (error.message ?: "加载失败"),
+            )
+        }
+    }
+
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        leadingContent()
+        val envelope = state.envelope
+        if (envelope != null) {
+            item(key = "$title-progressive-status") {
+                ProgressiveStatus(state)
+            }
+            content(state, envelope)
+        } else {
+            when {
+                state.loading -> item { LoadingOrError(LoadState.Loading) }
+                state.errors.isNotEmpty() -> item { LoadingOrError(LoadState.Error(state.errors.joinToString("；"))) }
+                else -> item { LoadingOrError(LoadState.Error("加载失败")) }
+            }
         }
     }
 }

@@ -4975,10 +4975,10 @@
     },
     "black": {
       "name": "black",
-      "version": "26.3.1",
-      "file_name": "black-26.3.1-py3-none-any.whl",
+      "version": "26.5.0",
+      "file_name": "black-26.5.0-py3-none-any.whl",
       "install_dir": "site",
-      "sha256": "2bd5aa94fc267d38bb21a70d7410a89f1a1d318841855f698746f8e7f51acd1b",
+      "sha256": "241f25bf59f5ca17f5121031e310e089b84cd22bb4eca47360099ea825544f17",
       "package_type": "package",
       "imports": [
         "black"

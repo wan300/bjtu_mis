@@ -22,11 +22,15 @@ import cn.edu.bjtu.mis.model.CourseSelectionData
 import cn.edu.bjtu.mis.model.EmptyRoomData
 import cn.edu.bjtu.mis.model.ExamData
 import cn.edu.bjtu.mis.model.ModuleEnvelope
+import cn.edu.bjtu.mis.model.ProgressiveModuleState
 import cn.edu.bjtu.mis.model.ScoreDetailData
 import cn.edu.bjtu.mis.model.ScoreData
+import cn.edu.bjtu.mis.model.ScoreItem
 import cn.edu.bjtu.mis.model.StudentProfileData
 import cn.edu.bjtu.mis.model.TimetableData
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.IOException
@@ -39,6 +43,20 @@ import java.util.UUID
 private const val HISTORY_ALL_TERMS = "all"
 private const val AA_RETRY_ATTEMPTS = 3
 private const val AA_COURSE_SELECTION_PATH = "/course_selection/courseselecttask/selects/"
+
+internal fun mergeScoreItems(items: Iterable<ScoreItem>): List<ScoreItem> =
+    items.distinctBy { item ->
+        listOf(
+            item.term,
+            item.courseName,
+            item.credit,
+            item.score,
+            item.bonusScore,
+            item.teacher,
+            item.detail,
+            item.detailPath,
+        ).joinToString("|")
+    }
 
 private data class PendingCourseSelectionCaptcha(
     val courseKey: String,
@@ -308,7 +326,7 @@ class AaProvider(
         val termValues = availableTerms.map { it.value }.filter { it.isNotBlank() }.distinct()
         val errors = mutableListOf<String>()
         if (termValues.isNotEmpty()) {
-            val combinedItems = termValues
+            val combinedItems = mergeScoreItems(termValues
                 .flatMap { termValue ->
                     runCatching { fetchScores(term = termValue, ctype = "ln") }
                         .getOrElse { error ->
@@ -324,19 +342,7 @@ class AaProvider(
                         }
                         .orEmpty()
                 }
-                .distinctBy { item ->
-                    listOf(
-                        item.term,
-                        item.courseName,
-                        item.credit,
-                        item.score,
-                        item.bonusScore,
-                        item.teacher,
-                        item.detail,
-                        item.detailPath,
-                    )
-                        .joinToString("|")
-                }
+            )
             return ModuleEnvelope(
                 module = "history_scores",
                 sourceSystem = "aa",
@@ -360,6 +366,100 @@ class AaProvider(
             },
             data = seed.data.copy(currentTerm = null),
         )
+    }
+
+    fun fetchHistoryScoresProgressive(term: String? = null): Flow<ProgressiveModuleState<ScoreData>> = flow {
+        val requestedTerm = term?.takeIf { it.isNotBlank() && it != HISTORY_ALL_TERMS }
+        if (requestedTerm != null) {
+            val envelope = fetchHistoryScores(requestedTerm)
+            emit(
+                ProgressiveModuleState(
+                    envelope = envelope,
+                    loading = false,
+                    complete = true,
+                    loadedCount = envelope.data.items.size,
+                    totalCount = envelope.data.items.size,
+                )
+            )
+            return@flow
+        }
+
+        val termIndex = runCatching { fetchScoreIndex() }.getOrNull()
+        val availableTerms = termIndex?.availableTerms.orEmpty()
+        val termValues = availableTerms.map { it.value }.filter { it.isNotBlank() }.distinct()
+        val errors = mutableListOf<String>()
+
+        if (termValues.isEmpty()) {
+            val seedSource = fetchScores(ctype = "ln")
+            val seed = seedSource.copy(
+                module = "history_scores",
+                sourceParams = buildJsonObject {
+                    put("term", HISTORY_ALL_TERMS)
+                    put("ctype", "ln")
+                },
+                data = seedSource.data.copy(currentTerm = null),
+            )
+            emit(
+                ProgressiveModuleState(
+                    envelope = seed,
+                    loading = false,
+                    complete = true,
+                    loadedCount = seed.data.items.size,
+                    totalCount = seed.data.items.size,
+                )
+            )
+            return@flow
+        }
+
+        var items = emptyList<ScoreItem>()
+
+        fun currentEnvelope(): ModuleEnvelope<ScoreData> =
+            ModuleEnvelope(
+                module = "history_scores",
+                sourceSystem = "aa",
+                coverage = if (errors.isEmpty()) CoverageLevel.Verified else CoverageLevel.Provisional,
+                sourceParams = buildJsonObject {
+                    put("term", HISTORY_ALL_TERMS)
+                    put("ctype", "ln")
+                    if (errors.isNotEmpty()) put("partial_error_count", errors.size)
+                },
+                data = ScoreData(currentTerm = null, availableTerms = availableTerms, items = items),
+            )
+
+        emit(
+            ProgressiveModuleState(
+                envelope = currentEnvelope(),
+                loading = true,
+                loadedCount = 0,
+                totalCount = termValues.size,
+                errors = errors.toList(),
+            )
+        )
+
+        termValues.forEachIndexed { index, termValue ->
+            runCatching { fetchScores(term = termValue, ctype = "ln") }
+                .onSuccess { envelope ->
+                    if (envelope.coverage == CoverageLevel.Provisional && envelope.data.items.isEmpty()) {
+                        errors += "term=$termValue unavailable"
+                    }
+                    items = mergeScoreItems(items + envelope.data.items)
+                }
+                .onFailure { error ->
+                    if (!isRetryableAaFailure(error)) throw error
+                    errors += "term=$termValue ${error.message.orEmpty()}".trim()
+                }
+
+            emit(
+                ProgressiveModuleState(
+                    envelope = currentEnvelope(),
+                    loading = index < termValues.lastIndex,
+                    complete = index == termValues.lastIndex,
+                    loadedCount = index + 1,
+                    totalCount = termValues.size,
+                    errors = errors.toList(),
+                )
+            )
+        }
     }
 
     suspend fun fetchScoreDetail(detailPath: String): ModuleEnvelope<ScoreDetailData> {

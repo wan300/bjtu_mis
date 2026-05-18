@@ -31,6 +31,12 @@ import {
 	supportsNativeAndroidTools,
 	updateCalendarEvent
 } from '../android-tools';
+import {
+	confirmNativeMailSend,
+	executeNativeAgentTool,
+	listNativeAgentTools,
+	supportsNativeAgentTools
+} from '../native-agent-tools';
 
 type JsonRecord = Record<string, any>;
 
@@ -52,14 +58,21 @@ export type LocalToolDefinition = {
 		| 'tasks'
 		| 'code'
 		| 'web'
+		| 'agent'
 		| 'android';
 	requiresAndroid?: boolean;
+	requiresWorkspace?: boolean;
 };
 
 export type LocalToolContext = {
 	includeWebSearch?: boolean;
 	includeAndroidTools?: boolean;
 	includeLocationTool?: boolean;
+	agentWorkspaceId?: string | null;
+};
+
+export type LocalToolExecutionContext = {
+	agentWorkspaceId?: string | null;
 };
 
 const jsonString = (value: unknown) => JSON.stringify(value);
@@ -87,6 +100,11 @@ const requiredString = (args: JsonRecord, key: string) => {
 
 const optionalStringArray = (value: unknown) =>
 	Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+
+const normalizedStringArray = (value: unknown) =>
+	optionalStringArray(value)
+		.map((item) => item.trim())
+		.filter(Boolean);
 
 const contentToText = (content: unknown): string => {
 	if (typeof content === 'string') {
@@ -871,15 +889,29 @@ export const LOCAL_ANDROID_TOOL_SPECS: LocalToolDefinition[] = [
 	}
 ];
 
-export const getAvailableLocalTools = (context: LocalToolContext = {}) => [
-	...LOCAL_CORE_TOOL_SPECS,
-	...(context.includeWebSearch ? LOCAL_WEB_SEARCH_TOOL_SPECS : []),
-	...(context.includeAndroidTools && supportsNativeAndroidTools()
-		? LOCAL_ANDROID_TOOL_SPECS.filter(
-				(tool) => context.includeLocationTool || tool.function.name !== 'get_current_location'
-			)
-		: [])
-];
+export const getAvailableLocalTools = async (context: LocalToolContext = {}) => {
+	const nativeAgentTools =
+		supportsNativeAgentTools() ? await listNativeAgentTools().catch(() => []) : [];
+	const availableNativeAgentTools = nativeAgentTools.filter(
+		(tool) => context.agentWorkspaceId || tool.requiresWorkspace === false
+	);
+
+	return [
+		...LOCAL_CORE_TOOL_SPECS,
+		...(context.includeWebSearch ? LOCAL_WEB_SEARCH_TOOL_SPECS : []),
+		...(context.includeAndroidTools && supportsNativeAndroidTools()
+			? LOCAL_ANDROID_TOOL_SPECS.filter(
+					(tool) => context.includeLocationTool || tool.function.name !== 'get_current_location'
+				)
+			: []),
+		...availableNativeAgentTools.map((tool) => ({
+			...tool,
+			category: 'agent' as const,
+			requiresAndroid: true,
+			requiresWorkspace: tool.requiresWorkspace ?? true
+		}))
+	];
+};
 
 const executeAndroidTool = async (name: string, args: JsonRecord) => {
 	if (name === 'get_device_context') return getDeviceContext();
@@ -936,8 +968,41 @@ const executeAndroidTool = async (name: string, args: JsonRecord) => {
 	throw new Error(`Unknown Android local tool "${name}".`);
 };
 
-export const executeRegisteredLocalTool = async (name: string, args: JsonRecord = {}) => {
+const confirmMailSendIfNeeded = async (name: string, args: JsonRecord) => {
+	if (name !== 'agent_mail_send') return;
+	await confirmNativeMailSend({
+		to: normalizedStringArray(args.to),
+		cc: normalizedStringArray(args.cc),
+		bcc: normalizedStringArray(args.bcc),
+		subject: typeof args.subject === 'string' ? args.subject : '',
+		body: typeof args.body === 'string' ? args.body : '',
+		isHtml: args.is_html === true,
+		attachmentCount: Array.isArray(args.attachments) ? args.attachments.length : 0
+	});
+};
+
+export const executeRegisteredLocalTool = async (
+	name: string,
+	args: JsonRecord = {},
+	context: LocalToolExecutionContext = {}
+) => {
 	try {
+		if (name.startsWith('agent_')) {
+			const canRunWithoutWorkspace = name.startsWith('agent_mail_');
+			if (!context.agentWorkspaceId && !canRunWithoutWorkspace) {
+				throw new Error('Native Agent workspace is not available for this chat.');
+			}
+			await confirmMailSendIfNeeded(name, args);
+
+			return jsonString(
+				await executeNativeAgentTool({
+					workspaceId: context.agentWorkspaceId ?? '',
+					toolName: name,
+					arguments: args
+				})
+			);
+		}
+
 		if (name === 'get_current_timestamp') {
 			return jsonString(currentTimestamp());
 		}

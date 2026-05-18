@@ -25,6 +25,7 @@ javascriptengine = "1.1.0"
 chaquopy = "17.0.0"
 pdfboxAndroid = "2.0.27.0"
 media3 = "1.5.1"
+commonsCompress = "1.28.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core" }
@@ -64,6 +65,7 @@ media3-datasource-okhttp = { module = "androidx.media3:media3-datasource-okhttp"
 androidx-room-testing = { module = "androidx.room:room-testing", version.ref = "room" }
 junit = { module = "junit:junit", version.ref = "junit" }
 cordova-android = { module = "org.apache.cordova:framework", version.ref = "cordovaAndroid" }
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commonsCompress" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

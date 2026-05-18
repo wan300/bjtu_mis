@@ -98,10 +98,17 @@ export const getLocalAgentMaxToolCallRetries = (env: JsonRecord = import.meta.en
 };
 
 export const shouldUseLocalAgentLoop = (body: JsonRecord) =>
-	body?.params?.function_calling === 'native' || shouldUseLocalWebSearchAgentLoop(body);
+	body?.params?.function_calling === 'native' ||
+	body?.features?.android_device_tools === true ||
+	shouldUseLocalCodeInterpreterAgentLoop(body) ||
+	(typeof body?.params?.agent_workspace_id === 'string' && body.params.agent_workspace_id.trim() !== '') ||
+	shouldUseLocalWebSearchAgentLoop(body);
 
 export const shouldUseLocalWebSearchAgentLoop = (body: JsonRecord) =>
 	body?.features?.web_search === true && supportsNativeWebSearch();
+
+export const shouldUseLocalCodeInterpreterAgentLoop = (body: JsonRecord) =>
+	body?.features?.code_interpreter === true;
 
 export const LOCAL_AGENT_LIMITATIONS = [
 	'No MCP tools.',
@@ -457,6 +464,7 @@ type LocalAgentRunContext = {
 	forceRagFallback: boolean;
 	webSearchRetryReported: boolean;
 	webSearchUnavailable: boolean;
+	agentWorkspaceId?: string | null;
 };
 
 const createStatus = (description: string, extra: JsonRecord = {}) => ({
@@ -978,6 +986,161 @@ const parseToolArguments = (toolCall: LocalToolCall) => {
 	}
 };
 
+const decodeXmlText = (value: string) =>
+	value.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (match, entity: string) => {
+		const normalized = entity.toLowerCase();
+		if (normalized === 'amp') return '&';
+		if (normalized === 'lt') return '<';
+		if (normalized === 'gt') return '>';
+		if (normalized === 'quot') return '"';
+		if (normalized === 'apos') return "'";
+		if (normalized.startsWith('#x')) {
+			const codePoint = Number.parseInt(normalized.slice(2), 16);
+			return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+				? String.fromCodePoint(codePoint)
+				: match;
+		}
+		if (normalized.startsWith('#')) {
+			const codePoint = Number.parseInt(normalized.slice(1), 10);
+			return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+				? String.fromCodePoint(codePoint)
+				: match;
+		}
+		return match;
+	});
+
+const normalizeInlineToolArguments = (toolName: string, args: JsonRecord) => {
+	const normalized = { ...args };
+
+	if (
+		toolName.startsWith('agent_') &&
+		typeof normalized.filename === 'string' &&
+		typeof normalized.path !== 'string'
+	) {
+		normalized.path = normalized.filename;
+		delete normalized.filename;
+	}
+
+	return normalized;
+};
+
+const parseInlineXmlToolArguments = (toolName: string, body: string): JsonRecord => {
+	const trimmed = body.trim();
+	if (!trimmed) {
+		return {};
+	}
+
+	if (trimmed.startsWith('{')) {
+		const parsed = JSON.parse(trimmed);
+		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+			throw new Error('Inline tool arguments must be a JSON object.');
+		}
+		return normalizeInlineToolArguments(toolName, parsed as JsonRecord);
+	}
+
+	const args: JsonRecord = {};
+	const fieldRegex = /<([A-Za-z_][\w.-]*)\b[^>]*>([\s\S]*?)<\/\1>/g;
+	let match: RegExpExecArray | null;
+
+	while ((match = fieldRegex.exec(body)) !== null) {
+		const key = match[1];
+		const value = decodeXmlText((match[2] ?? '').trim());
+		if (key) {
+			args[key] = value;
+		}
+	}
+
+	return normalizeInlineToolArguments(toolName, args);
+};
+
+const extractInlineXmlToolCalls = (
+	content: string,
+	availableToolNames: Set<string>
+): { content: string; toolCalls: LocalToolCall[] } => {
+	if (!content.includes('<agent_')) {
+		return { content, toolCalls: [] };
+	}
+
+	const toolCalls: LocalToolCall[] = [];
+	const toolRegex = /<(agent_[A-Za-z0-9_]+)\b[^>]*>([\s\S]*?)<\/\1>/g;
+	let strippedContent = '';
+	let lastIndex = 0;
+	let match: RegExpExecArray | null;
+
+	while ((match = toolRegex.exec(content)) !== null) {
+		const name = match[1];
+		if (!availableToolNames.has(name)) {
+			continue;
+		}
+
+		const rawArguments = match[2] ?? '';
+		let argumentsText: string;
+		try {
+			argumentsText = jsonString(parseInlineXmlToolArguments(name, rawArguments));
+		} catch {
+			argumentsText = rawArguments.trim();
+		}
+		toolCalls.push({
+			id: outputId('xml-fc'),
+			type: 'function',
+			function: {
+				name,
+				arguments: argumentsText
+			}
+		});
+		strippedContent += content.slice(lastIndex, match.index);
+		lastIndex = match.index + match[0].length;
+	}
+
+	if (toolCalls.length === 0) {
+		return { content, toolCalls: [] };
+	}
+
+	strippedContent += content.slice(lastIndex);
+
+	return {
+		content: strippedContent.replace(/\n{3,}/g, '\n\n').trim(),
+		toolCalls
+	};
+};
+
+const normalizeInlineXmlToolTurn = (
+	turn: ProviderTurn,
+	availableToolNames: Set<string>
+): ProviderTurn => {
+	if (turn.toolCalls.length > 0) {
+		return turn;
+	}
+
+	const inline = extractInlineXmlToolCalls(turn.content ?? '', availableToolNames);
+	if (inline.toolCalls.length === 0) {
+		return turn;
+	}
+
+	return {
+		...turn,
+		content: inline.content,
+		toolCalls: inline.toolCalls
+	};
+};
+
+const buildAssistantToolCallMessage = (turn: ProviderTurn): JsonRecord => {
+	const message: JsonRecord = {
+		role: 'assistant',
+		content: turn.content || null,
+		tool_calls: turn.toolCalls
+	};
+	const reasoning = turn.reasoning ?? '';
+
+	// DeepSeek thinking mode requires reasoning_content to be replayed with
+	// assistant tool-call messages when the tool result is sent back.
+	if (reasoning.trim()) {
+		message.reasoning_content = reasoning;
+	}
+
+	return message;
+};
+
 const normalizeToolCalls = (toolCalls: any[] = []): LocalToolCall[] =>
 	toolCalls
 		.map((toolCall, index) => ({
@@ -1263,7 +1426,9 @@ const runToolCall = async (
 		) {
 			content = await runWebSearchToolCall(toolCall, args, context);
 		} else {
-			content = await executeLocalTool(toolCall.function.name, args);
+			content = await executeLocalTool(toolCall.function.name, args, {
+				agentWorkspaceId: context?.agentWorkspaceId
+			});
 		}
 	} catch (error) {
 		if (
@@ -1518,8 +1683,18 @@ export const requestLocalAgentChatCompletion = async ({
 
 	const messages = [...(providerBody.messages ?? [])];
 	const webSearchEnabled = shouldUseLocalWebSearchAgentLoop(body);
-	const nativeToolsEnabled = body?.params?.function_calling === 'native' || !webSearchEnabled;
-	const localSettings = webSearchEnabled || nativeToolsEnabled ? await getLocalSettings() : null;
+	const codeInterpreterEnabled = shouldUseLocalCodeInterpreterAgentLoop(body);
+	const androidDeviceToolsEnabled = body?.features?.android_device_tools === true;
+	const nativeFunctionCallingEnabled = body?.params?.function_calling === 'native';
+	const broadLocalToolsEnabled =
+		nativeFunctionCallingEnabled ||
+		androidDeviceToolsEnabled ||
+		(!webSearchEnabled && !codeInterpreterEnabled);
+	const localSettings = webSearchEnabled || androidDeviceToolsEnabled ? await getLocalSettings() : null;
+	const agentWorkspaceId =
+		typeof body?.params?.agent_workspace_id === 'string' && body.params.agent_workspace_id.trim()
+			? body.params.agent_workspace_id.trim()
+			: null;
 	const context: LocalAgentRunContext = {
 		webSearchEnabled,
 		webSearchSettings: normalizeLocalWebSearchSettings(localSettings?.localWebSearch ?? {}),
@@ -1531,7 +1706,8 @@ export const requestLocalAgentChatCompletion = async ({
 		toolCallCount: 0,
 		forceRagFallback: false,
 		webSearchRetryReported: false,
-		webSearchUnavailable: false
+		webSearchUnavailable: false,
+		agentWorkspaceId
 	};
 	const maxModelRounds = webSearchEnabled
 		? DEFAULT_LOCAL_WEB_SEARCH_MAX_MODEL_ROUNDS
@@ -1539,13 +1715,23 @@ export const requestLocalAgentChatCompletion = async ({
 	const maxToolCalls = webSearchEnabled
 		? DEFAULT_LOCAL_WEB_SEARCH_MAX_TOOL_CALLS
 		: Number.POSITIVE_INFINITY;
-	const tools = getAvailableLocalTools({
+	const tools = (await getAvailableLocalTools({
 		includeWebSearch: webSearchEnabled,
-		includeAndroidTools: nativeToolsEnabled,
-		includeLocationTool: localSettings?.userLocation === true
-	})
-		.filter((tool) => nativeToolsEnabled || tool.category === 'web' || tool.category === 'math')
+		includeAndroidTools: androidDeviceToolsEnabled,
+		includeLocationTool: localSettings?.userLocation === true,
+		agentWorkspaceId
+	}))
+		.filter(
+			(tool) =>
+				broadLocalToolsEnabled ||
+				(webSearchEnabled && (tool.category === 'web' || tool.category === 'math')) ||
+				(codeInterpreterEnabled && (tool.category === 'code' || tool.category === 'math')) ||
+				(tool.category === 'agent' && (agentWorkspaceId || tool.requiresWorkspace === false))
+		)
 		.map(toProviderTool);
+	const availableToolNames = new Set(
+		tools.map((tool) => tool.function.name).filter((name): name is string => typeof name === 'string')
+	);
 	const agentBody = {
 		...providerBody,
 		tools,
@@ -1618,6 +1804,7 @@ export const requestLocalAgentChatCompletion = async ({
 					}
 					throw error;
 				}
+				turn = normalizeInlineXmlToolTurn(turn, availableToolNames);
 
 				if (turn.toolCalls.length === 0) {
 					if (webSearchEnabled && iteration === 0 && context.sources.length === 0) {
@@ -1682,11 +1869,7 @@ export const requestLocalAgentChatCompletion = async ({
 				}
 				emitLocalDisplaySnapshot(context);
 
-				messages.push({
-					role: 'assistant',
-					content: turn.content || null,
-					tool_calls: turn.toolCalls
-				});
+				messages.push(buildAssistantToolCallMessage(turn));
 
 				const toolMessages = await Promise.all(
 					turn.toolCalls.map((toolCall) => runToolCall(toolCall, context))

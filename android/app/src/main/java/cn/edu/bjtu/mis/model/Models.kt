@@ -705,6 +705,16 @@ data class ModuleEnvelope<T>(
     val data: T,
 )
 
+data class ProgressiveModuleState<T>(
+    val envelope: ModuleEnvelope<T>? = null,
+    val loading: Boolean = true,
+    val complete: Boolean = false,
+    val fromCache: Boolean = false,
+    val loadedCount: Int? = null,
+    val totalCount: Int? = null,
+    val errors: List<String> = emptyList(),
+)
+
 @Serializable
 data class SyncModuleSummary(
     val status: String,
@@ -735,6 +745,7 @@ data class SnapshotRecord(
 
 object ModuleKeys {
     const val Profile = "profile"
+    const val OpenWebUiAgent = "openwebui_agent"
     const val AcademicProgress = "academic_progress"
     const val HistoryScores = "history_scores"
     const val Timetable = "timetable"
@@ -743,7 +754,6 @@ object ModuleKeys {
     const val Scores = "scores"
     const val Calendar = "calendar"
     const val Homework = "homework"
-    const val Agent = "agent"
     const val CourseResources = "course_resources"
     const val CourseReplay = "course_replay"
     const val EmptyRooms = "empty_rooms"

@@ -29,6 +29,7 @@ import cn.edu.bjtu.mis.model.HomeworkAttachment
 import cn.edu.bjtu.mis.model.HomeworkSubmitResponse
 import cn.edu.bjtu.mis.model.HomeworkUploadFile
 import cn.edu.bjtu.mis.model.ModuleEnvelope
+import cn.edu.bjtu.mis.model.ProgressiveModuleState
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -39,6 +40,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import java.io.File
 import java.io.IOException
 import java.time.LocalDate
@@ -47,6 +50,19 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Base64
+
+internal fun mergeHomeworkItems(items: Iterable<cn.edu.bjtu.mis.model.HomeworkItem>): List<cn.edu.bjtu.mis.model.HomeworkItem> {
+    val dedupedItems = linkedMapOf<String, cn.edu.bjtu.mis.model.HomeworkItem>()
+    items.forEach { item ->
+        val key = item.homeworkId?.let { "id:$it" }
+            ?: "course:${item.courseId}:title:${item.title}:due:${item.dueAt.orEmpty()}"
+        val previous = dedupedItems[key]
+        if (previous == null || (!item.submittedAt.isNullOrBlank() && previous.submittedAt.isNullOrBlank())) {
+            dedupedItems[key] = item
+        }
+    }
+    return dedupedItems.values.toList()
+}
 
 class VeProvider(private val client: BjtuHttpClient) {
     private var sessionId: String? = null
@@ -138,14 +154,7 @@ class VeProvider(private val client: BjtuHttpClient) {
                     }
                 }
         }
-        val dedupedItems = linkedMapOf<String, cn.edu.bjtu.mis.model.HomeworkItem>()
-        items.forEach { item ->
-            val key = item.homeworkId?.let { "id:$it" } ?: "course:${item.courseId}:title:${item.title}:due:${item.dueAt.orEmpty()}"
-            val previous = dedupedItems[key]
-            if (previous == null || (!item.submittedAt.isNullOrBlank() && previous.submittedAt.isNullOrBlank())) {
-                dedupedItems[key] = item
-            }
-        }
+        val dedupedItems = mergeHomeworkItems(items)
 
         return ModuleEnvelope(
             module = "homework",
@@ -156,7 +165,118 @@ class VeProvider(private val client: BjtuHttpClient) {
                 put("include_attachments", includeAttachments)
                 if (errors.isNotEmpty()) put("partial_error_count", errors.size)
             },
-            data = buildHomeworkData(currentTerm, courses, dedupedItems.values.toList()),
+            data = buildHomeworkData(currentTerm, courses, dedupedItems),
+        )
+    }
+
+    fun fetchHomeworkProgressive(
+        term: String? = null,
+        includeAttachments: Boolean = true,
+    ): Flow<ProgressiveModuleState<HomeworkData>> = flow {
+        ensureStrictFlow("homework")
+        val currentTerm = term ?: parseCalendarTerms(
+            getJsonObject("/ve/back/rp/common/teachCalendar.shtml", mapOf("method" to "queryCurrentXq"))
+        ).second
+
+        if (currentTerm.isNullOrBlank()) {
+            val envelope = ModuleEnvelope(
+                module = "homework",
+                sourceSystem = "ve",
+                coverage = CoverageLevel.Provisional,
+                sourceParams = buildJsonObject { put("fallback_reason", "missing_current_term") },
+                data = buildHomeworkData(null, emptyList(), emptyList()),
+            )
+            emit(ProgressiveModuleState(envelope = envelope, loading = false, complete = true))
+            return@flow
+        }
+
+        val courses = parseCourses(
+            getJsonObject(
+                "/ve/back/coursePlatform/course.shtml",
+                mapOf("method" to "getCourseList", "pagesize" to "100", "page" to "1", "xqCode" to currentTerm),
+            )
+        )
+        val errors = mutableListOf<String>()
+        val attachmentCache = mutableMapOf<Pair<Int, Int>, List<HomeworkAttachment>>()
+        var items = emptyList<cn.edu.bjtu.mis.model.HomeworkItem>()
+
+        fun currentEnvelope(): ModuleEnvelope<HomeworkData> =
+            ModuleEnvelope(
+                module = "homework",
+                sourceSystem = "ve",
+                coverage = if (errors.isEmpty()) CoverageLevel.Verified else CoverageLevel.Provisional,
+                sourceParams = buildJsonObject {
+                    put("term", currentTerm)
+                    put("include_attachments", includeAttachments)
+                    if (errors.isNotEmpty()) put("partial_error_count", errors.size)
+                },
+                data = buildHomeworkData(currentTerm, courses, items),
+            )
+
+        emit(
+            ProgressiveModuleState(
+                envelope = currentEnvelope(),
+                loading = true,
+                loadedCount = 0,
+                totalCount = null,
+                errors = errors.toList(),
+            )
+        )
+
+        for (course in courses) {
+            runCatching { openHomeworkContext(course) }
+                .onFailure { errors += "toCoursePlatform:${course.courseId}:${it.message}" }
+                .onSuccess { teacherId ->
+                    for (subType in listOf(0, 2)) {
+                        runCatching {
+                            val payload = getJsonObject(
+                                "/ve/back/coursePlatform/homeWork.shtml",
+                                mapOf(
+                                    "method" to "getHomeWorkList",
+                                    "cId" to course.courseId.toString(),
+                                    "subType" to subType.toString(),
+                                    "page" to "1",
+                                    "pagesize" to "10",
+                                ),
+                            )
+                            parseHomeworkList(payload, course, subType).forEach { item ->
+                                val homeworkId = item.homeworkId
+                                val attachments = if (includeAttachments && homeworkId != null) {
+                                    attachmentCache.getOrPut(course.courseId to homeworkId) {
+                                        runCatching {
+                                            fetchHomeworkAttachments(homeworkId, course.courseId, teacherId)
+                                        }.onFailure {
+                                            errors += "homeWorkAttachment:${course.courseId}:$homeworkId:${it.message}"
+                                        }.getOrDefault(emptyList())
+                                    }
+                                } else {
+                                    emptyList()
+                                }
+                                items = mergeHomeworkItems(items + item.copy(attachments = attachments))
+                                emit(
+                                    ProgressiveModuleState(
+                                        envelope = currentEnvelope(),
+                                        loading = true,
+                                        loadedCount = items.size,
+                                        totalCount = null,
+                                        errors = errors.toList(),
+                                    )
+                                )
+                            }
+                        }.onFailure { errors += "homeWork:${course.courseId}:$subType:${it.message}" }
+                    }
+                }
+        }
+
+        emit(
+            ProgressiveModuleState(
+                envelope = currentEnvelope(),
+                loading = false,
+                complete = true,
+                loadedCount = items.size,
+                totalCount = items.size,
+                errors = errors.toList(),
+            )
         )
     }
 
@@ -374,6 +494,131 @@ class VeProvider(private val client: BjtuHttpClient) {
         }
     }
 
+    fun fetchCourseResourcesProgressive(
+        term: String? = null,
+        courseId: String? = null,
+        folderId: String = "0",
+        search: String? = null,
+    ): Flow<ProgressiveModuleState<CourseResourcesData>> = flow {
+        ensureStrictFlow("course resources")
+        val currentTerm = term ?: parseCalendarTerms(
+            getJsonObject("/ve/back/rp/common/teachCalendar.shtml", mapOf("method" to "queryCurrentXq"))
+        ).second
+
+        if (currentTerm.isNullOrBlank()) {
+            val envelope = ModuleEnvelope(
+                module = "course_resources",
+                sourceSystem = "ve",
+                coverage = CoverageLevel.Provisional,
+                sourceParams = buildJsonObject { put("fallback_reason", "missing_current_term") },
+                data = buildCourseResourcesData(null, emptyList(), null, folderId, emptyList(), emptyList(), emptyList()),
+            )
+            emit(ProgressiveModuleState(envelope = envelope, loading = false, complete = true))
+            return@flow
+        }
+
+        val courses = parseCourses(
+            getJsonObject(
+                "/ve/back/coursePlatform/course.shtml",
+                mapOf("method" to "getCourseList", "pagesize" to "100", "page" to "1", "xqCode" to currentTerm),
+            )
+        )
+        val requestedCourseId = courseId?.trim().orEmpty()
+        val selected = if (requestedCourseId.isNotBlank()) {
+            courses.firstOrNull { it.courseId.toString() == requestedCourseId || it.courseCode == requestedCourseId }
+        } else {
+            courses.firstOrNull()
+        }
+        val normalizedFolder = folderId.ifBlank { "0" }
+        val sourceParams = buildJsonObject {
+            put("term", currentTerm)
+            put("course_id", requestedCourseId.ifBlank { selected?.courseId?.toString().orEmpty() })
+            put("folder_id", normalizedFolder)
+            put("search", search.orEmpty())
+        }
+
+        fun envelope(
+            coverage: CoverageLevel,
+            tree: List<cn.edu.bjtu.mis.model.CourseResourceFolder> = emptyList(),
+            folders: List<cn.edu.bjtu.mis.model.CourseResourceFolder> = emptyList(),
+            resources: List<CourseResourceItem> = emptyList(),
+            error: Throwable? = null,
+        ): ModuleEnvelope<CourseResourcesData> =
+            ModuleEnvelope(
+                module = "course_resources",
+                sourceSystem = "ve",
+                coverage = coverage,
+                sourceParams = buildJsonObject {
+                    sourceParams.forEach { (key, value) -> put(key, value) }
+                    error?.message?.let { put("fallback_reason", it) }
+                },
+                data = buildCourseResourcesData(currentTerm, courses, selected, normalizedFolder, tree, folders, resources),
+            )
+
+        val courseEnvelope = envelope(CoverageLevel.Provisional)
+        emit(
+            ProgressiveModuleState(
+                envelope = courseEnvelope,
+                loading = selected != null,
+                complete = selected == null,
+                loadedCount = 1,
+                totalCount = if (selected == null) 1 else 2,
+            )
+        )
+        if (selected == null) return@flow
+
+        runCatching {
+            val context = openCourseResourcesContext(selected)
+            val baseParams = mapOf(
+                "courseId" to context["courseId"],
+                "cId" to context["cId"],
+                "xkhId" to context["xkhId"],
+                "xqCode" to context["xqCode"],
+                "docType" to ProviderConstants.VE_COURSE_RESOURCES_DOC_TYPE,
+            )
+            val treePayload = getJsonObject(
+                "/ve/back/coursePlatform/courseResource.shtml",
+                mapOf("method" to "stuQueryCourseResourceBag") + baseParams,
+            )
+            val listingPayload = getJsonObject(
+                "/ve/back/coursePlatform/courseResource.shtml",
+                mapOf(
+                    "method" to "stuQueryUploadResourceForCourseList",
+                    "up_id" to normalizedFolder,
+                    "searchName" to search.orEmpty(),
+                ) + baseParams,
+            )
+            val (folders, resources) = parseCourseResourceListing(listingPayload, normalizedFolder)
+            envelope(
+                coverage = CoverageLevel.Verified,
+                tree = parseCourseResourceTree(treePayload),
+                folders = folders,
+                resources = resources,
+            )
+        }.onSuccess {
+            emit(
+                ProgressiveModuleState(
+                    envelope = it,
+                    loading = false,
+                    complete = true,
+                    loadedCount = 2,
+                    totalCount = 2,
+                )
+            )
+        }.onFailure { error ->
+            emit(
+                ProgressiveModuleState(
+                    envelope = envelope(CoverageLevel.Provisional, error = error),
+                    loading = false,
+                    complete = true,
+                    loadedCount = 1,
+                    totalCount = 2,
+                    errors = listOf(error.message ?: "course_resources_detail_failed"),
+                )
+            )
+        }
+    }
+
     suspend fun downloadCourseResource(rpId: String, target: File): FileResponse {
         ensureStrictFlow("download")
         val payload = postJsonObject(
@@ -507,6 +752,104 @@ class VeProvider(private val client: BjtuHttpClient) {
                 parseCourseReplayLessons(payload),
             ),
         )
+    }
+
+    fun fetchCourseReplaysProgressive(
+        term: String? = null,
+        courseId: String? = null,
+    ): Flow<ProgressiveModuleState<CourseReplayData>> = flow {
+        ensureStrictFlow("course replay")
+        val currentTerm = term ?: parseCalendarTerms(
+            getJsonObject("/ve/back/rp/common/teachCalendar.shtml", mapOf("method" to "queryCurrentXq"))
+        ).second
+
+        if (currentTerm.isNullOrBlank()) {
+            val envelope = ModuleEnvelope(
+                module = "course_replay",
+                sourceSystem = "ve",
+                coverage = CoverageLevel.Provisional,
+                sourceParams = buildJsonObject { put("fallback_reason", "missing_current_term") },
+                data = buildCourseReplayData(null, emptyList(), null, null, null, emptyList()),
+            )
+            emit(ProgressiveModuleState(envelope = envelope, loading = false, complete = true))
+            return@flow
+        }
+
+        val courses = parseCourses(
+            getJsonObject(
+                "/ve/back/coursePlatform/course.shtml",
+                mapOf("method" to "getCourseList", "pagesize" to "100", "page" to "1", "xqCode" to currentTerm),
+            )
+        )
+        val selected = selectCourse(courses, courseId)
+        val sourceParams = buildJsonObject {
+            put("term", currentTerm)
+            put("course_id", courseId?.trim().orEmpty().ifBlank { selected?.courseId?.toString().orEmpty() })
+        }
+
+        fun envelope(
+            coverage: CoverageLevel,
+            userId: String? = null,
+            listenUserId: String? = null,
+            lessons: List<cn.edu.bjtu.mis.model.CourseReplayLesson> = emptyList(),
+            error: Throwable? = null,
+        ): ModuleEnvelope<CourseReplayData> =
+            ModuleEnvelope(
+                module = "course_replay",
+                sourceSystem = "ve",
+                coverage = coverage,
+                sourceParams = buildJsonObject {
+                    sourceParams.forEach { (key, value) -> put(key, value) }
+                    error?.message?.let { put("fallback_reason", it) }
+                },
+                data = buildCourseReplayData(currentTerm, courses, selected, userId, listenUserId, lessons),
+            )
+
+        emit(
+            ProgressiveModuleState(
+                envelope = envelope(CoverageLevel.Provisional),
+                loading = selected != null,
+                complete = selected == null,
+                loadedCount = 1,
+                totalCount = if (selected == null) 1 else 2,
+            )
+        )
+        if (selected == null) return@flow
+
+        runCatching {
+            val context = openCourseReplayContext(selected)
+            val payload = getJsonObject(
+                "/ve/back/rp/common/teachCalendar.shtml",
+                mapOf("method" to "toDisplyTeachCourses", "courseId" to selected.courseId.toString()),
+            )
+            envelope(
+                coverage = CoverageLevel.Verified,
+                userId = context.detailUserId ?: context.platformUserId,
+                listenUserId = context.listenUserId,
+                lessons = parseCourseReplayLessons(payload),
+            )
+        }.onSuccess {
+            emit(
+                ProgressiveModuleState(
+                    envelope = it,
+                    loading = false,
+                    complete = true,
+                    loadedCount = 2,
+                    totalCount = 2,
+                )
+            )
+        }.onFailure { error ->
+            emit(
+                ProgressiveModuleState(
+                    envelope = envelope(CoverageLevel.Provisional, error = error),
+                    loading = false,
+                    complete = true,
+                    loadedCount = 1,
+                    totalCount = 2,
+                    errors = listOf(error.message ?: "course_replay_detail_failed"),
+                )
+            )
+        }
     }
 
     suspend fun fetchCourseReplayPlayback(

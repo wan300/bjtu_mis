@@ -17,11 +17,24 @@ import org.json.JSONObject
 
 class OpenWebUiAgentFragment : Fragment() {
     private var bridge: Bridge? = null
+    private var currentPreferredTheme: String? = null
     private val studentName: String?
         get() = arguments
             ?.getString(ARG_STUDENT_NAME)
             ?.trim()
             ?.takeIf { it.isNotBlank() }
+    private val preferredTheme: String
+        get() = normalizeAgentTheme(currentPreferredTheme ?: arguments?.getString(ARG_AGENT_THEME))
+    private val openWebUiBackground: String
+        get() = when (preferredTheme) {
+            AGENT_THEME_LIGHT -> OpenWebUiLightBackground
+            else -> OpenWebUiDarkBackground
+        }
+    private val systemBarsStyle: String
+        get() = when (preferredTheme) {
+            AGENT_THEME_LIGHT -> "LIGHT"
+            else -> "DARK"
+        }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreateView(
@@ -34,12 +47,12 @@ class OpenWebUiAgentFragment : Fragment() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
             )
-            setBackgroundColor(Color.parseColor(OpenWebUiBackground))
+            setBackgroundColor(Color.parseColor(openWebUiBackground))
             addView(
                 CapacitorWebView(requireContext(), null).apply {
                     id = com.getcapacitor.android.R.id.webview
-                    setBackgroundColor(Color.parseColor(OpenWebUiBackground))
-                    addJavascriptInterface(StudentProfileBridge(studentName), "BjtuMisNative")
+                    setBackgroundColor(Color.parseColor(openWebUiBackground))
+                    addJavascriptInterface(NativeBridge(), "BjtuMisNative")
                     layoutParams = CoordinatorLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -57,6 +70,7 @@ class OpenWebUiAgentFragment : Fragment() {
             .addPlugin(NativeWebSearchPlugin::class.java)
             .addPlugin(NativeSecureStorePlugin::class.java)
             .addPlugin(NativeAndroidToolsPlugin::class.java)
+            .addPlugin(NativeAgentToolsPlugin::class.java)
             .addPlugin(NativeHttpPlugin::class.java)
             .create()
         disableCapacitorSystemBarInsets(view)
@@ -112,9 +126,29 @@ class OpenWebUiAgentFragment : Fragment() {
         return true
     }
 
+    fun updatePreferredTheme(theme: String) {
+        val nextTheme = normalizeAgentTheme(theme)
+        if (nextTheme == preferredTheme) return
+
+        currentPreferredTheme = nextTheme
+        val backgroundColor = Color.parseColor(openWebUiBackground)
+        view?.setBackgroundColor(backgroundColor)
+        bridge?.webView?.apply {
+            setBackgroundColor(backgroundColor)
+            evaluateJavascript(
+                """
+                window.dispatchEvent(new CustomEvent('bjtu-mis:theme-update', {
+                  detail: { theme: '$nextTheme' }
+                }));
+                """.trimIndent(),
+                null,
+            )
+        }
+    }
+
     private fun openWebUiConfig(): CapConfig =
         CapConfig.Builder(requireContext())
-            .setBackgroundColor(OpenWebUiBackground)
+            .setBackgroundColor(openWebUiBackground)
             .setInitialFocus(true)
             .setPluginsConfiguration(
                 JSONObject()
@@ -123,27 +157,40 @@ class OpenWebUiAgentFragment : Fragment() {
                         "SystemBars",
                         JSONObject()
                             .put("insetsHandling", "disable")
-                            .put("style", "DARK")
+                            .put("style", systemBarsStyle)
                             .put("hidden", false),
                     ),
             )
             .create()
 
-    private class StudentProfileBridge(
-        private val studentName: String?,
-    ) {
+    private inner class NativeBridge {
         @JavascriptInterface
         fun getStudentName(): String = studentName.orEmpty()
+
+        @JavascriptInterface
+        fun getPreferredTheme(): String = preferredTheme
     }
 
     companion object {
-        private const val ARG_STUDENT_NAME = "student_name"
-        private const val OpenWebUiBackground = "#171717"
+        const val AGENT_THEME_LIGHT = "light"
+        const val AGENT_THEME_DARK = "dark"
 
-        fun newInstance(studentName: String?): OpenWebUiAgentFragment =
+        private const val ARG_STUDENT_NAME = "student_name"
+        private const val ARG_AGENT_THEME = "agent_theme"
+        private const val OpenWebUiLightBackground = "#FFFFFF"
+        private const val OpenWebUiDarkBackground = "#171717"
+
+        private fun normalizeAgentTheme(theme: String?): String =
+            when (theme) {
+                AGENT_THEME_LIGHT -> AGENT_THEME_LIGHT
+                else -> AGENT_THEME_DARK
+            }
+
+        fun newInstance(studentName: String?, agentTheme: String): OpenWebUiAgentFragment =
             OpenWebUiAgentFragment().apply {
                 arguments = Bundle().apply {
                     putString(ARG_STUDENT_NAME, studentName)
+                    putString(ARG_AGENT_THEME, normalizeAgentTheme(agentTheme))
                 }
             }
     }

@@ -85,12 +85,15 @@ import cn.edu.bjtu.mis.model.CourseReplayLesson
 import cn.edu.bjtu.mis.model.CourseReplayPlaybackInfo
 import cn.edu.bjtu.mis.model.CourseReplayStreamChoice
 import cn.edu.bjtu.mis.model.ModuleEnvelope
+import cn.edu.bjtu.mis.model.ProgressiveModuleState
 import cn.edu.bjtu.mis.ui.components.InfoCard
 import cn.edu.bjtu.mis.ui.components.KeyValue
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
+import cn.edu.bjtu.mis.ui.components.ProgressiveStatus
 import cn.edu.bjtu.mis.ui.components.SectionTitle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.Locale
@@ -106,23 +109,33 @@ fun CourseReplayScreen(
 ) {
     val scope = rememberCoroutineScope()
     var selectedCourseId by remember { mutableStateOf("") }
-    var state by remember { mutableStateOf<LoadState<ModuleEnvelope<CourseReplayData>>>(LoadState.Loading) }
+    var state by remember { mutableStateOf(ProgressiveModuleState<CourseReplayData>()) }
     var selectedLesson by remember { mutableStateOf<CourseReplayLesson?>(null) }
     var playbackState by remember { mutableStateOf<LoadState<CourseReplayPlaybackInfo>?>(null) }
     var selectedStreamKind by remember { mutableStateOf<String?>(null) }
 
     fun load(courseId: String = selectedCourseId) {
         scope.launch {
-            state = LoadState.Loading
+            state = ProgressiveModuleState()
             selectedLesson = null
             playbackState = null
             selectedStreamKind = null
-            runCatching { repository.listing(courseId = courseId.ifBlank { null }) }
-                .onSuccess {
-                    selectedCourseId = it.data.selectedCourseId?.toString().orEmpty()
-                    state = LoadState.Data(it)
+            runCatching {
+                repository.listingProgressive(courseId = courseId.ifBlank { null })
+                    .collect { next ->
+                        next.envelope?.data?.let { data ->
+                            selectedCourseId = data.selectedCourseId?.toString().orEmpty()
+                        }
+                        state = next
+                    }
+            }
+                .onFailure {
+                    state = state.copy(
+                        loading = false,
+                        complete = true,
+                        errors = state.errors + (it.message ?: "课程回放加载失败"),
+                    )
                 }
-                .onFailure { state = LoadState.Error(it.message ?: "课程回放加载失败") }
         }
     }
 
@@ -160,7 +173,7 @@ fun CourseReplayScreen(
             )
         }
         item {
-            val data = (state as? LoadState.Data)?.value?.data
+            val data = state.envelope?.data
             CourseReplaySelector(
                 courses = data?.courses.orEmpty().map {
                     it.courseId.toString() to listOfNotNull(it.courseName, it.teacherName).joinToString(" · ")
@@ -172,11 +185,16 @@ fun CourseReplayScreen(
                 },
             )
         }
-        when (val current = state) {
-            LoadState.Loading, is LoadState.Error -> item { LoadingOrError(current) }
-            is LoadState.Data -> {
-                val envelope = current.value
+        val envelope = state.envelope
+        if (envelope == null) {
+            item {
+                LoadingOrError(
+                    if (state.loading) LoadState.Loading else LoadState.Error(state.errors.joinToString("；").ifBlank { "课程回放加载失败" })
+                )
+            }
+        } else {
                 val data = envelope.data
+                item { ProgressiveStatus(state) }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         data.currentTerm?.takeIf { it.isNotBlank() }?.let {
@@ -197,7 +215,7 @@ fun CourseReplayScreen(
                         )
                     }
                 }
-                if (data.lessons.isEmpty()) {
+                if (data.lessons.isEmpty() && !state.loading) {
                     item {
                         InfoCard("暂无课程回放") {
                             Text("该课程暂未返回可选回放课次。", style = MaterialTheme.typography.bodyMedium)
@@ -212,7 +230,6 @@ fun CourseReplayScreen(
                         )
                     }
                 }
-            }
         }
     }
 }

@@ -12,6 +12,7 @@ import cn.edu.bjtu.mis.data.db.toEntity
 import cn.edu.bjtu.mis.data.db.toModel
 import cn.edu.bjtu.mis.data.db.toCourseEntry
 import cn.edu.bjtu.mis.data.homework.homeworkMatchesStatusFilter
+import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.data.perf.PerfTrace
 import cn.edu.bjtu.mis.data.provider.AaProvider
 import cn.edu.bjtu.mis.data.provider.CoremailProvider
@@ -45,6 +46,7 @@ import cn.edu.bjtu.mis.model.MailMessageDetail
 import cn.edu.bjtu.mis.model.MailMessagesData
 import cn.edu.bjtu.mis.model.ModuleEnvelope
 import cn.edu.bjtu.mis.model.ModuleKeys
+import cn.edu.bjtu.mis.model.ProgressiveModuleState
 import cn.edu.bjtu.mis.model.ScoreData
 import cn.edu.bjtu.mis.model.ScoreDetailData
 import cn.edu.bjtu.mis.model.SessionCaptcha
@@ -56,6 +58,9 @@ import cn.edu.bjtu.mis.model.TimetableData
 import cn.edu.bjtu.mis.model.UserCourseDraft
 import cn.edu.bjtu.mis.model.UserTodoDraft
 import cn.edu.bjtu.mis.model.UserTodoItem
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
@@ -376,6 +381,11 @@ class ModuleRepository(
     suspend fun historyScores(term: String? = null): ModuleEnvelope<ScoreData> =
         fetchLiveOrSnapshot(ModuleKeys.HistoryScores) { AaProvider(it).fetchHistoryScores(term) }
 
+    fun historyScoresProgressive(term: String? = null): Flow<ProgressiveModuleState<ScoreData>> =
+        progressiveLiveOrSnapshot(ModuleKeys.HistoryScores) { client ->
+            AaProvider(client).fetchHistoryScoresProgressive(term)
+        }
+
     suspend fun timetable(): ModuleEnvelope<TimetableData> =
         snapshotOrFetch(ModuleKeys.Timetable) { AaProvider(it).fetchTimetable() }
             .withUserCourses()
@@ -399,6 +409,14 @@ class ModuleRepository(
             homeworkMatchesStatusFilter(it, status)
         }))
     }
+
+    fun homeworkProgressive(status: String = "all"): Flow<ProgressiveModuleState<HomeworkData>> =
+        progressiveLiveOrSnapshot(
+            moduleKey = ModuleKeys.Homework,
+            transform = { it.filteredHomework(status) },
+        ) { client ->
+            VeProvider(client).fetchHomeworkProgressive()
+        }
 
     suspend fun submitHomework(
         homeworkId: Int,
@@ -424,6 +442,24 @@ class ModuleRepository(
     ): ModuleEnvelope<CourseResourcesData> =
         fetchLiveOrSnapshot(ModuleKeys.CourseResources) {
             VeProvider(it).fetchCourseResources(term, courseId, folderId, search)
+        }
+
+    fun courseResourcesProgressive(
+        term: String? = null,
+        courseId: String? = null,
+        folderId: String = "0",
+        search: String? = null,
+    ): Flow<ProgressiveModuleState<CourseResourcesData>> =
+        progressiveLiveOrSnapshot(ModuleKeys.CourseResources) { client ->
+            VeProvider(client).fetchCourseResourcesProgressive(term, courseId, folderId, search)
+        }
+
+    fun courseReplayProgressive(
+        term: String? = null,
+        courseId: String? = null,
+    ): Flow<ProgressiveModuleState<CourseReplayData>> =
+        progressiveLiveOrSnapshot(ModuleKeys.CourseReplay) { client ->
+            VeProvider(client).fetchCourseReplaysProgressive(term, courseId)
         }
 
     suspend fun snapshots(): List<ModuleSnapshotEntity> = syncRepository.snapshots()
@@ -474,6 +510,77 @@ class ModuleRepository(
                 ?: throw it
         }
     }
+
+    private inline fun <reified T> progressiveLiveOrSnapshot(
+        moduleKey: String,
+        noinline transform: (ModuleEnvelope<T>) -> ModuleEnvelope<T> = { it },
+        crossinline fetcher: (BjtuHttpClient) -> Flow<ProgressiveModuleState<T>>,
+    ): Flow<ProgressiveModuleState<T>> = flow {
+        val cached = syncRepository.snapshot<T>(moduleKey)?.let(transform)
+        var latestNetworkEnvelope: ModuleEnvelope<T>? = null
+        if (cached != null) {
+            emit(
+                ProgressiveModuleState(
+                    envelope = cached,
+                    loading = true,
+                    complete = false,
+                    fromCache = true,
+                    loadedCount = itemCount(cached.data).takeIf { it >= 0 },
+                )
+            )
+        }
+
+        runCatching {
+            sessionManager.withAuthenticatedClient { client ->
+                fetcher(client).collect { state ->
+                    val rawEnvelope = state.envelope
+                    val envelopeWithSyncedAt = if (state.complete && rawEnvelope != null) {
+                        rawEnvelope.copy(syncedAt = nowIso())
+                    } else {
+                        rawEnvelope
+                    }
+                    if (state.complete && envelopeWithSyncedAt != null) {
+                        syncRepository.saveSnapshot(moduleKey, envelopeWithSyncedAt)
+                    }
+                    val displayEnvelope = envelopeWithSyncedAt?.let(transform)
+                    latestNetworkEnvelope = displayEnvelope
+                    emit(state.copy(envelope = displayEnvelope, fromCache = false))
+                }
+            }
+        }.onFailure { error ->
+            val fallback = latestNetworkEnvelope ?: cached
+            emit(
+                ProgressiveModuleState(
+                    envelope = fallback,
+                    loading = false,
+                    complete = true,
+                    fromCache = latestNetworkEnvelope == null && cached != null,
+                    loadedCount = fallback?.data?.let { itemCount(it).takeIf { count -> count >= 0 } },
+                    errors = listOf(error.message ?: "加载失败"),
+                )
+            )
+        }
+    }
+
+    private fun ModuleEnvelope<HomeworkData>.filteredHomework(status: String): ModuleEnvelope<HomeworkData> {
+        if (status == "all") return this
+        return copy(data = data.copy(items = data.items.filter { homeworkMatchesStatusFilter(it, status) }))
+    }
+
+    private fun itemCount(data: Any?): Int = when (data) {
+        is TimetableData -> data.entries.size
+        is ExamData -> data.items.size
+        is ScoreData -> data.items.size
+        is CalendarData -> data.items.size
+        is HomeworkData -> data.items.size
+        is CourseResourcesData -> data.resources.size
+        is CourseReplayData -> data.lessons.size
+        is EmptyRoomData -> data.rooms.size
+        is MailMessagesData -> data.messages.size
+        is MailFoldersData -> data.folders.size
+        is StudentProfileData -> data.fields.size
+        else -> -1
+    }
 }
 
 class CourseResourceRepository(
@@ -488,6 +595,14 @@ class CourseResourceRepository(
         search: String? = null,
     ): ModuleEnvelope<CourseResourcesData> =
         moduleRepository.courseResources(term, courseId, folderId, search)
+
+    fun listingProgressive(
+        term: String? = null,
+        courseId: String? = null,
+        folderId: String = "0",
+        search: String? = null,
+    ): Flow<ProgressiveModuleState<CourseResourcesData>> =
+        moduleRepository.courseResourcesProgressive(term, courseId, folderId, search)
 
     suspend fun download(rpId: String, filename: String, extension: String? = null): File =
         sessionManager.withAuthenticatedClient { client ->
@@ -635,6 +750,7 @@ private fun collapseRepeatedExtension(filename: String): String {
 
 class CourseReplayRepository(
     private val syncRepository: SyncRepository,
+    private val moduleRepository: ModuleRepository,
     private val sessionManager: SessionManager,
 ) {
     suspend fun listing(
@@ -651,6 +767,12 @@ class CourseReplayRepository(
             syncRepository.snapshot<CourseReplayData>(ModuleKeys.CourseReplay)
                 ?: throw it
         }
+
+    fun listingProgressive(
+        term: String? = null,
+        courseId: String? = null,
+    ): Flow<ProgressiveModuleState<CourseReplayData>> =
+        moduleRepository.courseReplayProgressive(term, courseId)
 
     suspend fun playback(
         term: String? = null,

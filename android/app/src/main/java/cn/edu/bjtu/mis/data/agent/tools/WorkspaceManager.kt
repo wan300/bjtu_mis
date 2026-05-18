@@ -11,6 +11,12 @@ import java.io.IOException
 
 class WorkspaceSecurityException(message: String) : IOException(message)
 
+data class WorkspaceImportSource(
+    val file: File,
+    val displayName: String,
+    val mimeType: String? = null,
+)
+
 class WorkspaceManager(
     private val context: Context,
     private val maxWorkspaceBytes: Long = DEFAULT_MAX_WORKSPACE_BYTES,
@@ -54,6 +60,43 @@ class WorkspaceManager(
                 displayName = description.name,
                 relativePath = "inbox/${target.name}",
                 mimeType = description.mimeType,
+                sizeBytes = target.length(),
+            )
+        }
+    }
+
+    suspend fun importFiles(taskId: String, sources: List<WorkspaceImportSource>): List<AgentAttachment> = withContext(Dispatchers.IO) {
+        val root = prepare(taskId)
+        val inbox = File(root, "inbox").apply { mkdirs() }
+        sources.mapIndexed { index, source ->
+            val displayName = source.displayName.ifBlank { source.file.name.ifBlank { "attachment-${index + 1}" } }
+            val name = safeFileName(displayName)
+            val target = uniqueFile(inbox, name)
+            var written = 0L
+            try {
+                source.file.inputStream().use { input ->
+                    target.outputStream().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            written += count
+                            if (written > maxFileBytes) {
+                                throw IOException("附件 $displayName 超过 50 MiB 限制")
+                            }
+                            output.write(buffer, 0, count)
+                        }
+                    }
+                }
+                ensureWorkspaceLimit(root)
+            } catch (error: Exception) {
+                target.delete()
+                throw error
+            }
+            AgentAttachment(
+                displayName = displayName,
+                relativePath = "inbox/${target.name}",
+                mimeType = source.mimeType,
                 sizeBytes = target.length(),
             )
         }
@@ -152,6 +195,12 @@ class WorkspaceManager(
 internal fun validateAgentRelativePath(relativePath: String, writable: Boolean): List<String> {
     val normalized = relativePath.replace('\\', '/').trim()
     if (normalized.isBlank()) throw WorkspaceSecurityException("路径不能为空")
+    if (normalized == ".") {
+        if (writable) {
+            throw WorkspaceSecurityException("Root workspace path is read-only")
+        }
+        return emptyList()
+    }
     if (normalized.startsWith("/") || normalized.contains("://")) {
         throw WorkspaceSecurityException("只允许相对路径")
     }

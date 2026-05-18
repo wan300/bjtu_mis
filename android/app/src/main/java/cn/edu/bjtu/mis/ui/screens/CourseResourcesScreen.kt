@@ -35,10 +35,13 @@ import cn.edu.bjtu.mis.data.repository.DocumentPreview
 import cn.edu.bjtu.mis.model.CourseResourceItem
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.ModuleEnvelope
+import cn.edu.bjtu.mis.model.ProgressiveModuleState
 import cn.edu.bjtu.mis.ui.components.InfoCard
 import cn.edu.bjtu.mis.ui.components.KeyValue
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
+import cn.edu.bjtu.mis.ui.components.ProgressiveStatus
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -50,7 +53,7 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
     var selectedCourseId by remember { mutableStateOf("") }
     var folderId by remember { mutableStateOf("0") }
     var search by remember { mutableStateOf("") }
-    var state by remember { mutableStateOf<LoadState<ModuleEnvelope<CourseResourcesData>>>(LoadState.Loading) }
+    var state by remember { mutableStateOf(ProgressiveModuleState<CourseResourcesData>()) }
     var downloading by remember { mutableStateOf<String?>(null) }
     var previewing by remember { mutableStateOf<String?>(null) }
     var previewTarget by remember { mutableStateOf<CourseResourcesPreviewTarget?>(null) }
@@ -58,16 +61,26 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
 
     fun load(nextFolder: String = folderId, nextCourse: String = selectedCourseId) {
         scope.launch {
-            state = LoadState.Loading
+            state = ProgressiveModuleState()
             error = null
             runCatching {
-                repository.listing(courseId = nextCourse.ifBlank { null }, folderId = nextFolder, search = search.ifBlank { null })
-            }.onSuccess {
-                selectedCourseId = it.data.selectedCourseId?.toString().orEmpty()
-                folderId = it.data.folderId
-                state = LoadState.Data(it)
+                repository.listingProgressive(
+                    courseId = nextCourse.ifBlank { null },
+                    folderId = nextFolder,
+                    search = search.ifBlank { null },
+                ).collect { next ->
+                    next.envelope?.data?.let { data ->
+                        selectedCourseId = data.selectedCourseId?.toString().orEmpty()
+                        folderId = data.folderId
+                    }
+                    state = next
+                }
             }.onFailure {
-                state = LoadState.Error(it.message ?: "加载失败")
+                state = state.copy(
+                    loading = false,
+                    complete = true,
+                    errors = state.errors + (it.message ?: "加载失败"),
+                )
             }
         }
     }
@@ -118,7 +131,7 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            val data = (state as? LoadState.Data)?.value?.data
+            val data = state.envelope?.data
             CourseSelector(
                 courses = data?.courses.orEmpty().map { it.courseId.toString() to listOfNotNull(it.courseName, it.teacherName).joinToString(" · ") },
                 value = selectedCourseId,
@@ -154,10 +167,16 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
         if (!error.isNullOrBlank()) {
             item { Text(error.orEmpty(), color = MaterialTheme.colorScheme.error) }
         }
-        when (val current = state) {
-            LoadState.Loading, is LoadState.Error -> item { LoadingOrError(current) }
-            is LoadState.Data -> {
-                val data = current.value.data
+        val envelope = state.envelope
+        if (envelope == null) {
+            item {
+                LoadingOrError(
+                    if (state.loading) LoadState.Loading else LoadState.Error(state.errors.joinToString("；").ifBlank { "加载失败" })
+                )
+            }
+        } else {
+                val data = envelope.data
+                item { ProgressiveStatus(state) }
                 item {
                     val currentTerm = data.currentTerm
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -167,6 +186,13 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             AssistChip(onClick = {}, label = { Text("${data.resources.size} 个文件") })
                             AssistChip(onClick = {}, label = { Text("${data.folders.size} 个目录") })
+                        }
+                    }
+                }
+                if (data.folders.isEmpty() && data.resources.isEmpty() && !state.loading) {
+                    item {
+                        InfoCard("暂无课程资源") {
+                            Text("当前课程或目录下没有可展示的资源。", style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
@@ -209,7 +235,6 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
             }
         }
     }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

@@ -1,0 +1,180 @@
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import { dedupeNativeAgentGeneratedFiles } from './generated-files';
+
+type JsonRecord = Record<string, any>;
+
+export type NativeAgentToolDefinition = {
+	type: 'function';
+	requiresWorkspace?: boolean;
+	function: {
+		name: string;
+		description: string;
+		parameters: JsonRecord;
+	};
+};
+
+export type NativeAgentAttachment = {
+	displayName: string;
+	relativePath: string;
+	mimeType?: string | null;
+	sizeBytes?: number | null;
+	extractedDir?: string | null;
+	extractedFiles?: string[];
+	extractionError?: string | null;
+};
+
+export type NativeAgentAttachmentFailure = {
+	filename: string;
+	message: string;
+};
+
+export type NativeAgentHomeworkDraft = {
+	hasPending: boolean;
+	workspaceId?: string;
+	draft?: string;
+	attachments?: NativeAgentAttachment[];
+	failedAttachments?: NativeAgentAttachmentFailure[];
+};
+
+export type NativeAgentGeneratedFile = {
+	displayName: string;
+	relativePath: string;
+	mimeType?: string | null;
+	sizeBytes?: number | null;
+	role?: string | null;
+};
+
+export type NativeAgentGeneratedFileSaveResult = {
+	saved: boolean;
+	uri?: string;
+	displayName?: string;
+	location?: string;
+	mimeType?: string | null;
+	sizeBytes?: number | null;
+};
+
+export type NativeAgentGeneratedFilePreview = {
+	previewable: boolean;
+	kind?: 'pdf' | 'docx' | 'markdown' | 'code' | 'text';
+	displayName?: string;
+	relativePath?: string;
+	mimeType?: string | null;
+	sizeBytes?: number | null;
+	encoding?: 'base64' | 'utf-8';
+	base64?: string;
+	text?: string;
+	reason?: string;
+};
+
+type NativeAgentToolsPlugin = {
+	consumePendingHomeworkDraft(): Promise<NativeAgentHomeworkDraft>;
+	listTools(): Promise<{ tools: NativeAgentToolDefinition[] }>;
+	executeTool(options: {
+		workspaceId?: string | null;
+		toolName: string;
+		arguments?: JsonRecord;
+	}): Promise<JsonRecord>;
+	listGeneratedFiles(options: { workspaceId: string }): Promise<{ files: NativeAgentGeneratedFile[] }>;
+	saveGeneratedFile(options: {
+		workspaceId: string;
+		relativePath: string;
+	}): Promise<NativeAgentGeneratedFileSaveResult>;
+	readGeneratedFilePreview(options: {
+		workspaceId: string;
+		relativePath: string;
+	}): Promise<NativeAgentGeneratedFilePreview>;
+};
+
+const NativeAgentTools = registerPlugin<NativeAgentToolsPlugin>('NativeAgentTools');
+
+export const supportsNativeAgentTools = () =>
+	Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+
+const requireNativeAgentTools = () => {
+	if (!supportsNativeAgentTools()) {
+		throw new Error('Native Agent tools are only available on Android local-first clients.');
+	}
+};
+
+export const consumePendingHomeworkDraft = async (): Promise<NativeAgentHomeworkDraft> => {
+	if (!supportsNativeAgentTools()) {
+		return { hasPending: false };
+	}
+
+	return NativeAgentTools.consumePendingHomeworkDraft();
+};
+
+export const listNativeAgentTools = async () => {
+	requireNativeAgentTools();
+	return (await NativeAgentTools.listTools()).tools ?? [];
+};
+
+export const executeNativeAgentTool = async (options: {
+	workspaceId?: string | null;
+	toolName: string;
+	arguments?: JsonRecord;
+}) => {
+	requireNativeAgentTools();
+	return NativeAgentTools.executeTool(options);
+};
+
+export const listNativeAgentGeneratedFiles = async (
+	workspaceId?: string | null
+): Promise<NativeAgentGeneratedFile[]> => {
+	if (!workspaceId || !supportsNativeAgentTools()) {
+		return [];
+	}
+
+	const response = await NativeAgentTools.listGeneratedFiles({ workspaceId });
+	return dedupeNativeAgentGeneratedFiles(response.files ?? []);
+};
+
+export const saveNativeAgentGeneratedFile = async (options: {
+	workspaceId: string;
+	relativePath: string;
+}) => {
+	requireNativeAgentTools();
+	return NativeAgentTools.saveGeneratedFile(options);
+};
+
+export const readNativeAgentGeneratedFilePreview = async (options: {
+	workspaceId: string;
+	relativePath: string;
+}) => {
+	requireNativeAgentTools();
+	return NativeAgentTools.readGeneratedFilePreview(options);
+};
+
+export type NativeMailSendConfirmation = {
+	to: string[];
+	cc: string[];
+	bcc: string[];
+	subject: string;
+	body: string;
+	isHtml: boolean;
+	attachmentCount: number;
+};
+
+type MailSendConfirmationHandler = (request: NativeMailSendConfirmation) => Promise<boolean> | boolean;
+
+let mailSendConfirmationHandler: MailSendConfirmationHandler | null = null;
+
+export const registerMailSendConfirmationHandler = (handler: MailSendConfirmationHandler) => {
+	mailSendConfirmationHandler = handler;
+	return () => {
+		if (mailSendConfirmationHandler === handler) {
+			mailSendConfirmationHandler = null;
+		}
+	};
+};
+
+export const confirmNativeMailSend = async (request: NativeMailSendConfirmation) => {
+	if (!mailSendConfirmationHandler) {
+		throw new Error('mail_send_confirmation_unavailable');
+	}
+
+	const confirmed = await mailSendConfirmationHandler(request);
+	if (!confirmed) {
+		throw new Error('user_denied');
+	}
+};

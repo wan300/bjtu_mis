@@ -5,6 +5,37 @@ import { DEFAULT_LOCAL_WEB_SEARCH_SETTINGS } from './web-search-config';
 export const LOCAL_FIRST_TOKEN = 'local-first-token';
 export const LOCAL_FIRST_USER_ID = 'local-user';
 export const LOCAL_FIRST_APP_NAME = 'Open WebUI';
+export const DEFAULT_LOCAL_USER_NAME = 'Local User';
+
+type NativeStudentProfileBridge = {
+	getStudentName?: () => unknown;
+	getPreferredTheme?: () => unknown;
+};
+
+const getNativeStudentProfileBridge = (): NativeStudentProfileBridge | undefined => {
+	if (!browser) {
+		return undefined;
+	}
+
+	return (
+		window as typeof window & {
+			BjtuMisNative?: NativeStudentProfileBridge;
+		}
+	).BjtuMisNative;
+};
+
+export const resolveLocalUserName = (
+	nativeBridge: NativeStudentProfileBridge | undefined = getNativeStudentProfileBridge()
+) => {
+	try {
+		const studentName = nativeBridge?.getStudentName?.();
+		return typeof studentName === 'string' && studentName.trim()
+			? studentName.trim()
+			: DEFAULT_LOCAL_USER_NAME;
+	} catch {
+		return DEFAULT_LOCAL_USER_NAME;
+	}
+};
 
 const DEFAULT_DIRECT_CONNECTIONS = {
 	OPENAI_API_BASE_URLS: [],
@@ -107,7 +138,7 @@ export const getLocalBackendConfig = () => ({
 
 export const getLocalUser = () => ({
 	id: LOCAL_FIRST_USER_ID,
-	name: 'Local User',
+	name: resolveLocalUserName(),
 	email: 'local@device',
 	role: 'user',
 	profile_image_url: '/user.png',

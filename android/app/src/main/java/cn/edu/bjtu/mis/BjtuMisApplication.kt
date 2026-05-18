@@ -1,6 +1,7 @@
 package cn.edu.bjtu.mis
 
 import android.app.Application
+import cn.edu.bjtu.mis.data.agent.clearLegacyNativeAgentConfiguration
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderWorker
 import cn.edu.bjtu.mis.data.perf.PerfTrace
 import cn.edu.bjtu.mis.data.sync.SessionKeepAliveWorker
@@ -32,7 +33,7 @@ class BjtuMisApplication : Application() {
             PerfTrace.measureSuspend("Application.deferredStartup") {
                 coroutineScope {
                     launch {
-                        runCatching { container.agentRepository.markStaleActiveTasks() }
+                        clearLegacyNativeAgentConfiguration(this@BjtuMisApplication)
                     }
                     launch {
                         SyncWorker.schedule(this@BjtuMisApplication)

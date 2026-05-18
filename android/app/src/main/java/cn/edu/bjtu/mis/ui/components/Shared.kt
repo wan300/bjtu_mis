@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cn.edu.bjtu.mis.R
+import cn.edu.bjtu.mis.model.ProgressiveModuleState
 
 sealed interface LoadState<out T> {
     data object Loading : LoadState<Nothing>
@@ -151,6 +153,38 @@ fun LoadingOrError(state: LoadState<*>, modifier: Modifier = Modifier) {
         }
         is LoadState.Error -> InfoCard("加载失败", subtitle = state.message) {}
         else -> Unit
+    }
+}
+
+@Composable
+fun ProgressiveStatus(state: ProgressiveModuleState<*>, modifier: Modifier = Modifier) {
+    if (!state.loading && !state.fromCache && state.errors.isEmpty()) return
+    val message = when {
+        state.loading && state.fromCache -> "正在刷新，当前显示缓存"
+        state.loading -> "正在加载更多内容"
+        state.errors.isNotEmpty() -> "部分内容加载失败"
+        state.fromCache -> "当前显示缓存"
+        else -> "正在更新"
+    }
+    InfoCard("加载状态", modifier = modifier, subtitle = message) {
+        val loaded = state.loadedCount
+        val total = state.totalCount
+        if (loaded != null && total != null && total > 0) {
+            LinearProgressIndicator(
+                progress = { (loaded.toFloat() / total.toFloat()).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text("已加载 $loaded/$total", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else if (loaded != null && loaded > 0) {
+            Text("已加载 $loaded 项", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (state.errors.isNotEmpty()) {
+            Text(
+                state.errors.take(3).joinToString("；"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
     }
 }
 

@@ -9,6 +9,7 @@ import org.junit.Test
 class WorkspaceManagerTest {
     @Test
     fun acceptsSafeWorkspacePaths() {
+        assertEquals(emptyList<String>(), validateAgentRelativePath(".", writable = false))
         assertEquals(listOf("work", "answer.md"), validateAgentRelativePath("work/answer.md", writable = true))
         assertEquals(listOf("inbox", "ref.txt"), validateAgentRelativePath("inbox/ref.txt", writable = false))
     }
@@ -26,6 +27,9 @@ class WorkspaceManagerTest {
     fun rejectsWritesOutsideWorkOutputOrLogs() {
         assertThrows(WorkspaceSecurityException::class.java) {
             validateAgentRelativePath("inbox/original.txt", writable = true)
+        }
+        assertThrows(WorkspaceSecurityException::class.java) {
+            validateAgentRelativePath(".", writable = true)
         }
     }
 }

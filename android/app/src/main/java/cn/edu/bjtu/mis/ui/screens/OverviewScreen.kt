@@ -90,7 +90,7 @@ val navigationTargets = listOf(
     NavigationTarget(ModuleKeys.Calendar, "学年日历"),
     NavigationTarget(ModuleKeys.Homework, "作业"),
     NavigationTarget(ModuleKeys.Mail, "邮箱"),
-    NavigationTarget(ModuleKeys.Agent, "作业助手"),
+    NavigationTarget(ModuleKeys.OpenWebUiAgent, "作业助手"),
     NavigationTarget(ModuleKeys.CourseResources, "课程资源"),
     NavigationTarget(ModuleKeys.CourseReplay, "课程回放"),
     NavigationTarget(ModuleKeys.EmptyRooms, "空教室"),
@@ -160,9 +160,9 @@ private val ServiceGroups = listOf(
     ),
     ServiceGroup(
         title = "智能助手",
-        subtitle = "本地作业辅助能力",
+        subtitle = "OpenWebUI 作业辅助能力",
         entries = listOf(
-            ServiceEntry(ModuleKeys.Agent, "作业助手", "本地智能体", Icons.Filled.Psychology, Color(0xFF5A6FE8)),
+            ServiceEntry(ModuleKeys.OpenWebUiAgent, "作业助手", "OpenWebUI Agent", Icons.Filled.Psychology, Color(0xFF5A6FE8)),
         ),
     ),
 )

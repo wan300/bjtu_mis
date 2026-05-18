@@ -4,6 +4,7 @@ import {
 	getDefaultLocalSettings,
 	getLocalBackendConfig,
 	getLocalUser,
+	resolveLocalUserName,
 	shouldUseLocalFirstClient
 } from './index';
 
@@ -44,5 +45,21 @@ describe('shouldUseLocalFirstClient', () => {
 			maxPageChars: 12000,
 			timeoutMs: 15000
 		});
+	});
+
+	it('uses the native student name as the local user name when available', () => {
+		expect(resolveLocalUserName({ getStudentName: () => ' 张三 ' })).toBe('张三');
+	});
+
+	it('falls back to the default local user name when the native student name is unavailable', () => {
+		expect(resolveLocalUserName()).toBe('Local User');
+		expect(resolveLocalUserName({ getStudentName: () => '   ' })).toBe('Local User');
+		expect(
+			resolveLocalUserName({
+				getStudentName: () => {
+					throw new Error('native bridge failed');
+				}
+			})
+		).toBe('Local User');
 	});
 });

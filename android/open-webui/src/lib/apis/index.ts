@@ -354,7 +354,7 @@ export const stopTasksByChatId = async (token: string, chat_id: string) => {
 
 export const getTaskIdsByChatId = async (token: string, chat_id: string) => {
 	if (isLocalFirstClient()) {
-		return [];
+		return { task_ids: [] };
 	}
 
 	let error = null;

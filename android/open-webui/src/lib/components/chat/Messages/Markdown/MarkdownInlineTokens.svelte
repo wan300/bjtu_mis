@@ -26,6 +26,9 @@
 	export let tokens: Token[];
 	export let sourceIds = [];
 	export let onSourceClick: Function = () => {};
+	const nativeAgentWorkspacePathClick = getContext<
+		((value: string) => boolean | Promise<boolean>) | null
+	>('nativeAgentWorkspacePathClick');
 
 	/**
 	 * Check if a URL is a same-origin note link and return the note ID if so.
@@ -48,7 +51,14 @@
 	/**
 	 * Handle link clicks - intercept same-origin app URLs for in-app navigation
 	 */
-	const handleLinkClick = (e: MouseEvent, href: string) => {
+	const handleLinkClick = async (e: MouseEvent, href: string) => {
+		const handled = await nativeAgentWorkspacePathClick?.(href);
+		if (handled) {
+			e.preventDefault();
+			e.stopPropagation();
+			return;
+		}
+
 		try {
 			const url = new URL(href, window.location.origin);
 			// Check if same origin and an in-app route

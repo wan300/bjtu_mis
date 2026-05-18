@@ -61,6 +61,8 @@
 	export let imageGenerationEnabled = false;
 	export let codeInterpreterEnabled = false;
 	export let webSearchEnabled = false;
+	export let uploadPending = false;
+	export let uploadPendingText = '';
 
 	export let onUpload: Function = (e) => {};
 	export let onSelect = (e) => {};
@@ -234,6 +236,8 @@
 					{toolServers}
 					{stopResponse}
 					{createMessagePair}
+					{uploadPending}
+					{uploadPendingText}
 					placeholder={$i18n.t('How can I help you today?')}
 					{onChange}
 					{onUpload}

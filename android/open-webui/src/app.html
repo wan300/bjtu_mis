@@ -47,8 +47,18 @@
 			(() => {
 				const metaThemeColorTag = document.querySelector('meta[name="theme-color"]');
 				const prefersDarkTheme = window.matchMedia('(prefers-color-scheme: dark)').matches;
+				const nativePreferredTheme = (() => {
+					try {
+						const theme = window.BjtuMisNative?.getPreferredTheme?.();
+						return theme === 'light' || theme === 'dark' ? theme : null;
+					} catch {
+						return null;
+					}
+				})();
 
-				if (!localStorage?.theme) {
+				if (nativePreferredTheme) {
+					localStorage.theme = nativePreferredTheme;
+				} else if (!localStorage?.theme) {
 					localStorage.theme = 'system';
 				}
 

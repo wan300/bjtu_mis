@@ -56,6 +56,14 @@ class FileTool(
             val file = workspaceManager.resolveRead(taskId, arguments.requiredString("path"))
             if (!file.exists()) return@withContext ToolResult(errorOutput("not_found", "文件不存在"))
             if (!file.isFile) return@withContext ToolResult(errorOutput("not_file", "路径不是文件"))
+            if (isSupportedArchive(file, filename = file.name)) {
+                return@withContext ToolResult(
+                    errorOutput(
+                        "unsupported_file_type",
+                        "This file is an archive or compressed file. Use agent_archive_extract to extract it under work/ before reading extracted files.",
+                    )
+                )
+            }
             if (looksBinary(file)) return@withContext ToolResult(errorOutput("unsupported_file_type", "file.read 只支持 UTF-8 文本"))
             val bytes = file.readBytes()
             val truncated = bytes.size > MAX_READ_BYTES

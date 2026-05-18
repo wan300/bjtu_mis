@@ -14,7 +14,10 @@ vi.mock('./secrets', () => ({
 }));
 
 vi.mock('./agent', () => ({
-	shouldUseLocalAgentLoop: (body: Record<string, any>) => body?.params?.function_calling === 'native',
+	shouldUseLocalAgentLoop: (body: Record<string, any>) =>
+		body?.params?.function_calling === 'native' ||
+		body?.features?.android_device_tools === true ||
+		(typeof body?.params?.agent_workspace_id === 'string' && body.params.agent_workspace_id.trim() !== ''),
 	requestLocalAgentChatCompletion: vi.fn(async () => [new Response('{}'), new AbortController()])
 }));
 
@@ -96,5 +99,53 @@ describe('requestLocalChatCompletion', () => {
 		expect(call.providerBody).not.toHaveProperty('tools');
 		expect(call.providerBody).not.toHaveProperty('tool_choice');
 		expect(call.requestProvider).toEqual(expect.any(Function));
+	});
+
+	it('delegates homework agent workspace requests to the local-first agent loop', async () => {
+		await requestLocalChatCompletion({
+			model: 'gpt-test',
+			messages: [{ role: 'user', content: 'analyze homework' }],
+			stream: false,
+			params: {
+				agent_workspace_id: 'workspace-1'
+			}
+		});
+
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(requestLocalAgentChatCompletion).toHaveBeenCalledTimes(1);
+		const call = vi.mocked(requestLocalAgentChatCompletion).mock.calls[0][0];
+
+		expect(call.body.params.agent_workspace_id).toBe('workspace-1');
+		expect(call.providerBody).toMatchObject({
+			model: 'gpt-test',
+			stream: false,
+			messages: [{ role: 'user', content: 'analyze homework' }]
+		});
+		expect(call.providerBody).not.toHaveProperty('tools');
+		expect(call.providerBody).not.toHaveProperty('tool_choice');
+	});
+
+	it('delegates Android device tool requests to the local-first agent loop', async () => {
+		await requestLocalChatCompletion({
+			model: 'gpt-test',
+			messages: [{ role: 'user', content: 'where am I?' }],
+			stream: false,
+			features: {
+				android_device_tools: true
+			}
+		});
+
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(requestLocalAgentChatCompletion).toHaveBeenCalledTimes(1);
+		const call = vi.mocked(requestLocalAgentChatCompletion).mock.calls[0][0];
+
+		expect(call.body.features.android_device_tools).toBe(true);
+		expect(call.providerBody).toMatchObject({
+			model: 'gpt-test',
+			stream: false,
+			messages: [{ role: 'user', content: 'where am I?' }]
+		});
+		expect(call.providerBody).not.toHaveProperty('tools');
+		expect(call.providerBody).not.toHaveProperty('tool_choice');
 	});
 });

@@ -2,6 +2,7 @@ package cn.edu.bjtu.mis.data.provider
 
 import cn.edu.bjtu.mis.data.network.AppCookieJar
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
+import cn.edu.bjtu.mis.model.ScoreItem
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -10,6 +11,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AaProviderTest {
+    @Test
+    fun mergeScoreItemsDeduplicatesAcrossProgressiveTerms() {
+        val duplicate = score("2025-2026-1", "软件工程", "90")
+        val merged = mergeScoreItems(
+            listOf(
+                duplicate,
+                score("2025-2026-1", "软件工程", "90"),
+                score("2025-2026-2", "软件工程", "91"),
+            )
+        )
+
+        assertEquals(listOf(duplicate, score("2025-2026-2", "软件工程", "91")), merged)
+    }
+
     @Test
     fun fetchCourseSelectionReadsCourses() = runBlocking {
         MockWebServer().use { server ->
@@ -186,6 +201,18 @@ class AaProviderTest {
         val baseUrl = server.url("/").toString().trimEnd('/')
         return AaProvider(BjtuHttpClient(AppCookieJar()), aaBaseUrl = baseUrl)
     }
+
+    private fun score(term: String, courseName: String, score: String): ScoreItem =
+        ScoreItem(
+            term = term,
+            courseName = courseName,
+            credit = "2",
+            score = score,
+            bonusScore = null,
+            teacher = "Teacher",
+            detail = null,
+            detailPath = null,
+        )
 
     private fun text(name: String): String {
         val resource = javaClass.getResource("/fixtures/$name")

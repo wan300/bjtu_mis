@@ -54,7 +54,19 @@ vi.mock('./web-search', () => ({
 	}))
 }));
 
-import { executeLocalTool, LOCAL_AGENT_TOOLS, requestLocalAgentChatCompletion } from './agent';
+vi.mock('./native-agent-tools', () => ({
+	supportsNativeAgentTools: vi.fn(() => false),
+	listNativeAgentTools: vi.fn(),
+	executeNativeAgentTool: vi.fn(),
+	confirmNativeMailSend: vi.fn()
+}));
+
+import {
+	executeLocalTool,
+	LOCAL_AGENT_TOOLS,
+	requestLocalAgentChatCompletion,
+	shouldUseLocalAgentLoop
+} from './agent';
 import {
 	getLocalChat,
 	getLocalFileRecord,
@@ -64,6 +76,12 @@ import {
 } from './db';
 import { getCurrentLocation, supportsNativeAndroidTools } from './android-tools';
 import { searchWeb, supportsNativeWebSearch } from './web-search';
+import {
+	confirmNativeMailSend,
+	executeNativeAgentTool,
+	listNativeAgentTools,
+	supportsNativeAgentTools
+} from './native-agent-tools';
 
 const providerJsonResponse = (message: Record<string, any>) =>
 	new Response(
@@ -190,6 +208,9 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	vi.mocked(supportsNativeAndroidTools).mockReturnValue(false);
 	vi.mocked(supportsNativeWebSearch).mockReturnValue(false);
+	vi.mocked(supportsNativeAgentTools).mockReturnValue(false);
+	vi.mocked(listNativeAgentTools).mockResolvedValue([]);
+	vi.mocked(confirmNativeMailSend).mockResolvedValue(undefined);
 	vi.mocked(getLocalSettings).mockResolvedValue({
 		localWebSearch: {
 			engine: 'auto',
@@ -202,6 +223,14 @@ beforeEach(() => {
 });
 
 describe('requestLocalAgentChatCompletion', () => {
+	it('uses the local agent loop when a native Agent workspace id is present', () => {
+		expect(shouldUseLocalAgentLoop({ params: { agent_workspace_id: 'workspace-1' } })).toBe(true);
+	});
+
+	it('uses the local agent loop when code interpreter is enabled', () => {
+		expect(shouldUseLocalAgentLoop({ features: { code_interpreter: true } })).toBe(true);
+	});
+
 	it('injects native tools and loops after a provider tool call', async () => {
 		const requests: Record<string, any>[] = [];
 		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
@@ -264,6 +293,60 @@ describe('requestLocalAgentChatCompletion', () => {
 		expect(content).toContain('The result is 4.');
 	});
 
+	it('passes provider reasoning back with assistant tool-call turns', async () => {
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(structuredClone(providerBody));
+
+			if (requests.length === 1) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content: null,
+						reasoning_content: 'I should calculate this before answering.',
+						tool_calls: [
+							{
+								id: 'call_reasoning',
+								type: 'function',
+								function: {
+									name: 'calculate_expression',
+									arguments: '{"expression":"6 * 7"}'
+								}
+							}
+						]
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: 'The result is 42.'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		const [res] = await requestLocalAgentChatCompletion({
+			body: {},
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+		const final = await res?.json();
+
+		expect(requestProvider).toHaveBeenCalledTimes(2);
+		expect(requests[1].messages.at(-2)).toMatchObject({
+			role: 'assistant',
+			content: null,
+			reasoning_content: 'I should calculate this before answering.',
+			tool_calls: expect.any(Array)
+		});
+		expect(JSON.parse(requests[1].messages.at(-1).content).result).toBe(42);
+		expect(final.choices[0].message.content).toContain('I should calculate this before answering.');
+		expect(final.choices[0].message.content).toContain('The result is 42.');
+	});
+
 	it('exposes the Android location tool when user location sharing is enabled', async () => {
 		vi.mocked(supportsNativeAndroidTools).mockReturnValue(true);
 		vi.mocked(getLocalSettings).mockResolvedValue({
@@ -290,12 +373,84 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		await requestLocalAgentChatCompletion({
-			body: {},
+			body: { features: { android_device_tools: true } },
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
 
 		const toolNames = requests[0].tools.map((tool: any) => tool.function.name);
+		expect(toolNames).toContain('get_current_location');
+	});
+
+	it('hides the Android location tool when user location sharing is disabled', async () => {
+		vi.mocked(supportsNativeAndroidTools).mockReturnValue(true);
+		vi.mocked(getLocalSettings).mockResolvedValue({
+			userLocation: false,
+			localWebSearch: {
+				engine: 'auto',
+				resultCount: 5,
+				fetchPageCount: 3,
+				maxPageChars: 12000,
+				timeoutMs: 15000
+			}
+		} as any);
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: 'Ready.'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		await requestLocalAgentChatCompletion({
+			body: { features: { android_device_tools: true } },
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+
+		const toolNames = requests[0].tools.map((tool: any) => tool.function.name);
+		expect(toolNames).not.toContain('get_current_location');
+	});
+
+	it('exposes web search and Android location tools together when both features are enabled', async () => {
+		vi.mocked(supportsNativeAndroidTools).mockReturnValue(true);
+		vi.mocked(supportsNativeWebSearch).mockReturnValue(true);
+		vi.mocked(getLocalSettings).mockResolvedValue({
+			userLocation: true,
+			localWebSearch: {
+				engine: 'auto',
+				resultCount: 5,
+				fetchPageCount: 3,
+				maxPageChars: 12000,
+				timeoutMs: 15000
+			}
+		} as any);
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: 'Ready.'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		await requestLocalAgentChatCompletion({
+			body: { features: { web_search: true, android_device_tools: true } },
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+
+		const toolNames = requests[0].tools.map((tool: any) => tool.function.name);
+		expect(toolNames).toContain('search_web');
 		expect(toolNames).toContain('get_current_location');
 	});
 
@@ -675,6 +830,343 @@ describe('requestLocalAgentChatCompletion', () => {
 		expect(searchWeb).not.toHaveBeenCalled();
 		expect(toolResult.result).toBe('1431111670135373607581806');
 		expect(final.choices[0].message.content).toContain('1431111670135373607581806');
+	});
+
+	it('exposes code interpreter tools without Android device tools when code interpreter is enabled', async () => {
+		vi.mocked(supportsNativeAndroidTools).mockReturnValue(true);
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: 'Ready.'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		await requestLocalAgentChatCompletion({
+			body: { features: { code_interpreter: true } },
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+
+		const toolNames = requests[0].tools.map((tool: any) => tool.function.name);
+		expect(toolNames).toContain('execute_python');
+		expect(toolNames).toContain('calculate_expression');
+		expect(toolNames).not.toContain('get_device_context');
+		expect(toolNames).not.toContain('get_current_location');
+	});
+
+	it('exposes web search and code interpreter tools together when both features are enabled', async () => {
+		vi.mocked(supportsNativeWebSearch).mockReturnValue(true);
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: 'Ready.'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		await requestLocalAgentChatCompletion({
+			body: { features: { web_search: true, code_interpreter: true } },
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+
+		const toolNames = requests[0].tools.map((tool: any) => tool.function.name);
+		expect(toolNames).toContain('search_web');
+		expect(toolNames).toContain('fetch_url');
+		expect(toolNames).toContain('execute_python');
+		expect(toolNames).toContain('calculate_expression');
+	});
+
+	it('injects native Agent workspace tools when a workspace id is present', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		vi.mocked(listNativeAgentTools).mockResolvedValue([
+			{
+				type: 'function',
+				function: {
+					name: 'agent_file_list',
+					description: 'List files in the native Agent workspace.',
+					parameters: {
+						type: 'object',
+						properties: {},
+						required: [],
+						additionalProperties: false
+					}
+				}
+			},
+			{
+				type: 'function',
+				requiresWorkspace: true,
+				function: {
+					name: 'agent_archive_extract',
+					description: 'Extract a supported archive in the native Agent workspace.',
+					parameters: {
+						type: 'object',
+						properties: {
+							archivePath: { type: 'string' },
+							targetDir: { type: 'string' }
+						},
+						required: ['archivePath', 'targetDir'],
+						additionalProperties: false
+					}
+				}
+			}
+		]);
+		vi.mocked(executeNativeAgentTool).mockResolvedValue({
+			output: { ok: true, files: [{ path: 'inbox/task.pdf' }] }
+		});
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+
+			if (requests.length === 1) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content: null,
+						tool_calls: [
+							{
+								id: 'call_agent_files',
+								type: 'function',
+								function: {
+									name: 'agent_file_list',
+									arguments: '{}'
+								}
+							}
+						]
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: 'Found inbox/task.pdf.'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		await requestLocalAgentChatCompletion({
+			body: { params: { agent_workspace_id: 'workspace-1' } },
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+
+		expect(requests[0].tools.map((tool: any) => tool.function.name)).toContain('agent_file_list');
+		expect(requests[0].tools.map((tool: any) => tool.function.name)).toContain('agent_archive_extract');
+		expect(executeNativeAgentTool).toHaveBeenCalledWith({
+			workspaceId: 'workspace-1',
+			toolName: 'agent_file_list',
+			arguments: {}
+		});
+		expect(JSON.parse(requests[1].messages.at(-1).content).output.files[0].path).toBe(
+			'inbox/task.pdf'
+		);
+	});
+
+	it('injects only non-workspace native Agent mail tools without a workspace id', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		vi.mocked(listNativeAgentTools).mockResolvedValue([
+			{
+				type: 'function',
+				requiresWorkspace: true,
+				function: {
+					name: 'agent_file_list',
+					description: 'List files in the native Agent workspace.',
+					parameters: {
+						type: 'object',
+						properties: {},
+						required: [],
+						additionalProperties: false
+					}
+				}
+			},
+			{
+				type: 'function',
+				requiresWorkspace: false,
+				function: {
+					name: 'agent_mail_read',
+					description: 'Read a mail message.',
+					parameters: {
+						type: 'object',
+						properties: {
+							message_id: { type: 'string' }
+						},
+						required: ['message_id'],
+						additionalProperties: false
+					}
+				}
+			}
+		]);
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: 'Ready.'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		await requestLocalAgentChatCompletion({
+			body: { params: { function_calling: 'native' } },
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+
+		const toolNames = requests[0].tools.map((tool: any) => tool.function.name);
+		expect(toolNames).toContain('agent_mail_read');
+		expect(toolNames).not.toContain('agent_file_list');
+	});
+
+	it('does not execute agent_mail_send when the user denies confirmation', async () => {
+		vi.mocked(confirmNativeMailSend).mockRejectedValue(new Error('user_denied'));
+		const args = {
+			to: ['student@example.edu'],
+			cc: ['teacher@example.edu'],
+			bcc: [],
+			subject: 'Draft subject',
+			body: 'Draft body',
+			is_html: false
+		};
+
+		const result = JSON.parse(await executeLocalTool('agent_mail_send', args));
+
+		expect(confirmNativeMailSend).toHaveBeenCalledWith({
+			to: ['student@example.edu'],
+			cc: ['teacher@example.edu'],
+			bcc: [],
+			subject: 'Draft subject',
+			body: 'Draft body',
+			isHtml: false,
+			attachmentCount: 0
+		});
+		expect(executeNativeAgentTool).not.toHaveBeenCalled();
+		expect(result.error).toBe('user_denied');
+	});
+
+	it('executes agent_mail_send only after confirmation', async () => {
+		vi.mocked(executeNativeAgentTool).mockResolvedValue({
+			output: { ok: true, sent: { sent_message_id: 'sent-1', compose_id: 'compose-1' } }
+		});
+		const args = {
+			to: ['student@example.edu'],
+			subject: 'Draft subject',
+			body: 'Draft body',
+			is_html: true
+		};
+
+		const result = JSON.parse(await executeLocalTool('agent_mail_send', args));
+
+		expect(confirmNativeMailSend).toHaveBeenCalledWith({
+			to: ['student@example.edu'],
+			cc: [],
+			bcc: [],
+			subject: 'Draft subject',
+			body: 'Draft body',
+			isHtml: true,
+			attachmentCount: 0
+		});
+		expect(executeNativeAgentTool).toHaveBeenCalledWith({
+			workspaceId: '',
+			toolName: 'agent_mail_send',
+			arguments: args
+		});
+		expect(result.output.sent.sent_message_id).toBe('sent-1');
+	});
+
+	it('executes inline XML native Agent tool calls returned as message text', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		vi.mocked(listNativeAgentTools).mockResolvedValue([
+			{
+				type: 'function',
+				function: {
+					name: 'agent_file_read',
+					description: 'Read files in the native Agent workspace.',
+					parameters: {
+						type: 'object',
+						properties: {
+							path: { type: 'string' }
+						},
+						required: ['path'],
+						additionalProperties: false
+					}
+				}
+			}
+		]);
+		vi.mocked(executeNativeAgentTool).mockResolvedValue({
+			output: {
+				ok: true,
+				path: 'inbox/makefile_example',
+				content: 'makefile demo content',
+				truncated: false,
+				size_bytes: 21
+			}
+		});
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+
+			if (requests.length === 1) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content:
+							'好的，我来读取附件。\n\n<agent_file_read>\n<filename>inbox/makefile_example</filename>\n</agent_file_read>'
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: '附件内容是 makefile demo content。'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		const [res] = await requestLocalAgentChatCompletion({
+			body: { params: { agent_workspace_id: 'workspace-1' } },
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+		const final = await res?.json();
+		const toolResult = JSON.parse(requests[1].messages.at(-1).content);
+		const finalContent = final.choices[0].message.content;
+
+		expect(requests[0].tools.map((tool: any) => tool.function.name)).toContain(
+			'agent_file_read'
+		);
+		expect(executeNativeAgentTool).toHaveBeenCalledWith({
+			workspaceId: 'workspace-1',
+			toolName: 'agent_file_read',
+			arguments: { path: 'inbox/makefile_example' }
+		});
+		expect(toolResult.output.content).toBe('makefile demo content');
+		expect(finalContent).toContain('<details type="tool_calls" done="true"');
+		expect(finalContent).toContain('name="agent_file_read"');
+		expect(finalContent).toContain('附件内容是 makefile demo content。');
+		expect(finalContent).not.toContain('<agent_file_read>');
+		expect(finalContent).not.toContain('<filename>inbox/makefile_example</filename>');
 	});
 
 	it('falls back to local RAG search when the model does not call web tools', async () => {

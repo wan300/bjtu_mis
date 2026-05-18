@@ -22,14 +22,20 @@ import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentContainerView
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
 import cn.edu.bjtu.mis.openwebui.OpenWebUiAgentFragment
+import cn.edu.bjtu.mis.ui.theme.AppThemeOption
 
 @Composable
 fun OpenWebUiAgentScreen(
     repository: ModuleRepository,
+    themeOption: AppThemeOption,
     onBackHandlerChanged: ((() -> Boolean)?) -> Unit,
 ) {
     var studentName by remember { mutableStateOf<String?>(null) }
     var profileLoaded by remember { mutableStateOf(false) }
+    val agentTheme = when (themeOption) {
+        AppThemeOption.Default -> OpenWebUiAgentFragment.AGENT_THEME_LIGHT
+        AppThemeOption.MascotGold -> OpenWebUiAgentFragment.AGENT_THEME_DARK
+    }
 
     LaunchedEffect(repository) {
         studentName = runCatching {
@@ -85,10 +91,13 @@ fun OpenWebUiAgentScreen(
             }
         },
         update = { container ->
-            if (fragmentManager.findFragmentById(container.id) == null && !fragmentManager.isStateSaved) {
+            val fragment = fragmentManager.findFragmentById(container.id) as? OpenWebUiAgentFragment
+            if (fragment == null && !fragmentManager.isStateSaved) {
                 fragmentManager.beginTransaction()
-                    .replace(container.id, OpenWebUiAgentFragment.newInstance(studentName))
+                    .replace(container.id, OpenWebUiAgentFragment.newInstance(studentName, agentTheme))
                     .commitNow()
+            } else {
+                fragment?.updatePreferredTheme(agentTheme)
             }
         },
     )

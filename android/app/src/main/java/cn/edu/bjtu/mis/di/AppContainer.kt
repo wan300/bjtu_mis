@@ -3,15 +3,12 @@ package cn.edu.bjtu.mis.di
 import android.content.Context
 import androidx.room.Room
 import cn.edu.bjtu.mis.data.agent.document.DocumentTool
-import cn.edu.bjtu.mis.data.agent.llm.LlmClient
-import cn.edu.bjtu.mis.data.agent.repository.AgentRepository
-import cn.edu.bjtu.mis.data.agent.repository.AgentSecretStore
-import cn.edu.bjtu.mis.data.agent.repository.AgentSettingsStore
 import cn.edu.bjtu.mis.data.agent.runtime.RuntimeManager
 import cn.edu.bjtu.mis.data.agent.search.SearchTool
 import cn.edu.bjtu.mis.data.agent.tools.ArchiveTool
 import cn.edu.bjtu.mis.data.agent.tools.CodeTool
 import cn.edu.bjtu.mis.data.agent.tools.FileTool
+import cn.edu.bjtu.mis.data.agent.tools.MailAgentTool
 import cn.edu.bjtu.mis.data.agent.tools.PackageTool
 import cn.edu.bjtu.mis.data.agent.tools.ToolRegistry
 import cn.edu.bjtu.mis.data.agent.tools.WorkspaceManager
@@ -23,6 +20,7 @@ import cn.edu.bjtu.mis.data.db.MIGRATION_2_3
 import cn.edu.bjtu.mis.data.db.MIGRATION_3_4
 import cn.edu.bjtu.mis.data.db.MIGRATION_4_5
 import cn.edu.bjtu.mis.data.db.MIGRATION_5_6
+import cn.edu.bjtu.mis.data.db.MIGRATION_6_7
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderCoordinator
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderNotifier
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderRunner
@@ -51,7 +49,7 @@ class AppContainer(context: Context) {
             appContext,
             AppDatabase::class.java,
             "bjtu_mis.sqlite3",
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build()
     }
 
     val cookieJar = AppCookieJar()
@@ -76,7 +74,7 @@ class AppContainer(context: Context) {
     }
     val courseReplayRepository: CourseReplayRepository by lazy {
         PerfTrace.measure("AppContainer.courseReplayRepository") {
-            CourseReplayRepository(syncRepository, sessionManager)
+            CourseReplayRepository(syncRepository, moduleRepository, sessionManager)
         }
     }
     val mailRepository: MailRepository by lazy {
@@ -112,12 +110,6 @@ class AppContainer(context: Context) {
             )
         }
     }
-    val agentSettingsStore: AgentSettingsStore by lazy {
-        PerfTrace.measure("AppContainer.agentSettingsStore") { AgentSettingsStore(appContext) }
-    }
-    val agentSecretStore: AgentSecretStore by lazy {
-        PerfTrace.measure("AppContainer.agentSecretStore") { AgentSecretStore(appContext) }
-    }
     val themeStore: AppThemeStore by lazy {
         PerfTrace.measure("AppContainer.themeStore") { AppThemeStore(appContext) }
     }
@@ -135,19 +127,8 @@ class AppContainer(context: Context) {
                     DocumentTool(appContext, agentWorkspaceManager).tools() +
                     CodeTool(agentWorkspaceManager, agentRuntimeManager).tools() +
                     SearchTool().tools() +
+                    MailAgentTool(mailRepository).tools() +
                     PackageTool(agentWorkspaceManager).tools()
-            )
-        }
-    }
-    val agentRepository: AgentRepository by lazy {
-        PerfTrace.measure("AppContainer.agentRepository") {
-            AgentRepository(
-                dao = database.agentDao(),
-                settingsStore = agentSettingsStore,
-                secretStore = agentSecretStore,
-                workspaceManager = agentWorkspaceManager,
-                toolRegistry = agentToolRegistry,
-                llmClient = LlmClient(),
             )
         }
     }

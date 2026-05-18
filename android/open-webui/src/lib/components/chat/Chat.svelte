@@ -3,7 +3,7 @@
 	import { toast } from 'svelte-sonner';
 	import { PaneGroup, Pane, PaneResizer } from 'paneforge';
 
-	import { getContext, onDestroy, onMount, tick } from 'svelte';
+	import { getContext, onDestroy, onMount, setContext, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -82,6 +82,20 @@
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 	import { isLocalFirstClient } from '$lib/local-first';
 	import { supportsNativeAndroidTools, vibrate as nativeVibrate } from '$lib/local-first/android-tools';
+	import {
+		consumePendingHomeworkDraft,
+		listNativeAgentGeneratedFiles,
+		registerMailSendConfirmationHandler,
+		type NativeAgentAttachment,
+		type NativeAgentAttachmentFailure,
+		type NativeAgentGeneratedFile,
+		type NativeAgentHomeworkDraft,
+		type NativeMailSendConfirmation
+	} from '$lib/local-first/native-agent-tools';
+	import {
+		HOMEWORK_DRAFT_PREPARING_I18N_KEY,
+		shouldBlockHomeworkDraftSubmit
+	} from '$lib/local-first/homework-agent';
 	import { requestLocalChatCompletion } from '$lib/local-first/providers';
 	import { supportsNativeWebSearch } from '$lib/local-first/web-search';
 	import { processWeb, processWebSearch, processYoutubeVideo } from '$lib/apis/retrieval';
@@ -104,6 +118,8 @@
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Navbar from '$lib/components/chat/Navbar.svelte';
+	import NativeAgentAttachmentStatus from '$lib/components/chat/NativeAgentAttachmentStatus.svelte';
+	import NativeAgentGeneratedFiles from '$lib/components/chat/NativeAgentGeneratedFiles.svelte';
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
 	import Placeholder from './Placeholder.svelte';
@@ -147,6 +163,8 @@
 	let autoScroll = true;
 	let processing = '';
 	let messagesContainerElement: HTMLDivElement;
+	let keyboardHeight = 0;
+	$: chatKeyboardOffset = $isMobileClient ? keyboardHeight : 0;
 
 	let navbarElement;
 
@@ -158,6 +176,22 @@
 	let eventConfirmationInputValue = '';
 	let eventConfirmationInputType = '';
 	let eventCallback = null;
+	let pendingMailSendConfirmation:
+		| { request: NativeMailSendConfirmation; resolve: (confirmed: boolean) => void }
+		| null = null;
+
+	const formatMailRecipients = (recipients: string[]) =>
+		recipients.length > 0 ? recipients.join(', ') : '-';
+
+	const mailBodyPreview = (body: string) => {
+		const normalized = body.replace(/\s+/g, ' ').trim();
+		return normalized.length > 800 ? `${normalized.slice(0, 800)}...` : normalized;
+	};
+
+	const resolveMailSendConfirmation = (confirmed: boolean) => {
+		pendingMailSendConfirmation?.resolve(confirmed);
+		pendingMailSendConfirmation = null;
+	};
 
 	let selectedModels = [''];
 	let atSelectedModel: Model | undefined;
@@ -199,6 +233,52 @@
 	let chatFiles = [];
 	let files = [];
 	let params = {};
+	let nativeAgentWorkspaceId: string | null = null;
+	let nativeAgentAttachments: NativeAgentAttachment[] = [];
+	let nativeAgentAttachmentFailures: NativeAgentAttachmentFailure[] = [];
+	let nativeAgentGeneratedFiles: NativeAgentGeneratedFile[] = [];
+	let nativeAgentGeneratedFilesLoading = false;
+	let nativeAgentGeneratedFilesComponent: NativeAgentGeneratedFiles | undefined;
+	let nativeAgentGeneratedFilesRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+	let homeworkDraftPreparing = false;
+
+	const refreshNativeAgentGeneratedFiles = async () => {
+		if (!nativeAgentWorkspaceId) {
+			nativeAgentGeneratedFiles = [];
+			return;
+		}
+
+		nativeAgentGeneratedFilesLoading = true;
+		try {
+			nativeAgentGeneratedFiles = await listNativeAgentGeneratedFiles(nativeAgentWorkspaceId);
+		} catch (error) {
+			console.error('Failed to list native Agent generated files:', error);
+		} finally {
+			nativeAgentGeneratedFilesLoading = false;
+		}
+	};
+
+	const scheduleNativeAgentGeneratedFilesRefresh = (delayMs = 500) => {
+		if (!nativeAgentWorkspaceId) {
+			nativeAgentGeneratedFiles = [];
+			return;
+		}
+
+		if (nativeAgentGeneratedFilesRefreshTimer) {
+			clearTimeout(nativeAgentGeneratedFilesRefreshTimer);
+		}
+		nativeAgentGeneratedFilesRefreshTimer = setTimeout(() => {
+			nativeAgentGeneratedFilesRefreshTimer = null;
+			refreshNativeAgentGeneratedFiles();
+		}, delayMs);
+	};
+
+	setContext('nativeAgentWorkspacePathClick', async (value: string) => {
+		if (!nativeAgentWorkspaceId || !nativeAgentGeneratedFilesComponent) {
+			return false;
+		}
+		return nativeAgentGeneratedFilesComponent.openWorkspacePath(value);
+	});
 
 	$: if (chatIdProp) {
 		navigateHandler();
@@ -217,6 +297,12 @@
 		messageInput?.setText('');
 
 		files = [];
+		nativeAgentWorkspaceId = null;
+		nativeAgentAttachments = [];
+		nativeAgentAttachmentFailures = [];
+		nativeAgentGeneratedFiles = [];
+		nativeAgentGeneratedFilesLoading = false;
+		homeworkDraftPreparing = false;
 		selectedToolIds = [];
 		selectedFilterIds = [];
 		webSearchEnabled = false;
@@ -324,6 +410,76 @@
 		}
 	};
 
+	const consumeHomeworkAgentDraft = async () => {
+		if (!isLocalFirstClient()) {
+			return false;
+		}
+
+		homeworkDraftPreparing = true;
+		try {
+			const handoff: NativeAgentHomeworkDraft = await consumePendingHomeworkDraft().catch((error) => {
+				console.error('Failed to consume native homework draft:', error);
+				toast.error($i18n.t('Failed to prepare homework draft.'));
+				return { hasPending: false } satisfies NativeAgentHomeworkDraft;
+			});
+
+			if (!handoff?.hasPending) {
+				return false;
+			}
+
+			nativeAgentWorkspaceId = handoff.workspaceId ?? null;
+			nativeAgentAttachments = handoff.attachments ?? [];
+			nativeAgentAttachmentFailures = handoff.failedAttachments ?? [];
+			if (nativeAgentWorkspaceId) {
+				params = { ...params, agent_workspace_id: nativeAgentWorkspaceId };
+				await refreshNativeAgentGeneratedFiles();
+			}
+
+			const draft = handoff.draft ?? '';
+			prompt = draft;
+			messageInput?.setText(draft);
+			document.getElementById('chat-input')?.focus();
+			const importedCount = nativeAgentAttachments.length;
+			const failedCount = nativeAgentAttachmentFailures.length;
+			toast.success(
+				$i18n.t('Homework draft prepared. Imported {{count}} attachment(s).', {
+					count: importedCount
+				})
+			);
+			if (failedCount > 0) {
+				toast.warning(
+					$i18n.t('{{count}} homework attachment(s) could not be imported.', {
+						count: failedCount
+					})
+				);
+			}
+			return true;
+		} finally {
+			homeworkDraftPreparing = false;
+		}
+	};
+
+	const modelSupportsFeature = (model, feature) =>
+		model?.info?.meta?.capabilities?.[feature] ?? true;
+
+	const selectedModelsSupportFeature = (modelIds, feature) =>
+		modelIds.every(
+			(modelId) =>
+				$models.find((model) => model.id === modelId)?.info?.meta?.capabilities?.[feature] ?? true
+		);
+
+	const canUseWebSearchForModel = (model) =>
+		modelSupportsFeature(model, 'web_search') &&
+		$config?.features?.enable_web_search &&
+		($user?.role === 'admin' || $user?.permissions?.features?.web_search) &&
+		(!isLocalFirstClient() || supportsNativeWebSearch());
+
+	const canUseCodeInterpreterForModel = (model) =>
+		!$selectedTerminalId &&
+		modelSupportsFeature(model, 'code_interpreter') &&
+		$config?.features?.enable_code_interpreter &&
+		($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter);
+
 	const setDefaults = async () => {
 		if (!$tools) {
 			tools.set(await getTools(localStorage.token));
@@ -376,6 +532,9 @@
 			}
 
 			// Set Default Features
+			webSearchEnabled = canUseWebSearchForModel(model);
+			codeInterpreterEnabled = canUseCodeInterpreterForModel(model);
+
 			if (model?.info?.meta?.defaultFeatureIds) {
 				if (
 					model.info?.meta?.capabilities?.['image_generation'] &&
@@ -385,21 +544,6 @@
 					imageGenerationEnabled = model.info.meta.defaultFeatureIds.includes('image_generation');
 				}
 
-				if (
-					model.info?.meta?.capabilities?.['web_search'] &&
-					$config?.features?.enable_web_search &&
-					($user?.role === 'admin' || $user?.permissions?.features?.web_search)
-				) {
-					webSearchEnabled = model.info.meta.defaultFeatureIds.includes('web_search');
-				}
-
-				if (
-					model.info?.meta?.capabilities?.['code_interpreter'] &&
-					$config?.features?.enable_code_interpreter &&
-					($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
-				) {
-					codeInterpreterEnabled = model.info.meta.defaultFeatureIds.includes('code_interpreter');
-				}
 			}
 
 			// Set Default Terminal
@@ -725,13 +869,18 @@
 		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
 		$socket?.on('events', chatEventHandler);
+		const unregisterMailSendConfirmation = registerMailSendConfirmationHandler((request) => {
+			pendingMailSendConfirmation?.resolve(false);
+			return new Promise<boolean>((resolve) => {
+				pendingMailSendConfirmation = { request, resolve };
+			});
+		});
 
 		$audioQueue?.destroy();
 
 		const audioQueueInstance = new AudioQueue(document.getElementById('audioElement'));
 		audioQueue.set(audioQueueInstance);
 
-		let keyboardHeight = 0;
 		const cleanupKeyboard = createKeyboardAvoidance((height) => {
 			keyboardHeight = height;
 			if (height > 0 && autoScroll) {
@@ -850,6 +999,13 @@
 				showControlsSubscribe();
 				selectedFolderSubscribe();
 				cleanupKeyboard();
+				unregisterMailSendConfirmation();
+				if (nativeAgentGeneratedFilesRefreshTimer) {
+					clearTimeout(nativeAgentGeneratedFilesRefreshTimer);
+					nativeAgentGeneratedFilesRefreshTimer = null;
+				}
+				pendingMailSendConfirmation?.resolve(false);
+				pendingMailSendConfirmation = null;
 				window.removeEventListener('message', onMessageHandler);
 				$socket?.off('events', chatEventHandler);
 				audioQueueInstance?.destroy();
@@ -1238,6 +1394,12 @@
 
 		chatFiles = [];
 		params = {};
+		nativeAgentWorkspaceId = null;
+		nativeAgentAttachments = [];
+		nativeAgentAttachmentFailures = [];
+		nativeAgentGeneratedFiles = [];
+		nativeAgentGeneratedFilesLoading = false;
+		homeworkDraftPreparing = false;
 		taskIds = null;
 		chatTasks = [];
 
@@ -1289,8 +1451,10 @@
 			showControls.set(true);
 		}
 
+		const consumedHomeworkDraft = await consumeHomeworkAgentDraft();
+
 		// Consume one-shot desktop event (e.g. Spotlight query, call shortcut)
-		if ($desktopEvent) {
+		if (!consumedHomeworkDraft && $desktopEvent) {
 			const event = $desktopEvent;
 			desktopEvent.set(null);
 
@@ -1328,7 +1492,7 @@
 					submitHandler(query || '');
 				}
 			}
-		} else if ($page.url.searchParams.get('q')) {
+		} else if (!consumedHomeworkDraft && $page.url.searchParams.get('q')) {
 			const q = $page.url.searchParams.get('q') ?? '';
 			messageInput?.setText(q);
 
@@ -1390,6 +1554,15 @@
 
 				params = chatContent?.params ?? {};
 				chatFiles = chatContent?.files ?? [];
+				nativeAgentWorkspaceId =
+					typeof params?.agent_workspace_id === 'string' && params.agent_workspace_id.trim()
+						? params.agent_workspace_id.trim()
+						: null;
+				if (nativeAgentWorkspaceId) {
+					await refreshNativeAgentGeneratedFiles();
+				} else {
+					nativeAgentGeneratedFiles = [];
+				}
 
 				// Load tasks from chat-level DB field
 				chatTasks = chat?.tasks ?? [];
@@ -2007,6 +2180,10 @@
 			}
 		}
 
+		if (nativeAgentWorkspaceId && (content || choices)) {
+			scheduleNativeAgentGeneratedFilesRefresh();
+		}
+
 		if (selected_model_id) {
 			message.selectedModelId = selected_model_id;
 			message.arena = true;
@@ -2021,6 +2198,7 @@
 		if (done) {
 			finalizeReasoningMessage(message);
 			message.done = true;
+			await refreshNativeAgentGeneratedFiles();
 
 			if ($settings.responseAutoCopy) {
 				copyToClipboard(message.content);
@@ -2150,6 +2328,10 @@
 
 		if (pendingOAuthTools.length > 0) {
 			toast.warning($i18n.t('Please connect all required integrations before sending a message'));
+			return;
+		}
+		if (shouldBlockHomeworkDraftSubmit(homeworkDraftPreparing)) {
+			toast.warning($i18n.t(HOMEWORK_DRAFT_PREPARING_I18N_KEY));
 			return;
 		}
 		if (userPrompt === '' && files.length === 0) {
@@ -2295,6 +2477,10 @@
 		}
 		history = history;
 
+		if (isLocalFirstClient() && !_chatId && !$temporaryChatEnabled) {
+			_chatId = await initChatHandler(history);
+		}
+
 		// New chat — backend generates the chat_id on first request
 		if (!_chatId) {
 			if ($temporaryChatEnabled) {
@@ -2378,6 +2564,9 @@
 
 	const getFeatures = () => {
 		let features = {};
+		const currentModels = atSelectedModel?.id ? [atSelectedModel.id] : selectedModels;
+		const webSearchSupported = selectedModelsSupportFeature(currentModels, 'web_search');
+		const codeInterpreterSupported = selectedModelsSupportFeature(currentModels, 'code_interpreter');
 
 		if ($config?.features)
 			features = {
@@ -2389,18 +2578,27 @@
 						: false,
 				code_interpreter:
 					$config?.features?.enable_code_interpreter &&
-					($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
+					($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter) &&
+					codeInterpreterSupported
 						? codeInterpreterEnabled
 						: false,
 				web_search:
 					$config?.features?.enable_web_search &&
 					($user?.role === 'admin' || $user?.permissions?.features?.web_search) &&
-					(!isLocalFirstClient() || supportsNativeWebSearch())
+					(!isLocalFirstClient() || supportsNativeWebSearch()) &&
+					webSearchSupported
 						? webSearchEnabled
+						: false,
+				android_device_tools:
+					$config?.features?.enable_android_device_tools &&
+					($user?.role === 'admin' || $user?.permissions?.features?.android_device_tools) &&
+					isLocalFirstClient() &&
+					supportsNativeAndroidTools() &&
+					$settings?.userLocation === true
+						? true
 						: false
 			};
 
-		const currentModels = atSelectedModel?.id ? [atSelectedModel.id] : selectedModels;
 		if (
 			currentModels.filter(
 				(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
@@ -2408,6 +2606,7 @@
 		) {
 			if (
 				$config?.features?.enable_web_search &&
+				($user?.role === 'admin' || $user?.permissions?.features?.web_search) &&
 				($settings?.webSearch ?? false) === 'always' &&
 				(!isLocalFirstClient() || supportsNativeWebSearch())
 			) {
@@ -2602,6 +2801,7 @@
 				params: {
 					...$settings?.params,
 					...params,
+					...(nativeAgentWorkspaceId ? { agent_workspace_id: nativeAgentWorkspaceId } : {}),
 					stop: getStopTokens()
 				},
 
@@ -2969,7 +3169,7 @@
 				localStorage.token,
 				{
 					id: _chatId,
-					title: $i18n.t('New Chat'),
+					...(isLocalFirstClient() ? {} : { title: $i18n.t('New Chat') }),
 					models: selectedModels,
 					system: $settings.system ?? undefined,
 					params: params,
@@ -2988,8 +3188,8 @@
 
 			await tick();
 
-			await chats.set(await getChatList(localStorage.token, $currentChatPage));
 			currentChatPage.set(1);
+			await chats.set(await getChatList(localStorage.token, $currentChatPage));
 
 			selectedFolder.set(null);
 		} else {
@@ -3109,6 +3309,99 @@
 	}}
 />
 
+{#if pendingMailSendConfirmation}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+		role="dialog"
+		aria-modal="true"
+	>
+		<div
+			class="w-full max-w-2xl rounded-lg border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-800 dark:bg-gray-950"
+		>
+			<div class="mb-4">
+				<div class="text-lg font-semibold text-gray-900 dark:text-gray-50">
+					{$i18n.t('Confirm mail send')}
+				</div>
+				<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+					{$i18n.t('Review the message before it is sent from your mailbox.')}
+				</div>
+			</div>
+
+			<div class="space-y-3 text-sm">
+				<div>
+					<div class="mb-1 font-medium text-gray-700 dark:text-gray-200">{$i18n.t('To')}</div>
+					<div class="break-words rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900">
+						{formatMailRecipients(pendingMailSendConfirmation.request.to)}
+					</div>
+				</div>
+				<div class="grid gap-3 md:grid-cols-2">
+					<div>
+						<div class="mb-1 font-medium text-gray-700 dark:text-gray-200">{$i18n.t('Cc')}</div>
+						<div class="break-words rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900">
+							{formatMailRecipients(pendingMailSendConfirmation.request.cc)}
+						</div>
+					</div>
+					<div>
+						<div class="mb-1 font-medium text-gray-700 dark:text-gray-200">{$i18n.t('Bcc')}</div>
+						<div class="break-words rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900">
+							{formatMailRecipients(pendingMailSendConfirmation.request.bcc)}
+						</div>
+					</div>
+				</div>
+				<div>
+					<div class="mb-1 font-medium text-gray-700 dark:text-gray-200">{$i18n.t('Subject')}</div>
+					<div class="break-words rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900">
+						{pendingMailSendConfirmation.request.subject || '-'}
+					</div>
+				</div>
+				<div class="grid gap-3 md:grid-cols-2">
+					<div>
+						<div class="mb-1 font-medium text-gray-700 dark:text-gray-200">
+							{$i18n.t('Body format')}
+						</div>
+						<div class="rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900">
+							{pendingMailSendConfirmation.request.isHtml ? 'HTML' : 'Plain text'}
+						</div>
+					</div>
+					<div>
+						<div class="mb-1 font-medium text-gray-700 dark:text-gray-200">
+							{$i18n.t('Attachments')}
+						</div>
+						<div class="rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-900">
+							{pendingMailSendConfirmation.request.attachmentCount}
+						</div>
+					</div>
+				</div>
+				<div>
+					<div class="mb-1 font-medium text-gray-700 dark:text-gray-200">
+						{$i18n.t('Body preview')}
+					</div>
+					<pre
+						class="max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-800 dark:bg-gray-900 dark:text-gray-100"
+					>{mailBodyPreview(pendingMailSendConfirmation.request.body) || '-'}</pre>
+				</div>
+			</div>
+
+			<div class="mt-5 flex justify-end gap-2">
+				<button
+					type="button"
+					class="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-100 dark:hover:bg-gray-900"
+					on:click={() => resolveMailSendConfirmation(false)}
+				>
+					{$i18n.t('Cancel')}
+				</button>
+				<button
+					type="button"
+					class="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+					on:click={() => resolveMailSendConfirmation(true)}
+				>
+					{$i18n.t('Send')}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <div
 	class="h-screen max-h-[100dvh] transition-width duration-200 ease-in-out {$showSidebar
 		? '  md:max-w-[calc(100%-var(--sidebar-width))]'
@@ -3200,11 +3493,16 @@
 						}}
 					/>
 
-					<div id="chat-pane" class="flex flex-col flex-auto z-10 w-full @container overflow-auto">
+					<div
+						id="chat-pane"
+						class="flex flex-col flex-auto z-10 w-full @container overflow-auto"
+						style={`--chat-keyboard-offset: ${chatKeyboardOffset}px;`}
+					>
 						{#if ($settings?.landingPageMode === 'chat' && !$selectedFolder) || createMessagesList(history, history.currentId).length > 0}
 							<div
 								class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
 								id="messages-container"
+								style="padding-bottom: calc(var(--chat-keyboard-offset, 0px) + 0.625rem); scroll-padding-bottom: calc(var(--chat-keyboard-offset, 0px) + 8rem);"
 								bind:this={messagesContainerElement}
 								on:scroll={(e) => {
 									autoScroll =
@@ -3238,7 +3536,22 @@
 								</div>
 							</div>
 
-							<div class=" {$isMobileClient ? 'pb-safe-bottom' : 'pb-2'} {dragged ? 'z-0' : 'z-10'}">
+							<div
+								class="chat-input-shell {$isMobileClient
+									? 'pb-safe-bottom'
+									: 'pb-2'} {dragged ? 'z-0' : 'z-10'}"
+							>
+								<NativeAgentAttachmentStatus
+									preparing={homeworkDraftPreparing}
+									attachments={nativeAgentAttachments}
+									failures={nativeAgentAttachmentFailures}
+								/>
+								<NativeAgentGeneratedFiles
+									bind:this={nativeAgentGeneratedFilesComponent}
+									workspaceId={nativeAgentWorkspaceId}
+									files={nativeAgentGeneratedFiles}
+									loading={nativeAgentGeneratedFilesLoading}
+								/>
 								<MessageInput
 									bind:this={messageInput}
 									{history}
@@ -3258,6 +3571,8 @@
 									bind:dragged
 									toolServers={$toolServers}
 									{generating}
+									uploadPending={homeworkDraftPreparing}
+									uploadPendingText={$i18n.t(HOMEWORK_DRAFT_PREPARING_I18N_KEY)}
 									{stopResponse}
 									{createMessagePair}
 									{onUpload}
@@ -3321,40 +3636,55 @@
 							</div>
 						{:else}
 							<div class="flex items-center h-full">
-								<Placeholder
-									{history}
-									{selectedModels}
-									bind:messageInput
-									bind:files
-									bind:prompt
-									bind:autoScroll
-									bind:selectedToolIds
-									bind:selectedFilterIds
-									bind:imageGenerationEnabled
-									bind:codeInterpreterEnabled
-									bind:webSearchEnabled
-									bind:atSelectedModel
-									bind:showCommands
-									bind:dragged
-									{pendingOAuthTools}
-									toolServers={$toolServers}
-									{stopResponse}
-									{createMessagePair}
-									{onSelect}
-									{onUpload}
-									onChange={(data) => {
-										if (!$temporaryChatEnabled) {
-											saveDraft(data);
-										}
-									}}
-									on:submit={async (e) => {
-										clearDraft();
-										if (e.detail || files.length > 0) {
-											await tick();
-											submitHandler(e.detail);
-										}
-									}}
-								/>
+								<div class="w-full chat-input-shell">
+									<NativeAgentAttachmentStatus
+										preparing={homeworkDraftPreparing}
+										attachments={nativeAgentAttachments}
+										failures={nativeAgentAttachmentFailures}
+									/>
+									<NativeAgentGeneratedFiles
+										bind:this={nativeAgentGeneratedFilesComponent}
+										workspaceId={nativeAgentWorkspaceId}
+										files={nativeAgentGeneratedFiles}
+										loading={nativeAgentGeneratedFilesLoading}
+									/>
+									<Placeholder
+										{history}
+										{selectedModels}
+										bind:messageInput
+										bind:files
+										bind:prompt
+										bind:autoScroll
+										bind:selectedToolIds
+										bind:selectedFilterIds
+										bind:imageGenerationEnabled
+										bind:codeInterpreterEnabled
+										bind:webSearchEnabled
+										uploadPending={homeworkDraftPreparing}
+										uploadPendingText={$i18n.t(HOMEWORK_DRAFT_PREPARING_I18N_KEY)}
+										bind:atSelectedModel
+										bind:showCommands
+										bind:dragged
+										{pendingOAuthTools}
+										toolServers={$toolServers}
+										{stopResponse}
+										{createMessagePair}
+										{onSelect}
+										{onUpload}
+										onChange={(data) => {
+											if (!$temporaryChatEnabled) {
+												saveDraft(data);
+											}
+										}}
+										on:submit={async (e) => {
+											clearDraft();
+											if (e.detail || files.length > 0) {
+												await tick();
+												submitHandler(e.detail);
+											}
+										}}
+									/>
+								</div>
 							</div>
 						{/if}
 					</div>
@@ -3397,5 +3727,17 @@
 	::-webkit-scrollbar {
 		height: 0.5rem;
 		width: 0.5rem;
+	}
+
+	.chat-input-shell {
+		transform: translate3d(0, calc(0px - var(--chat-keyboard-offset, 0px)), 0);
+		transition: transform 160ms ease;
+		will-change: transform;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.chat-input-shell {
+			transition: none;
+		}
 	}
 </style>

@@ -13,11 +13,6 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import cn.edu.bjtu.mis.data.AppJson
-import cn.edu.bjtu.mis.data.agent.db.AgentArtifactEntity
-import cn.edu.bjtu.mis.data.agent.db.AgentDao
-import cn.edu.bjtu.mis.data.agent.db.AgentMessageEntity
-import cn.edu.bjtu.mis.data.agent.db.AgentStepEntity
-import cn.edu.bjtu.mis.data.agent.db.AgentTaskEntity
 import cn.edu.bjtu.mis.model.CourseEntry
 import cn.edu.bjtu.mis.model.MailFolder
 import cn.edu.bjtu.mis.model.MailMessageSummary
@@ -270,17 +265,12 @@ interface BjtuMisDao {
         UserTodoEntity::class,
         MailFolderEntity::class,
         MailMessageSummaryEntity::class,
-        AgentTaskEntity::class,
-        AgentStepEntity::class,
-        AgentArtifactEntity::class,
-        AgentMessageEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): BjtuMisDao
-    abstract fun agentDao(): AgentDao
 }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -317,85 +307,7 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
 }
 
 val MIGRATION_3_4 = object : Migration(3, 4) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS `agent_tasks` (
-                `id` TEXT NOT NULL,
-                `prompt` TEXT NOT NULL,
-                `status` TEXT NOT NULL,
-                `allowed_tools_json` TEXT NOT NULL,
-                `output_format` TEXT NOT NULL,
-                `max_steps` INTEGER NOT NULL,
-                `final_answer` TEXT,
-                `error_message` TEXT,
-                `created_at` TEXT NOT NULL,
-                `updated_at` TEXT NOT NULL,
-                `started_at` TEXT,
-                `finished_at` TEXT,
-                `source_kind` TEXT,
-                `source_ref` TEXT,
-                `title` TEXT,
-                `context_json` TEXT,
-                PRIMARY KEY(`id`)
-            )
-            """.trimIndent()
-        )
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_tasks_status_updated_at` ON `agent_tasks` (`status`, `updated_at`)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_tasks_source_kind_source_ref` ON `agent_tasks` (`source_kind`, `source_ref`)")
-        db.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS `agent_steps` (
-                `id` TEXT NOT NULL,
-                `task_id` TEXT NOT NULL,
-                `step_index` INTEGER NOT NULL,
-                `tool_name` TEXT NOT NULL,
-                `input_json` TEXT NOT NULL,
-                `status` TEXT NOT NULL,
-                `stdout` TEXT,
-                `stderr` TEXT,
-                `error_message` TEXT,
-                `started_at` TEXT NOT NULL,
-                `finished_at` TEXT,
-                PRIMARY KEY(`id`)
-            )
-            """.trimIndent()
-        )
-        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_agent_steps_task_id_step_index` ON `agent_steps` (`task_id`, `step_index`)")
-        db.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS `agent_artifacts` (
-                `id` TEXT NOT NULL,
-                `task_id` TEXT NOT NULL,
-                `relative_path` TEXT NOT NULL,
-                `mime_type` TEXT NOT NULL,
-                `size_bytes` INTEGER NOT NULL,
-                `role` TEXT NOT NULL,
-                `created_at` TEXT NOT NULL,
-                PRIMARY KEY(`id`)
-            )
-            """.trimIndent()
-        )
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_artifacts_task_id_role` ON `agent_artifacts` (`task_id`, `role`)")
-        db.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS `agent_messages` (
-                `id` TEXT NOT NULL,
-                `task_id` TEXT NOT NULL,
-                `message_index` INTEGER NOT NULL,
-                `role` TEXT NOT NULL,
-                `content` TEXT NOT NULL,
-                `tool_call_id` TEXT,
-                `tool_name` TEXT,
-                `metadata_json` TEXT,
-                `created_at` TEXT NOT NULL,
-                `updated_at` TEXT NOT NULL,
-                PRIMARY KEY(`id`)
-            )
-            """.trimIndent()
-        )
-        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_agent_messages_task_id_message_index` ON `agent_messages` (`task_id`, `message_index`)")
-    }
+    override fun migrate(db: SupportSQLiteDatabase) = Unit
 }
 
 val MIGRATION_4_5 = object : Migration(4, 5) {
@@ -458,6 +370,15 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_user_todos_date` ON `user_todos` (`date`)")
+    }
+}
+
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS `agent_messages`")
+        db.execSQL("DROP TABLE IF EXISTS `agent_artifacts`")
+        db.execSQL("DROP TABLE IF EXISTS `agent_steps`")
+        db.execSQL("DROP TABLE IF EXISTS `agent_tasks`")
     }
 }
 

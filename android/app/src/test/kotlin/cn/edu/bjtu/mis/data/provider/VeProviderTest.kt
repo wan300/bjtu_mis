@@ -1,9 +1,24 @@
 package cn.edu.bjtu.mis.data.provider
 
+import cn.edu.bjtu.mis.model.HomeworkAttachment
+import cn.edu.bjtu.mis.model.HomeworkItem
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class VeProviderTest {
+    @Test
+    fun mergeHomeworkItemsPrefersSubmittedDuplicateAndKeepsOrder() {
+        val open = homework(id = 1, title = "实验一", submittedAt = null)
+        val submitted = homework(id = 1, title = "实验一", submittedAt = "2026-05-18 10:00")
+        val withoutId = homework(id = null, title = "课程报告", submittedAt = null)
+        val duplicateWithoutId = homework(id = null, title = "课程报告", submittedAt = null)
+
+        val merged = mergeHomeworkItems(listOf(open, withoutId, submitted, duplicateWithoutId))
+
+        assertEquals(listOf(submitted, withoutId), merged)
+        assertEquals("result.pdf", merged.first().attachments.single().filename)
+    }
+
     @Test
     fun courseReplayUserIdCandidatesPreferReplayDetailId() {
         val candidates = courseReplayUserIdCandidates(
@@ -61,4 +76,21 @@ class VeProviderTest {
         assertEquals(false, params.containsKey("timeTableId"))
         assertEquals(false, params.containsKey("timetableId"))
     }
+
+    private fun homework(id: Int?, title: String, submittedAt: String?): HomeworkItem =
+        HomeworkItem(
+            homeworkId = id,
+            course = "软件工程",
+            courseId = 100,
+            courseCode = "M410001B",
+            title = title,
+            submittedAt = submittedAt,
+            status = if (submittedAt == null) "open" else "done",
+            subType = 0,
+            attachments = if (submittedAt == null) {
+                emptyList()
+            } else {
+                listOf(HomeworkAttachment("a1", "result.pdf"))
+            },
+        )
 }

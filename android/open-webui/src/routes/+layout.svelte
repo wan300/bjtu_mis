@@ -637,6 +637,30 @@
 		}
 	};
 
+	const applyThemeUpdate = (newTheme) => {
+		localStorage.setItem('theme', newTheme);
+		theme.set(newTheme);
+
+		const themes = ['dark', 'light', 'oled-dark', 'her'];
+		let themeToApply =
+			newTheme === 'oled-dark' ? 'dark' : newTheme === 'her' ? 'light' : newTheme;
+		if (newTheme === 'system') {
+			themeToApply = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+		}
+		themes
+			.filter((e) => e !== themeToApply)
+			.forEach((e) => {
+				e.split(' ').forEach((cls) => document.documentElement.classList.remove(cls));
+			});
+		themeToApply.split(' ').forEach((cls) => document.documentElement.classList.add(cls));
+
+		const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+		metaThemeColor?.setAttribute(
+			'content',
+			themeToApply === 'dark' ? (newTheme === 'oled-dark' ? '#000000' : '#171717') : '#ffffff'
+		);
+	};
+
 	const desktopEventHandler = async (event) => {
 		// Events that don't require auth
 		if (event.type === 'page:reload') {
@@ -658,23 +682,7 @@
 			return;
 		}
 		if (event.type === 'theme:update' && event.data?.theme) {
-			const newTheme = event.data.theme;
-			localStorage.setItem('theme', newTheme);
-			theme.set(newTheme);
-
-			// Apply theme classes (mirrors logic from chat/Settings/General.svelte)
-			const themes = ['dark', 'light', 'oled-dark'];
-			let themeToApply =
-				newTheme === 'oled-dark' ? 'dark' : newTheme === 'her' ? 'light' : newTheme;
-			if (newTheme === 'system') {
-				themeToApply = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-			}
-			themes
-				.filter((e) => e !== themeToApply)
-				.forEach((e) => {
-					e.split(' ').forEach((cls) => document.documentElement.classList.remove(cls));
-				});
-			themeToApply.split(' ').forEach((cls) => document.documentElement.classList.add(cls));
+			applyThemeUpdate(event.data.theme);
 			return;
 		}
 		if (event.type === 'models:refresh') {
@@ -740,7 +748,15 @@
 	};
 
 	onMount(async () => {
+		const nativeThemeUpdateHandler = (event) => {
+			const newTheme = event.detail?.theme;
+			if (newTheme) {
+				applyThemeUpdate(newTheme);
+			}
+		};
+
 		window.addEventListener('message', windowMessageEventHandler);
+		window.addEventListener('bjtu-mis:theme-update', nativeThemeUpdateHandler);
 
 		let touchstartY = 0;
 
@@ -1060,6 +1076,7 @@
 		return () => {
 			window.removeEventListener('resize', onResize);
 			window.removeEventListener('message', windowMessageEventHandler);
+			window.removeEventListener('bjtu-mis:theme-update', nativeThemeUpdateHandler);
 			document.removeEventListener('touchstart', touchstartHandler);
 			document.removeEventListener('touchmove', touchmoveHandler);
 			document.removeEventListener('touchend', touchendHandler);

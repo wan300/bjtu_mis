@@ -51,7 +51,6 @@ import cn.edu.bjtu.mis.model.AutoLoginStatus
 import cn.edu.bjtu.mis.model.ModuleKeys
 import cn.edu.bjtu.mis.model.SessionState
 import cn.edu.bjtu.mis.ui.screens.AcademicProgressScreen
-import cn.edu.bjtu.mis.ui.screens.AgentScreen
 import cn.edu.bjtu.mis.ui.screens.CalendarScreen
 import cn.edu.bjtu.mis.ui.screens.CourseReplayScreen
 import cn.edu.bjtu.mis.ui.screens.CourseResourcesScreen
@@ -74,8 +73,8 @@ import kotlinx.coroutines.launch
 
 private const val RouteHome = "overview"
 private const val RouteServices = "services"
-private const val RouteOpenWebUiAgent = "openwebui_agent"
-private val MainRoutes = setOf(RouteHome, RouteServices, RouteOpenWebUiAgent, ModuleKeys.Profile)
+private const val LegacyNativeAgentRoute = "agent"
+private val MainRoutes = setOf(RouteHome, RouteServices, ModuleKeys.OpenWebUiAgent, ModuleKeys.Profile)
 
 private data class BottomTab(
     val route: String,
@@ -94,7 +93,7 @@ private enum class ShellIcon {
 private val BottomTabs = listOf(
     BottomTab(RouteHome, "首页", ShellIcon.Home),
     BottomTab(RouteServices, "服务", ShellIcon.Grid),
-    BottomTab(RouteOpenWebUiAgent, "Agent", ShellIcon.Agent),
+    BottomTab(ModuleKeys.OpenWebUiAgent, "Agent", ShellIcon.Agent),
     BottomTab(ModuleKeys.Profile, "我的", ShellIcon.Person),
 )
 
@@ -130,16 +129,18 @@ fun BjtuMisApp(
     }
 
     fun navigateMain(route: String) {
-        current = route
-        mainTab = route
+        val target = normalizeRoute(route)
+        current = target
+        mainTab = target
         showExitDialog = false
     }
 
     fun navigateModule(route: String) {
-        if (route in MainRoutes) {
-            navigateMain(route)
+        val target = normalizeRoute(route)
+        if (target in MainRoutes) {
+            navigateMain(target)
         } else {
-            current = route
+            current = target
             showExitDialog = false
         }
     }
@@ -195,9 +196,10 @@ fun BjtuMisApp(
     LaunchedEffect(requestedRoute, ready) {
         val route = requestedRoute
         if (ready == true && !route.isNullOrBlank()) {
-            current = route
-            mainTab = when (route) {
-                RouteHome, RouteServices, RouteOpenWebUiAgent, ModuleKeys.Profile -> route
+            val target = normalizeRoute(route)
+            current = target
+            mainTab = when (target) {
+                RouteHome, RouteServices, ModuleKeys.OpenWebUiAgent, ModuleKeys.Profile -> target
                 else -> RouteServices
             }
             showExitDialog = false
@@ -240,7 +242,7 @@ fun BjtuMisApp(
         null -> Splash()
         false -> LoginScreen(container.sessionRepository) {
             ready = true
-            current = requestedRoute ?: RouteHome
+            current = requestedRoute?.let(::normalizeRoute) ?: RouteHome
             mainTab = if (current in MainRoutes) current else RouteServices
             if (!requestedRoute.isNullOrBlank()) onRouteHandled()
             startSessionKeepAlive()
@@ -250,7 +252,7 @@ fun BjtuMisApp(
         true -> {
             BackHandler {
                 when {
-                    current == RouteOpenWebUiAgent && openWebUiBackHandler?.invoke() == true -> Unit
+                    current == ModuleKeys.OpenWebUiAgent && openWebUiBackHandler?.invoke() == true -> Unit
                     current !in MainRoutes -> current = mainTab
                     current != RouteHome -> navigateMain(RouteHome)
                     else -> showExitDialog = true
@@ -281,15 +283,21 @@ fun BjtuMisApp(
             }
 
             val extendHomeIntoStatusBar = themeOption == AppThemeOption.MascotGold && current == RouteHome
-            val isOpenWebUiAgent = current == RouteOpenWebUiAgent
+            val isOpenWebUiAgent = current == ModuleKeys.OpenWebUiAgent
+            val isLightAgentTheme = isOpenWebUiAgent && themeOption == AppThemeOption.Default
             BjtuMisSystemBars(
                 statusBarColor = when {
                     extendHomeIntoStatusBar -> Color.Transparent
+                    isLightAgentTheme -> Color.White
                     isOpenWebUiAgent -> Color(0xFF171717)
                     else -> MaterialTheme.colorScheme.primary
                 },
                 navigationBarColor = MaterialTheme.colorScheme.surface,
-                useDarkStatusBarIcons = !isOpenWebUiAgent && themeOption != AppThemeOption.MascotGold,
+                useDarkStatusBarIcons = if (isOpenWebUiAgent) {
+                    isLightAgentTheme
+                } else {
+                    themeOption != AppThemeOption.MascotGold
+                },
                 useDarkNavigationBarIcons = themeOption != AppThemeOption.MascotGold,
                 decorFitsSystemWindows = !extendHomeIntoStatusBar,
             )
@@ -335,8 +343,9 @@ fun BjtuMisApp(
                             moduleRepository = container.moduleRepository,
                             onNavigate = ::navigateModule,
                         )
-                        RouteOpenWebUiAgent -> OpenWebUiAgentScreen(
+                        ModuleKeys.OpenWebUiAgent -> OpenWebUiAgentScreen(
                             repository = container.moduleRepository,
+                            themeOption = themeOption,
                             onBackHandlerChanged = { openWebUiBackHandler = it },
                         )
                         ModuleKeys.Profile -> MainScreenPadding {
@@ -367,6 +376,9 @@ fun BjtuMisApp(
         }
     }
 }
+
+private fun normalizeRoute(route: String): String =
+    if (route == LegacyNativeAgentRoute) ModuleKeys.OpenWebUiAgent else route
 
 @Composable
 private fun MainScreenPadding(content: @Composable () -> Unit) {
@@ -402,16 +414,10 @@ private fun ModuleRoute(
         ModuleKeys.Homework -> HomeworkScreen(
             repository = container.moduleRepository,
             attachmentRepository = container.homeworkAttachmentRepository,
-            agentRepository = container.agentRepository,
             onNavigate = onNavigate,
+            onOpenAgent = { onNavigate(ModuleKeys.OpenWebUiAgent) },
         )
         ModuleKeys.Mail -> MailScreen(container.mailRepository)
-        ModuleKeys.Agent -> AgentScreen(
-            repository = container.agentRepository,
-            settingsStore = container.agentSettingsStore,
-            secretStore = container.agentSecretStore,
-            runtimeManager = container.agentRuntimeManager,
-        )
         ModuleKeys.CourseResources -> CourseResourcesScreen(container.courseResourceRepository)
         ModuleKeys.CourseReplay -> CourseReplayScreen(container.courseReplayRepository, container.httpClient.client)
         ModuleKeys.EmptyRooms -> EmptyRoomsScreen(container.moduleRepository)

@@ -16,6 +16,8 @@ interface AgentTool {
     val name: String
     val description: String
     val parameters: JsonObject
+    val requiresWorkspace: Boolean
+        get() = true
 
     suspend fun execute(taskId: String, arguments: JsonObject): ToolResult
 }

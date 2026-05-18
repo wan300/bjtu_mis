@@ -169,6 +169,7 @@ dependencies {
     implementation(libs.media3.ui)
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.cordova.android)
+    implementation(libs.commons.compress)
 
     ksp(libs.androidx.room.compiler)
 
