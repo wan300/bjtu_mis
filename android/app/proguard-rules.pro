@@ -1,5 +1,6 @@
 -keep class kotlinx.serialization.** { *; }
 -dontwarn com.gemalto.jp2.JP2Decoder
+-dontwarn com.github.luben.zstd.ZstdInputStream
 
 -keep @com.getcapacitor.annotation.CapacitorPlugin public class * {
     @com.getcapacitor.annotation.PermissionCallback <methods>;

@@ -8,12 +8,14 @@ import cn.edu.bjtu.mis.model.MailContactsData
 import cn.edu.bjtu.mis.model.MailContactSuggestion
 import cn.edu.bjtu.mis.model.MailFolder
 import cn.edu.bjtu.mis.model.MailFoldersData
+import cn.edu.bjtu.mis.model.MailMarkReadResponse
 import cn.edu.bjtu.mis.model.MailMessageDetail
 import cn.edu.bjtu.mis.model.MailMessagesData
 import cn.edu.bjtu.mis.model.MailMessageSummary
 import cn.edu.bjtu.mis.model.ModuleEnvelope
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -31,6 +33,7 @@ interface MailAgentGateway {
     suspend fun folders(): ModuleEnvelope<MailFoldersData>
     suspend fun messages(folderId: String, start: Int, limit: Int): ModuleEnvelope<MailMessagesData>
     suspend fun detail(messageId: String, mboxa: String = ""): ModuleEnvelope<MailMessageDetail>
+    suspend fun markRead(messageIds: List<String>, mboxa: String = ""): MailMarkReadResponse
     suspend fun contacts(keyword: String, limit: Int): ModuleEnvelope<MailContactsData>
     suspend fun saveDraft(request: MailComposeRequest): MailComposeResponse
     suspend fun send(request: MailComposeRequest): MailComposeResponse
@@ -46,6 +49,9 @@ private class RepositoryMailAgentGateway(
 
     override suspend fun detail(messageId: String, mboxa: String): ModuleEnvelope<MailMessageDetail> =
         repository.detail(messageId = messageId, mboxa = mboxa)
+
+    override suspend fun markRead(messageIds: List<String>, mboxa: String): MailMarkReadResponse =
+        repository.markRead(messageIds = messageIds, mboxa = mboxa)
 
     override suspend fun contacts(keyword: String, limit: Int): ModuleEnvelope<MailContactsData> =
         repository.contacts(keyword = keyword, limit = limit)
@@ -67,6 +73,7 @@ class MailAgentTool(
         ListFoldersTool(),
         ListRecentTool(),
         ReadTool(),
+        MarkReadTool(),
         DigestContextTool(),
         SearchContactsTool(),
         SaveDraftTool(),
@@ -92,22 +99,23 @@ class MailAgentTool(
 
     private inner class ListRecentTool : BaseMailTool() {
         override val name = "mail.list_recent"
-        override val description = "List recent Coremail messages. Defaults to inbox, last 7 days, max 50 messages."
+        override val description = "List Coremail messages in a date window. Defaults to inbox, last 7 days, max 50 messages."
         override val parameters = objectSchema(
             "folder_id" to stringSchema("Coremail folder id. Defaults to inbox folder 1."),
-            "days" to integerSchema("Recent window in days. Defaults to 7.", minimum = 1, maximum = 30),
+            "start_date" to stringSchema("Inclusive start date/time. Supports YYYY-MM-DD, local date-time, ISO offset, or instant."),
+            "end_date" to stringSchema("Inclusive end date/time. Date-only values include the whole day."),
+            "days" to integerSchema("Recent window in days when start_date is omitted. Defaults to 7.", minimum = 1),
             "limit" to integerSchema("Maximum messages to return. Defaults to 50.", minimum = 1, maximum = 100),
+            "scan_limit" to integerSchema("Maximum messages to scan while seeking the date window. Defaults to 500.", minimum = 1, maximum = MAX_SCAN_LIMIT),
         )
 
         override suspend fun execute(taskId: String, arguments: JsonObject): ToolResult = withContext(Dispatchers.IO) {
-            val request = RecentMailRequest.from(arguments)
-            val messages = listRecentMessages(request)
+            val request = MailWindowRequest.from(arguments, clock)
+            val result = listWindowMessages(request)
             ToolResult(
-                okOutput(
-                    "folder_id" to JsonPrimitive(request.folderId),
-                    "days" to JsonPrimitive(request.days),
-                    "limit" to JsonPrimitive(request.limit),
-                    "messages" to JsonArray(messages.map { it.toJson() }),
+                request.toOutput(
+                    result,
+                    "messages" to JsonArray(result.messages.map { it.toJson() }),
                 )
             )
         }
@@ -134,23 +142,51 @@ class MailAgentTool(
         }
     }
 
+    private inner class MarkReadTool : BaseMailTool() {
+        override val name = "mail.mark_read"
+        override val description = "Mark explicit Coremail message ids as read."
+        override val parameters = objectSchema(
+            "message_ids" to stringArraySchema("Coremail message ids to mark as read."),
+            "mboxa" to stringSchema("Optional Coremail mailbox token."),
+            required = listOf("message_ids"),
+        )
+
+        override suspend fun execute(taskId: String, arguments: JsonObject): ToolResult = withContext(Dispatchers.IO) {
+            val messageIds = arguments.stringArray("message_ids")
+            if (messageIds.isEmpty()) throw IllegalArgumentException("Missing parameter message_ids")
+            val mboxa = arguments.string("mboxa").orEmpty()
+            val response = gateway.markRead(messageIds = messageIds, mboxa = mboxa)
+            ToolResult(
+                okOutput(
+                    "status" to JsonPrimitive(response.status),
+                    "message_ids" to JsonArray(response.messageIds.map { JsonPrimitive(it) }),
+                    "updated_count" to JsonPrimitive(response.updatedCount),
+                )
+            )
+        }
+    }
+
     private inner class DigestContextTool : BaseMailTool() {
         override val name = "mail.digest_context"
         override val description =
-            "Collect recent high-signal mail context for an LLM digest. The model should write the final summary."
+            "Collect high-signal mail context in a date window for an LLM digest. The model should write the final summary."
         override val parameters = objectSchema(
             "folder_id" to stringSchema("Coremail folder id. Defaults to inbox folder 1."),
-            "days" to integerSchema("Recent window in days. Defaults to 7.", minimum = 1, maximum = 30),
+            "start_date" to stringSchema("Inclusive start date/time. Supports YYYY-MM-DD, local date-time, ISO offset, or instant."),
+            "end_date" to stringSchema("Inclusive end date/time. Date-only values include the whole day."),
+            "days" to integerSchema("Recent window in days when start_date is omitted. Defaults to 7.", minimum = 1),
             "limit" to integerSchema("Maximum messages to inspect. Defaults to 50.", minimum = 1, maximum = 100),
+            "scan_limit" to integerSchema("Maximum messages to scan while seeking the date window. Defaults to 500.", minimum = 1, maximum = MAX_SCAN_LIMIT),
             "max_messages_with_body" to integerSchema("Maximum prioritized messages to read fully. Defaults to 20.", minimum = 1, maximum = 50),
             "max_body_chars" to integerSchema("Maximum body excerpt characters per message. Defaults to 3000.", minimum = 1, maximum = MAX_BODY_CHARS),
         )
 
         override suspend fun execute(taskId: String, arguments: JsonObject): ToolResult = withContext(Dispatchers.IO) {
-            val request = RecentMailRequest.from(arguments)
+            val request = MailWindowRequest.from(arguments, clock)
             val maxBodies = arguments.int("max_messages_with_body", DEFAULT_DIGEST_BODY_COUNT).coerceIn(1, 50)
             val maxBodyChars = arguments.int("max_body_chars", DEFAULT_DIGEST_BODY_CHARS).coerceIn(1, MAX_BODY_CHARS)
-            val recentMessages = listRecentMessages(request)
+            val windowResult = listWindowMessages(request)
+            val recentMessages = windowResult.messages
             val prioritized = recentMessages.sortedWith(
                 compareByDescending<MailMessageSummary> { it.digestPriority() }
                     .thenByDescending { it.messageInstant()?.toEpochMilli() ?: Long.MIN_VALUE }
@@ -168,10 +204,8 @@ class MailAgentTool(
                 )
             }
             ToolResult(
-                okOutput(
-                    "folder_id" to JsonPrimitive(request.folderId),
-                    "days" to JsonPrimitive(request.days),
-                    "limit" to JsonPrimitive(request.limit),
+                request.toOutput(
+                    windowResult,
                     "read_body_count" to JsonPrimitive(detailsById.size),
                     "items" to JsonArray(items),
                 )
@@ -225,50 +259,110 @@ class MailAgentTool(
         }
     }
 
-    private suspend fun listRecentMessages(request: RecentMailRequest): List<MailMessageSummary> {
-        val cutoff = Instant.now(clock).minusSeconds(request.days.toLong() * 24L * 60L * 60L)
+    private suspend fun listWindowMessages(request: MailWindowRequest): MailWindowResult {
         val messages = mutableListOf<MailMessageSummary>()
         var start = 0
-        var reachedTimeLimit = false
-        while (messages.size < request.limit && !reachedTimeLimit) {
-            val pageSize = minOf(PAGE_SIZE, request.limit - messages.size)
+        var scannedCount = 0
+        var reachedStartBoundary = false
+        var scanTruncated = false
+        while (messages.size < request.limit && !reachedStartBoundary) {
+            val remainingScan = request.scanLimit - scannedCount
+            if (remainingScan <= 0) {
+                scanTruncated = true
+                break
+            }
+            val pageSize = minOf(PAGE_SIZE, remainingScan)
             val page = gateway.messages(folderId = request.folderId, start = start, limit = pageSize).data.messages
             if (page.isEmpty()) break
             for (message in page) {
+                scannedCount += 1
                 val instant = message.messageInstant()
-                if (instant != null && instant.isBefore(cutoff)) {
-                    reachedTimeLimit = true
+                if (instant != null && instant.isAfter(request.endInstant)) continue
+                if (instant != null && instant.isBefore(request.startInstant)) {
+                    reachedStartBoundary = true
                     break
                 }
                 messages += message
                 if (messages.size >= request.limit) break
             }
             if (page.size < pageSize) break
-            start += pageSize
+            start += page.size
         }
-        return messages
+        return MailWindowResult(
+            messages = messages,
+            scannedCount = scannedCount,
+            scanTruncated = scanTruncated,
+        )
     }
 
-    private data class RecentMailRequest(
+    private data class MailWindowRequest(
         val folderId: String,
-        val days: Int,
+        val startInstant: Instant,
+        val endInstant: Instant,
+        val days: Int?,
         val limit: Int,
+        val scanLimit: Int,
     ) {
+        fun rangeJson(): JsonObject = buildJsonObject {
+            put("start_at", startInstant.toString())
+            put("end_at", endInstant.toString())
+            days?.let { put("days", it) }
+        }
+
+        fun toOutput(result: MailWindowResult, vararg values: Pair<String, kotlinx.serialization.json.JsonElement>): JsonObject =
+            buildJsonObject {
+                put("ok", true)
+                put("folder_id", folderId)
+                days?.let { put("days", it) }
+                put("limit", limit)
+                put("scan_limit", scanLimit)
+                put("range", rangeJson())
+                put("scanned_count", result.scannedCount)
+                put("scan_truncated", result.scanTruncated)
+                values.forEach { (key, value) -> put(key, value) }
+            }
+
         companion object {
-            fun from(arguments: JsonObject): RecentMailRequest =
-                RecentMailRequest(
+            fun from(arguments: JsonObject, clock: Clock): MailWindowRequest {
+                val now = Instant.now(clock)
+                val days = arguments.int("days", DEFAULT_DAYS).coerceAtLeast(1)
+                val explicitStart = arguments.string("start_date")?.takeIf { it.isNotBlank() }
+                val explicitEnd = arguments.string("end_date")?.takeIf { it.isNotBlank() }
+                val endInstant = explicitEnd
+                    ?.let { parseMailWindowBoundary(it, endOfDay = true) }
+                    ?: now
+                val startInstant = explicitStart
+                    ?.let { parseMailWindowBoundary(it, endOfDay = false) }
+                    ?: endInstant.minusSeconds(days.toLong() * SECONDS_PER_DAY)
+                if (endInstant.isBefore(startInstant)) {
+                    throw IllegalArgumentException("end_date must not be before start_date")
+                }
+                return MailWindowRequest(
                     folderId = arguments.string("folder_id")?.takeIf { it.isNotBlank() } ?: DEFAULT_FOLDER_ID,
-                    days = arguments.int("days", DEFAULT_DAYS).coerceIn(1, 30),
+                    startInstant = startInstant,
+                    endInstant = endInstant,
+                    days = if (explicitStart == null) days else null,
                     limit = arguments.int("limit", DEFAULT_LIMIT).coerceIn(1, 100),
+                    scanLimit = arguments.int("scan_limit", DEFAULT_SCAN_LIMIT).coerceIn(1, MAX_SCAN_LIMIT),
                 )
+            }
         }
     }
+
+    private data class MailWindowResult(
+        val messages: List<MailMessageSummary>,
+        val scannedCount: Int,
+        val scanTruncated: Boolean,
+    )
 }
 
 private const val DEFAULT_FOLDER_ID = "1"
 private const val DEFAULT_DAYS = 7
 private const val DEFAULT_LIMIT = 50
+private const val DEFAULT_SCAN_LIMIT = 500
+private const val MAX_SCAN_LIMIT = 2000
 private const val PAGE_SIZE = 50
+private const val SECONDS_PER_DAY = 24L * 60L * 60L
 private const val DEFAULT_BODY_CHARS = 12000
 private const val MAX_BODY_CHARS = 30000
 private const val DEFAULT_DIGEST_BODY_COUNT = 20
@@ -276,6 +370,7 @@ private const val DEFAULT_DIGEST_BODY_CHARS = 3000
 private const val DEFAULT_CONTACT_LIMIT = 8
 
 private val localDateTimeFormats = listOf(
+    DateTimeFormatter.ISO_LOCAL_DATE_TIME,
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"),
     DateTimeFormatter.ofPattern("yyyy/M/d H:mm:ss"),
@@ -532,6 +627,26 @@ private fun MailMessageSummary.digestPriority(): Int {
 
 private fun MailMessageSummary.messageInstant(): Instant? =
     parseMailInstant(receivedAt) ?: parseMailInstant(sentAt) ?: parseMailInstant(modifiedAt)
+
+private fun parseMailWindowBoundary(value: String, endOfDay: Boolean): Instant {
+    val text = value.trim()
+    runCatching { Instant.parse(text) }.getOrNull()?.let { return it }
+    runCatching { OffsetDateTime.parse(text, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant() }.getOrNull()
+        ?.let { return it }
+    runCatching {
+        val date = LocalDate.parse(text, DateTimeFormatter.ISO_LOCAL_DATE)
+        val startOfDay = date.atStartOfDay(ZoneId.systemDefault()).toInstant()
+        if (endOfDay) startOfDay.plusSeconds(SECONDS_PER_DAY).minusNanos(1) else startOfDay
+    }.getOrNull()?.let { return it }
+    localDateTimeFormats.forEach { formatter ->
+        runCatching {
+            LocalDateTime.parse(text, formatter)
+                .atZone(ZoneId.systemDefault())
+                .toInstant()
+        }.getOrNull()?.let { return it }
+    }
+    throw IllegalArgumentException("Invalid mail date/time: $value")
+}
 
 private fun parseMailInstant(value: String?): Instant? {
     val text = value?.trim()?.takeIf { it.isNotBlank() } ?: return null

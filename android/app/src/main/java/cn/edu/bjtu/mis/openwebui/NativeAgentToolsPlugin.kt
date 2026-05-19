@@ -345,7 +345,7 @@ class NativeAgentToolsPlugin : Plugin() {
         if (attachments.isNotEmpty()) {
             appendLine()
             appendLine("已自动下载并导入的附件，可通过 agent_file_list、agent_file_read、agent_document_extract_pdf/docx、agent_archive_extract 等工具访问。")
-            appendLine("请先用 agent_file_list 查看附件；如果附件是 zip/jar/tar/tar.gz/tgz/tar.bz2/tbz2/gz/bz2，请调用 agent_archive_extract 解压到 work/attachments/ 下；PDF/DOCX 请先用对应提取工具转成文本后再分析：")
+            appendLine("请先用 agent_file_list 并传入 path=\"inbox\" 查看附件；如果附件是 zip/jar/tar/tar.gz/tgz/tar.bz2/tbz2/gz/bz2，请调用 agent_archive_extract 解压到 work/attachments/ 下；PDF/DOCX 请先用对应提取工具转成文本后再分析：")
             attachments.forEach { attachment ->
                 appendLine("- ${attachment.displayName}: 原始附件 ${attachment.relativePath}")
                 appendLine("  - 如需解压，建议 targetDir：work/attachments/${safeAttachmentDirName(attachment)}")
@@ -553,6 +553,7 @@ class NativeAgentToolsPlugin : Plugin() {
             "agent_mail_list_folders" to "mail.list_folders",
             "agent_mail_list_recent" to "mail.list_recent",
             "agent_mail_read" to "mail.read",
+            "agent_mail_mark_read" to "mail.mark_read",
             "agent_mail_digest_context" to "mail.digest_context",
             "agent_mail_search_contacts" to "mail.search_contacts",
             "agent_mail_save_draft" to "mail.save_draft",

@@ -998,6 +998,9 @@ class VeProvider(private val client: BjtuHttpClient) {
             strictFlowStep = "ve_course_platform_index_ready"
             val index = openCoursePlatformIndex(gateway)
             rememberSession(index)
+            if (isBjtuCasLoginUrl(index.url)) {
+                throw SessionExpiredException("VE course platform redirected to CAS login.")
+            }
             if (!index.url.contains("123.121.147.7") || !index.url.contains("coursePlatform.shtml")) {
                 throw IllegalStateException("unexpected VE index url ${index.url}")
             }
@@ -1009,6 +1012,7 @@ class VeProvider(private val client: BjtuHttpClient) {
         }.getOrElse { error ->
             strictFlowReady = false
             lastBootstrapError = "step=$strictFlowStep ${error.message.orEmpty()}".trim()
+            if (error is SessionExpiredException) throw error
             false
         }
     }
@@ -1299,6 +1303,9 @@ class VeProvider(private val client: BjtuHttpClient) {
 
     private fun parseJsonObjectResponse(response: TextResponse, path: String): JsonObject {
         val body = response.body.trimStart()
+        if (isBjtuCasLoginUrl(response.url)) {
+            throw SessionExpiredException("VE request $path redirected to CAS login.")
+        }
         if (body.startsWith("<")) {
             throw IOException(
                 "VE returned HTML instead of JSON for $path: ${extractHtmlTitle(response.body) ?: response.url}"
@@ -1415,6 +1422,9 @@ class VeProvider(private val client: BjtuHttpClient) {
         }?.trim()?.takeIf { it.isNotBlank() }
 
     private fun requireExpectedLanding(url: String, step: String) {
+        if (isBjtuCasLoginUrl(url)) {
+            throw SessionExpiredException("$step redirected to CAS login.")
+        }
         val host = runCatching { URI(url).host.orEmpty() }.getOrDefault("")
         if (host in setOf("bksy.bjtu.edu.cn", "bksycenter.bjtu.edu.cn", "123.121.147.7")) return
         throw IllegalStateException("$step expected VE landing, got $url")

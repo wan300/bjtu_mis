@@ -1,5 +1,7 @@
 package cn.edu.bjtu.mis.data.provider
 
+import java.net.URI
+
 object ProviderConstants {
     const val MIS_HOME_URL = "https://mis.bjtu.edu.cn/home/"
     const val MIS_AA_BRIDGE_URL = "https://mis.bjtu.edu.cn/module/module/10/"
@@ -16,6 +18,14 @@ object ProviderConstants {
     const val VE_COURSE_RESOURCES_COURSE_TO_PAGE = "10450"
     const val VE_COURSE_REPLAY_COURSE_TO_PAGE = "10480"
     const val VE_COURSE_RESOURCES_DOC_TYPE = "1"
+}
+
+internal fun isBjtuCasLoginUrl(url: String): Boolean {
+    val uri = runCatching { URI(url) }.getOrNull() ?: return false
+    val path = uri.path.orEmpty()
+    return path == "/auth/login" ||
+        path.startsWith("/auth/login/") ||
+        (uri.host.equals("cas.bjtu.edu.cn", ignoreCase = true) && path.startsWith("/auth/"))
 }
 
 class SessionExpiredException(message: String) : RuntimeException(message)

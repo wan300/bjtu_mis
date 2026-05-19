@@ -147,7 +147,7 @@ class TimetableWidgetProvider : AppWidgetProvider() {
 
         private fun openHomeworkPendingIntent(context: Context): PendingIntent {
             val intent = Intent(context, MainActivity::class.java).apply {
-                putExtra(MainActivity.EXTRA_OPEN_ROUTE, ModuleKeys.Homework)
+                putExtra(MainActivity.EXTRA_OPEN_ROUTE, ModuleKeys.Timetable)
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
             return PendingIntent.getActivity(

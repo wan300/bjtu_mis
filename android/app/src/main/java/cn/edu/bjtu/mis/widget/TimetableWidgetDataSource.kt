@@ -14,13 +14,19 @@ class TimetableWidgetDataSource(
     private val dao: BjtuMisDao,
 ) {
     suspend fun load(today: LocalDate = LocalDate.now()): TimetableWidgetModel {
-        val snapshot = dao.getSnapshot(ModuleKeys.Timetable) ?: return TimetableWidgetMapper.empty(today)
-        val envelope = runCatching {
-            AppJson.decodeFromString<ModuleEnvelope<TimetableData>>(snapshot.payloadJson)
-        }.getOrNull() ?: return TimetableWidgetMapper.empty(today)
-
         val userCourses = dao.getUserCourses().map { it.toCourseEntry() }
-        val merged = envelope.data.copy(entries = envelope.data.entries + userCourses)
+        val snapshot = dao.getSnapshot(ModuleKeys.Timetable)
+        val envelope = snapshot?.let {
+            runCatching {
+                AppJson.decodeFromString<ModuleEnvelope<TimetableData>>(it.payloadJson)
+            }.getOrNull()
+        }
+
+        if (envelope == null && userCourses.isEmpty()) return TimetableWidgetMapper.empty(today)
+
+        val merged = (envelope?.data ?: TimetableData()).copy(
+            entries = envelope?.data?.entries.orEmpty() + userCourses,
+        )
         return TimetableWidgetMapper.map(
             data = merged,
             currentWeek = loadCurrentWeek(),

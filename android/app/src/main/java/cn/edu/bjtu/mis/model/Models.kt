@@ -549,6 +549,14 @@ data class MailDeleteResponse(
 )
 
 @Serializable
+data class MailMarkReadResponse(
+    val status: String,
+    val messageIds: List<String> = emptyList(),
+    val updatedCount: Int = 0,
+    val upstream: JsonObject = buildJsonObject {},
+)
+
+@Serializable
 data class MailContactSuggestion(
     val contactId: String? = null,
     val displayName: String = "",

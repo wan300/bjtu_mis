@@ -51,7 +51,7 @@ npm run test:frontend -- --run
 - 归档：`agent_archive_extract`、`agent_archive_create_zip`
 - 文档：`agent_document_extract_pdf`、`agent_document_extract_docx`、`agent_document_generate_pdf`、`agent_document_generate_docx`
 - 代码：`agent_run_javascript`
-- 邮件：`agent_mail_list_folders`、`agent_mail_list_recent`、`agent_mail_read`、`agent_mail_digest_context`、`agent_mail_search_contacts`、`agent_mail_save_draft`、`agent_mail_send`
+- 邮件：`agent_mail_list_folders`、`agent_mail_list_recent`（支持最近天数或显式日期区间）、`agent_mail_read`、`agent_mail_mark_read`、`agent_mail_digest_context`、`agent_mail_search_contacts`、`agent_mail_save_draft`、`agent_mail_send`
 - 结果：`agent_package_results`
 
 ## 关键路径

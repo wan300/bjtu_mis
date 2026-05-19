@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	dedupeNativeAgentGeneratedFiles,
+	findNativeAgentGeneratedFile,
+	getGeneratedFileSaveErrorMessage,
 	getNativeAgentGeneratedFilePreviewKind,
 	isNativeAgentGeneratedFilePreviewable,
-	normalizeNativeAgentWorkspacePath
+	normalizeNativeAgentWorkspacePath,
+	shouldShowNativeAgentOutputEntry
 } from './generated-files';
 
 describe('native agent generated file helpers', () => {
@@ -13,6 +16,9 @@ describe('native agent generated file helpers', () => {
 		expect(normalizeNativeAgentWorkspacePath('output\\a.docx')).toBe('output/a.docx');
 		expect(normalizeNativeAgentWorkspacePath('output/Final Report.pdf')).toBe(
 			'output/Final Report.pdf'
+		);
+		expect(normalizeNativeAgentWorkspacePath('output/作业4_分析报告.md')).toBe(
+			'output/作业4_分析报告.md'
 		);
 		expect(normalizeNativeAgentWorkspacePath('results.zip')).toBe('results.zip');
 		expect(normalizeNativeAgentWorkspacePath('work/tmp/final.md')).toBe('work/tmp/final.md');
@@ -56,5 +62,41 @@ describe('native agent generated file helpers', () => {
 			{ displayName: 'a', relativePath: 'output/a.pdf' },
 			{ displayName: 'b', relativePath: 'results.zip' }
 		]);
+	});
+
+	it('shows the output entry whenever a native workspace is available', () => {
+		expect(shouldShowNativeAgentOutputEntry('workspace-1')).toBe(true);
+		expect(shouldShowNativeAgentOutputEntry('  workspace-1  ')).toBe(true);
+		expect(shouldShowNativeAgentOutputEntry('')).toBe(false);
+		expect(shouldShowNativeAgentOutputEntry(null)).toBe(false);
+	});
+
+	it('finds generated files by normalized path before saving', () => {
+		const files = [
+			{ displayName: '报告.md', relativePath: 'output/作业4_分析报告.md' },
+			{ displayName: 'bundle', relativePath: 'results.zip' }
+		];
+
+		expect(findNativeAgentGeneratedFile(files, 'output\\作业4_分析报告.md')?.displayName).toBe(
+			'报告.md'
+		);
+		expect(findNativeAgentGeneratedFile(files, 'output/missing.md')).toBeNull();
+	});
+
+	it('maps native save failures to user-facing messages', () => {
+		expect(getGeneratedFileSaveErrorMessage(new Error('File not found: output/missing.md'))).toEqual(
+			{
+				key: 'Generated output file was not found.'
+			}
+		);
+		expect(getGeneratedFileSaveErrorMessage(new Error('Failed to create Downloads entry'))).toEqual(
+			{
+				key: 'Android could not save this file to Downloads.'
+			}
+		);
+		expect(getGeneratedFileSaveErrorMessage(new Error('boom'))).toEqual({
+			key: 'Failed to save generated file: {{message}}',
+			params: { message: 'boom' }
+		});
 	});
 });

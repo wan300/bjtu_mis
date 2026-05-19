@@ -6,6 +6,11 @@ type GeneratedFileLike = {
 	role?: string | null;
 };
 
+export type GeneratedFileSaveErrorMessage = {
+	key: string;
+	params?: Record<string, string>;
+};
+
 const WORKSPACE_PATH_ROOTS = new Set(['output', 'work', 'logs']);
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const TEXT_MIME_TYPES = new Set([
@@ -124,6 +129,9 @@ export const isNativeAgentGeneratedFilePreviewable = (
 	mimeType: string | null | undefined = ''
 ) => getNativeAgentGeneratedFilePreviewKind(path, mimeType) !== null;
 
+export const shouldShowNativeAgentOutputEntry = (workspaceId?: string | null) =>
+	typeof workspaceId === 'string' && workspaceId.trim() !== '';
+
 export const dedupeNativeAgentGeneratedFiles = <T extends GeneratedFileLike>(files: T[] = []): T[] => {
 	const seen = new Set<string>();
 	const result: T[] = [];
@@ -136,4 +144,52 @@ export const dedupeNativeAgentGeneratedFiles = <T extends GeneratedFileLike>(fil
 	}
 
 	return result;
+};
+
+export const findNativeAgentGeneratedFile = <T extends GeneratedFileLike>(
+	files: T[] = [],
+	value: unknown
+): T | null => {
+	const path = normalizeNativeAgentWorkspacePath(value);
+	if (!path) return null;
+	return dedupeNativeAgentGeneratedFiles(files).find((file) => file.relativePath === path) ?? null;
+};
+
+const getErrorMessageText = (error: unknown) => {
+	if (error instanceof Error) return error.message;
+	if (typeof error === 'string') return error;
+	if (error && typeof error === 'object' && 'message' in error) {
+		return String((error as { message?: unknown }).message ?? '');
+	}
+	return '';
+};
+
+export const getGeneratedFileSaveErrorMessage = (
+	error: unknown,
+	relativePath?: string | null
+): GeneratedFileSaveErrorMessage => {
+	const message = getErrorMessageText(error).trim();
+	const path = normalizeNativeAgentWorkspacePath(relativePath ?? '') ?? relativePath ?? '';
+
+	if (/file not found|not_found|no such file/i.test(message)) {
+		return {
+			key: 'Generated output file was not found.',
+			params: path ? { path } : undefined
+		};
+	}
+
+	if (/downloads|mediastore|output document|openoutputstream|permission|eacces|denied/i.test(message)) {
+		return {
+			key: 'Android could not save this file to Downloads.'
+		};
+	}
+
+	if (message) {
+		return {
+			key: 'Failed to save generated file: {{message}}',
+			params: { message }
+		};
+	}
+
+	return { key: 'Failed to save generated file.' };
 };

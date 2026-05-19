@@ -42,6 +42,7 @@ import cn.edu.bjtu.mis.model.MailComposeResponse
 import cn.edu.bjtu.mis.model.MailContactsData
 import cn.edu.bjtu.mis.model.MailDeleteResponse
 import cn.edu.bjtu.mis.model.MailFoldersData
+import cn.edu.bjtu.mis.model.MailMarkReadResponse
 import cn.edu.bjtu.mis.model.MailMessageDetail
 import cn.edu.bjtu.mis.model.MailMessagesData
 import cn.edu.bjtu.mis.model.ModuleEnvelope
@@ -847,6 +848,20 @@ class MailRepository(
             CoremailProvider(it).deleteMessages(messageIds = messageIds, mboxa = mboxa)
         }.also {
             dao.deleteMailMessageSummaries(messageIds)
+        }
+
+    suspend fun markRead(messageIds: List<String>, mboxa: String = ""): MailMarkReadResponse =
+        sessionManager.withAuthenticatedClient {
+            CoremailProvider(it).markMessagesRead(messageIds = messageIds, mboxa = mboxa)
+        }.also {
+            val cachedUnread = dao.getMailMessageSummariesByIds(messageIds).filter { message -> !message.read }
+            dao.markMailMessageSummariesRead(messageIds)
+            cachedUnread
+                .groupingBy { message -> message.folderId }
+                .eachCount()
+                .forEach { (folderId, unreadCount) ->
+                    dao.decrementMailFolderUnreadCount(folderId, unreadCount)
+                }
         }
 
     suspend fun download(messageId: String, part: String, filename: String?, contentType: String? = null): File =

@@ -16,6 +16,7 @@ class GeneratedFileExportsTest {
         val root = temp.newFolder("workspace")
         write(File(root, "output/report.pdf"), "pdf")
         write(File(root, "output/nested/notes.md"), "# notes")
+        write(File(root, "output/作业4_分析报告.md"), "# report")
         write(File(root, "work/draft.txt"), "draft")
         write(File(root, "inbox/source.docx"), "source")
         write(File(root, "results.zip"), "zip")
@@ -23,10 +24,15 @@ class GeneratedFileExportsTest {
         val files = listGeneratedFilesInWorkspace(root)
 
         assertEquals(
-            listOf("output/report.pdf", "output/nested/notes.md", "results.zip"),
+            listOf(
+                "output/report.pdf",
+                "output/作业4_分析报告.md",
+                "output/nested/notes.md",
+                "results.zip",
+            ),
             files.map { it.relativePath },
         )
-        assertEquals(listOf("output", "output", "package"), files.map { it.role })
+        assertEquals(listOf("output", "output", "output", "package"), files.map { it.role })
     }
 
     @Test

@@ -992,8 +992,11 @@ describe('requestLocalAgentChatCompletion', () => {
 					description: 'List files in the native Agent workspace.',
 					parameters: {
 						type: 'object',
-						properties: {},
-						required: [],
+						properties: {
+							path: { type: 'string' },
+							recursive: { type: 'boolean' }
+						},
+						required: ['path'],
 						additionalProperties: false
 					}
 				}
@@ -1035,7 +1038,7 @@ describe('requestLocalAgentChatCompletion', () => {
 								type: 'function',
 								function: {
 									name: 'agent_file_list',
-									arguments: '{}'
+									arguments: '{"path":"inbox"}'
 								}
 							}
 						]
@@ -1064,7 +1067,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		expect(executeNativeAgentTool).toHaveBeenCalledWith({
 			workspaceId: 'workspace-1',
 			toolName: 'agent_file_list',
-			arguments: {}
+			arguments: { path: 'inbox' }
 		});
 		expect(JSON.parse(requests[1].messages.at(-1).content).output.files[0].path).toBe(
 			'inbox/task.pdf'
@@ -1082,8 +1085,11 @@ describe('requestLocalAgentChatCompletion', () => {
 					description: 'List files in the native Agent workspace.',
 					parameters: {
 						type: 'object',
-						properties: {},
-						required: [],
+						properties: {
+							path: { type: 'string' },
+							recursive: { type: 'boolean' }
+						},
+						required: ['path'],
 						additionalProperties: false
 					}
 				}
@@ -1261,6 +1267,226 @@ describe('requestLocalAgentChatCompletion', () => {
 		expect(finalContent).toContain('附件内容是 makefile demo content。');
 		expect(finalContent).not.toContain('<agent_file_read>');
 		expect(finalContent).not.toContain('<filename>inbox/makefile_example</filename>');
+	});
+
+	it('executes bare inline XML native Agent tool tags instead of finalizing as text', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		vi.mocked(listNativeAgentTools).mockResolvedValue([
+			{
+				type: 'function',
+				function: {
+					name: 'agent_file_list',
+					description: 'List files in the native Agent workspace.',
+					parameters: {
+						type: 'object',
+						properties: {
+							path: { type: 'string' },
+							recursive: { type: 'boolean' }
+						},
+						required: ['path'],
+						additionalProperties: false
+					}
+				}
+			}
+		]);
+		vi.mocked(executeNativeAgentTool).mockRejectedValueOnce(
+			new Error('Missing required parameter path')
+		);
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+
+			if (requests.length === 1) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content: '我先查看附件列表。\n\n<agent_file_list>'
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: '需要带上 path 参数，例如 inbox。'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		const [res] = await requestLocalAgentChatCompletion({
+			body: { params: { agent_workspace_id: 'workspace-1' } },
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+		const final = await res?.json();
+		const toolResult = JSON.parse(requests[1].messages.at(-1).content);
+		const finalContent = final.choices[0].message.content;
+
+		expect(requestProvider).toHaveBeenCalledTimes(2);
+		expect(executeNativeAgentTool).toHaveBeenCalledWith({
+			workspaceId: 'workspace-1',
+			toolName: 'agent_file_list',
+			arguments: {}
+		});
+		expect(toolResult.error).toBe('Missing required parameter path');
+		expect(finalContent).toContain('<details type="tool_calls" done="true"');
+		expect(finalContent).toContain('name="agent_file_list"');
+		expect(finalContent).toContain('需要带上 path 参数，例如 inbox。');
+		expect(finalContent).not.toContain('<agent_file_list>');
+	});
+
+	it('executes self-closing inline XML native Agent tool tags', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		vi.mocked(listNativeAgentTools).mockResolvedValue([
+			{
+				type: 'function',
+				requiresWorkspace: false,
+				function: {
+					name: 'agent_mail_list_folders',
+					description: 'List Coremail folders.',
+					parameters: {
+						type: 'object',
+						properties: {},
+						required: [],
+						additionalProperties: false
+					}
+				}
+			}
+		]);
+		vi.mocked(executeNativeAgentTool).mockResolvedValue({
+			output: { ok: true, folders: [{ id: '1', name: 'Inbox' }] }
+		});
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+
+			if (requests.length === 1) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content: '<agent_mail_list_folders />'
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: 'Found the inbox folder.'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		const [res] = await requestLocalAgentChatCompletion({
+			body: { params: { function_calling: 'native' } },
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+		const final = await res?.json();
+		const finalContent = final.choices[0].message.content;
+
+		expect(requestProvider).toHaveBeenCalledTimes(2);
+		expect(executeNativeAgentTool).toHaveBeenCalledWith({
+			workspaceId: '',
+			toolName: 'agent_mail_list_folders',
+			arguments: {}
+		});
+		expect(finalContent).toContain('name="agent_mail_list_folders"');
+		expect(finalContent).toContain('Found the inbox folder.');
+		expect(finalContent).not.toContain('<agent_mail_list_folders');
+	});
+
+	it('hides streamed inline XML native Agent tags from content snapshots', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		vi.mocked(listNativeAgentTools).mockResolvedValue([
+			{
+				type: 'function',
+				function: {
+					name: 'agent_file_list',
+					description: 'List files in the native Agent workspace.',
+					parameters: {
+						type: 'object',
+						properties: {
+							path: { type: 'string' },
+							recursive: { type: 'boolean' }
+						},
+						required: ['path'],
+						additionalProperties: false
+					}
+				}
+			}
+		]);
+		vi.mocked(executeNativeAgentTool).mockRejectedValueOnce(
+			new Error('Missing required parameter path')
+		);
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+
+			if (requests.length === 1) {
+				return [
+					providerStreamResponse([
+						{
+							choices: [
+								{
+									index: 0,
+									delta: {
+										content: '我先查看附件列表。\n\n<agent_file_list>'
+									}
+								}
+							]
+						}
+					]),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerStreamResponse([
+					{
+						choices: [
+							{
+								index: 0,
+								delta: {
+									content: '需要带上 path 参数，例如 inbox。'
+								}
+							}
+						]
+					}
+				]),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		const [res] = await requestLocalAgentChatCompletion({
+			body: { params: { agent_workspace_id: 'workspace-1' } },
+			providerBody: { ...baseProviderBody(), stream: true },
+			requestProvider
+		});
+		const streamText = await res?.text();
+		const events = parseSseJsonEvents(streamText);
+		const contentEvents = events.filter((event) => typeof event.content === 'string');
+
+		expect(requestProvider).toHaveBeenCalledTimes(2);
+		expect(executeNativeAgentTool).toHaveBeenCalledWith({
+			workspaceId: 'workspace-1',
+			toolName: 'agent_file_list',
+			arguments: {}
+		});
+		expect(streamText).not.toContain('<agent_file_list');
+		expect(contentEvents.some((event) => event.content.includes('我先查看附件列表。'))).toBe(true);
+		expect(contentEvents.some((event) => event.content.includes('name="agent_file_list"'))).toBe(
+			true
+		);
+		expect(contentEvents.at(-1)?.content).toContain('需要带上 path 参数，例如 inbox。');
+		expect(streamText).toContain('data: [DONE]');
 	});
 
 	it('falls back to local RAG search when the model does not call web tools', async () => {

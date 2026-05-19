@@ -15,6 +15,7 @@ import cn.edu.bjtu.mis.model.MailContactsData
 import cn.edu.bjtu.mis.model.MailDeleteResponse
 import cn.edu.bjtu.mis.model.MailFolder
 import cn.edu.bjtu.mis.model.MailFoldersData
+import cn.edu.bjtu.mis.model.MailMarkReadResponse
 import cn.edu.bjtu.mis.model.MailMessageDetail
 import cn.edu.bjtu.mis.model.MailMessageSummary
 import cn.edu.bjtu.mis.model.MailMessagesData
@@ -187,6 +188,31 @@ class CoremailProvider(
             status = "deleted",
             messageIds = messageIds,
             targetFolderId = COREMAIL_TRASH_FOLDER_ID.toString(),
+            upstream = upstream("var" to payload["var"]),
+        )
+    }
+
+    suspend fun markMessagesRead(messageIds: List<String>, mboxa: String = ""): MailMarkReadResponse {
+        if (messageIds.isEmpty()) throw CoremailError("Coremail message ids missing")
+        val payload = postJsonFunc(
+            "mbox:updateMessageInfos",
+            buildJsonObject {
+                put("attrs", buildJsonObject {
+                    put("flags", buildJsonObject {
+                        put("read", true)
+                    })
+                })
+                put("ids", buildJsonArray { messageIds.forEach { add(JsonPrimitive(it)) } })
+                put("mboxa", mboxa)
+                put("returnOriginalMsgInfos", true)
+                put("expandThreadMid", false)
+            },
+        )
+        val updatedCount = payload.obj("var").firstInt("updated", "updatedCount") ?: messageIds.size
+        return MailMarkReadResponse(
+            status = "read",
+            messageIds = messageIds,
+            updatedCount = updatedCount,
             upstream = upstream("var" to payload["var"]),
         )
     }
@@ -483,7 +509,12 @@ class CoremailProvider(
     private suspend fun ensureReady(): String {
         sid?.let { return it }
         val response = client.getText(ssoUrl, headers = mapOf("Referer" to "https://mis.bjtu.edu.cn/home/"))
-        val extracted = extractSid(response.url, response.body) ?: throw CoremailError("Coremail sid missing after SSO")
+        val extracted = extractSid(response.url, response.body) ?: run {
+            if (isBjtuCasLoginUrl(response.url)) {
+                throw SessionExpiredException("Coremail SSO redirected to CAS login.")
+            }
+            throw CoremailError("Coremail sid missing after SSO: ${response.url}")
+        }
         sid = extracted
         return extracted
     }

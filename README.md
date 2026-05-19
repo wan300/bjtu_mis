@@ -34,7 +34,7 @@ BJTU MIS Android 是一款为北京交通大学同学准备的校园学习服务
 - `NativeAgentToolsPlugin` 将 Android 工具注册给 Open WebUI local-first agent loop。当前暴露的工具覆盖工作区文件读写、常用归档解压与 ZIP 打包、PDF/DOCX 提取与生成、受限代码运行、Coremail 邮件能力和结果打包。
 - 作业附件会自动下载并导入 Agent workspace。压缩包不在 handoff 阶段自动解压，Agent 需要通过 `agent_archive_extract` 按需解压到 `work/attachments/`。当前支持 `zip`/`jar`、`tar`、`tar.gz`/`tgz`、`tar.bz2`/`tbz2`、`gz` 和 `bz2`，并对路径穿越、条目数量、单文件大小和总大小做限制。
 - Open WebUI 聊天界面会显示作业附件导入状态。附件准备期间会阻止提交，避免模型在文件未导入完成时开始分析。
-- Coremail Agent 工具不依赖 workspace，可用于读取近期邮件、生成摘要上下文、搜索联系人、保存草稿。`agent_mail_send` 必须经过用户确认弹窗后才会真正发送。
+- Coremail Agent 工具不依赖 workspace，可用于按最近天数或显式日期区间读取邮件、生成摘要上下文、搜索联系人、保存草稿，并可按邮件 ID 将未读邮件标记为已读。`agent_mail_send` 必须经过用户确认弹窗后才会真正发送。
 - Agent 只能生成分析、步骤、答案草稿或 `output/` 下的文件，不会自动提交课程平台作业。
 - 旧原生 Agent 的 Room 表、前台服务、API Key 和模型配置已废弃；应用启动时会清理遗留配置，数据库迁移到版本 7 时会删除旧 Agent 表。
 

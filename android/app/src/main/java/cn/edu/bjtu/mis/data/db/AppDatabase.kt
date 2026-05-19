@@ -234,6 +234,15 @@ interface BjtuMisDao {
     @Query("DELETE FROM mail_message_summaries WHERE message_id IN (:messageIds)")
     suspend fun deleteMailMessageSummaries(messageIds: List<String>)
 
+    @Query("SELECT * FROM mail_message_summaries WHERE message_id IN (:messageIds)")
+    suspend fun getMailMessageSummariesByIds(messageIds: List<String>): List<MailMessageSummaryEntity>
+
+    @Query("UPDATE mail_message_summaries SET read = 1 WHERE message_id IN (:messageIds)")
+    suspend fun markMailMessageSummariesRead(messageIds: List<String>)
+
+    @Query("UPDATE mail_folders SET unread_count = MAX(unread_count - :delta, 0) WHERE folder_id = :folderId")
+    suspend fun decrementMailFolderUnreadCount(folderId: String, delta: Int)
+
     @Query(
         """
         SELECT * FROM mail_message_summaries

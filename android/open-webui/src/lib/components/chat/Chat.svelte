@@ -3551,6 +3551,7 @@
 									workspaceId={nativeAgentWorkspaceId}
 									files={nativeAgentGeneratedFiles}
 									loading={nativeAgentGeneratedFilesLoading}
+									onRefresh={refreshNativeAgentGeneratedFiles}
 								/>
 								<MessageInput
 									bind:this={messageInput}
@@ -3647,6 +3648,7 @@
 										workspaceId={nativeAgentWorkspaceId}
 										files={nativeAgentGeneratedFiles}
 										loading={nativeAgentGeneratedFilesLoading}
+										onRefresh={refreshNativeAgentGeneratedFiles}
 									/>
 									<Placeholder
 										{history}

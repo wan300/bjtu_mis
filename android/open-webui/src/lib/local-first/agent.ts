@@ -693,8 +693,40 @@ const emitLocalDisplaySnapshot = (context: LocalAgentRunContext, finalContent = 
 	}
 };
 
-const emitLocalPartialTurnSnapshot = (context: LocalAgentRunContext, turn: ProviderTurn) => {
-	emitLocalDisplaySnapshot(context, formatTurnContent(turn, { final: false }));
+const hideInlineAgentToolFragmentsForDisplay = (
+	content: string,
+	availableToolNames: Set<string>
+) => {
+	if (!content.includes('<agent_')) {
+		return content;
+	}
+
+	const toolTagRegex = /<(agent_[A-Za-z0-9_]+)\b[^>]*\/?>/g;
+	let match: RegExpExecArray | null;
+
+	while ((match = toolTagRegex.exec(content)) !== null) {
+		const name = match[1];
+		if (availableToolNames.has(name)) {
+			return content.slice(0, match.index).replace(/\n{3,}/g, '\n\n').trim();
+		}
+	}
+
+	return content;
+};
+
+const emitLocalPartialTurnSnapshot = (
+	context: LocalAgentRunContext,
+	turn: ProviderTurn,
+	availableToolNames: Set<string>
+) => {
+	const displayContent = hideInlineAgentToolFragmentsForDisplay(
+		turn.content ?? '',
+		availableToolNames
+	);
+	emitLocalDisplaySnapshot(
+		context,
+		formatTurnContent({ ...turn, content: displayContent }, { final: false })
+	);
 };
 
 const finalizeLocalAgentTurn = (
@@ -1100,39 +1132,73 @@ const extractInlineXmlToolCalls = (
 		return { content, toolCalls: [] };
 	}
 
-	const toolCalls: LocalToolCall[] = [];
-	const toolRegex = /<(agent_[A-Za-z0-9_]+)\b[^>]*>([\s\S]*?)<\/\1>/g;
-	let strippedContent = '';
-	let lastIndex = 0;
-	let match: RegExpExecArray | null;
-
-	while ((match = toolRegex.exec(content)) !== null) {
-		const name = match[1];
-		if (!availableToolNames.has(name)) {
-			continue;
+	const matches: { start: number; end: number; name: string; rawArguments: string }[] = [];
+	const coveredRanges: { start: number; end: number }[] = [];
+	const overlapsCoveredRange = (start: number, end: number) =>
+		coveredRanges.some((range) => start < range.end && end > range.start);
+	const addMatch = (start: number, end: number, name: string, rawArguments = '') => {
+		if (!availableToolNames.has(name) || overlapsCoveredRange(start, end)) {
+			return;
 		}
 
-		const rawArguments = match[2] ?? '';
+		matches.push({ start, end, name, rawArguments });
+		coveredRanges.push({ start, end });
+	};
+
+	const closedToolRegex = /<(agent_[A-Za-z0-9_]+)\b[^>]*>([\s\S]*?)<\/\1>/g;
+	let closedMatch: RegExpExecArray | null;
+	while ((closedMatch = closedToolRegex.exec(content)) !== null) {
+		addMatch(
+			closedMatch.index,
+			closedMatch.index + closedMatch[0].length,
+			closedMatch[1],
+			closedMatch[2] ?? ''
+		);
+	}
+
+	const selfClosingToolRegex = /<(agent_[A-Za-z0-9_]+)\b[^>]*\/>/g;
+	let selfClosingMatch: RegExpExecArray | null;
+	while ((selfClosingMatch = selfClosingToolRegex.exec(content)) !== null) {
+		addMatch(
+			selfClosingMatch.index,
+			selfClosingMatch.index + selfClosingMatch[0].length,
+			selfClosingMatch[1]
+		);
+	}
+
+	const bareToolRegex = /(^|\r?\n)[ \t]*<(agent_[A-Za-z0-9_]+)\b(?![^>]*\/>)[^>]*>[ \t]*(?=\r?\n|$)/g;
+	let bareMatch: RegExpExecArray | null;
+	while ((bareMatch = bareToolRegex.exec(content)) !== null) {
+		addMatch(bareMatch.index, bareMatch.index + bareMatch[0].length, bareMatch[2]);
+	}
+
+	matches.sort((left, right) => left.start - right.start);
+
+	if (matches.length === 0) {
+		return { content, toolCalls: [] };
+	}
+
+	const toolCalls: LocalToolCall[] = [];
+	let strippedContent = '';
+	let lastIndex = 0;
+
+	for (const match of matches) {
 		let argumentsText: string;
 		try {
-			argumentsText = jsonString(parseInlineXmlToolArguments(name, rawArguments));
+			argumentsText = jsonString(parseInlineXmlToolArguments(match.name, match.rawArguments));
 		} catch {
-			argumentsText = rawArguments.trim();
+			argumentsText = match.rawArguments.trim();
 		}
 		toolCalls.push({
 			id: outputId('xml-fc'),
 			type: 'function',
 			function: {
-				name,
+				name: match.name,
 				arguments: argumentsText
 			}
 		});
-		strippedContent += content.slice(lastIndex, match.index);
-		lastIndex = match.index + match[0].length;
-	}
-
-	if (toolCalls.length === 0) {
-		return { content, toolCalls: [] };
+		strippedContent += content.slice(lastIndex, match.start);
+		lastIndex = match.end;
 	}
 
 	strippedContent += content.slice(lastIndex);
@@ -1798,7 +1864,8 @@ export const requestLocalAgentChatCompletion = async ({
 
 	const run = async (callbacks?: { emitContentSnapshot: (content: string) => void }) => {
 		context.emitContentSnapshot = callbacks?.emitContentSnapshot;
-		const onPartialTurn = (turn: ProviderTurn) => emitLocalPartialTurnSnapshot(context, turn);
+		const onPartialTurn = (turn: ProviderTurn) =>
+			emitLocalPartialTurnSnapshot(context, turn, availableToolNames);
 
 		try {
 			for (let iteration = 0; iteration < maxModelRounds; iteration += 1) {

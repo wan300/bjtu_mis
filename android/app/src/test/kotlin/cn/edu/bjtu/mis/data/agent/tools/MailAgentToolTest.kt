@@ -5,6 +5,7 @@ import cn.edu.bjtu.mis.model.MailComposeRequest
 import cn.edu.bjtu.mis.model.MailComposeResponse
 import cn.edu.bjtu.mis.model.MailContactsData
 import cn.edu.bjtu.mis.model.MailFoldersData
+import cn.edu.bjtu.mis.model.MailMarkReadResponse
 import cn.edu.bjtu.mis.model.MailMessageDetail
 import cn.edu.bjtu.mis.model.MailMessagesData
 import cn.edu.bjtu.mis.model.MailMessageSummary
@@ -46,6 +47,11 @@ class MailAgentToolTest {
             folderId = "1",
             subject = "Old",
             receivedAt = "2026-05-01T12:00:00Z",
+        ) + MailMessageSummary(
+            messageId = "older-than-thirty",
+            folderId = "1",
+            subject = "Older than thirty days",
+            receivedAt = "2026-04-10T12:00:00Z",
         )
         val tools = MailAgentTool(gateway, fixedClock()).tools()
         val listRecent = tools.single { it.name == "mail.list_recent" }
@@ -57,6 +63,65 @@ class MailAgentToolTest {
         val messages = windowOutput["messages"]!!.jsonArray
         assertEquals(55, messages.size)
         assertFalse(messages.any { it.jsonObject["message_id"]!!.jsonPrimitive.contentOrNull == "old" })
+
+        val extendedOutput = listRecent.execute(
+            "",
+            buildJsonObject {
+                put("days", 60)
+                put("limit", 100)
+            },
+        ).output
+        val extendedMessages = extendedOutput["messages"]!!.jsonArray
+        assertTrue(extendedMessages.any { it.jsonObject["message_id"]!!.jsonPrimitive.contentOrNull == "older-than-thirty" })
+    }
+
+    @Test
+    fun listRecentSupportsExplicitDateWindowAndReportsScanLimit() = runBlocking {
+        val gateway = FakeMailGateway()
+        gateway.messages = listOf(
+            MailMessageSummary(
+                messageId = "too-new",
+                folderId = "1",
+                subject = "Too new",
+                receivedAt = "2026-05-13T00:00:00Z",
+            ),
+            MailMessageSummary(
+                messageId = "in-window",
+                folderId = "1",
+                subject = "In window",
+                receivedAt = "2026-05-12T12:00:00Z",
+            ),
+            MailMessageSummary(
+                messageId = "also-in-window",
+                folderId = "1",
+                subject = "Also in window",
+                receivedAt = "2026-05-11T12:00:00Z",
+            ),
+            MailMessageSummary(
+                messageId = "too-old",
+                folderId = "1",
+                subject = "Too old",
+                receivedAt = "2026-05-09T12:00:00Z",
+            ),
+        )
+        val listRecent = MailAgentTool(gateway, fixedClock()).tools().single { it.name == "mail.list_recent" }
+
+        val output = listRecent.execute(
+            "",
+            buildJsonObject {
+                put("start_date", "2026-05-10T00:00:00Z")
+                put("end_date", "2026-05-12T23:59:59Z")
+                put("scan_limit", 2)
+                put("limit", 10)
+            },
+        ).output
+
+        val messageIds = output["messages"]!!.jsonArray.map { it.jsonObject["message_id"]!!.jsonPrimitive.contentOrNull }
+        assertEquals(listOf("in-window"), messageIds)
+        assertEquals(2, output["scanned_count"]!!.jsonPrimitive.int)
+        assertTrue(output["scan_truncated"]!!.jsonPrimitive.boolean)
+        assertEquals("2026-05-10T00:00:00Z", output["range"]!!.jsonObject["start_at"]!!.jsonPrimitive.contentOrNull)
+        assertFalse(output.containsKey("days"))
     }
 
     @Test
@@ -165,6 +230,31 @@ class MailAgentToolTest {
         assertEquals("sent-1", sentOutput["sent_message_id"]!!.jsonPrimitive.contentOrNull)
     }
 
+    @Test
+    fun markReadRequiresMessageIdsAndPassesIdsToGateway() = runBlocking {
+        val gateway = FakeMailGateway()
+        val markRead = MailAgentTool(gateway, fixedClock()).tools().single { it.name == "mail.mark_read" }
+
+        val missingError = runCatching {
+            markRead.execute("", buildJsonObject { put("message_ids", JsonArray(emptyList())) })
+        }.exceptionOrNull()
+        assertNotNull(missingError)
+        assertTrue(missingError!!.message.orEmpty().contains("message_ids"))
+
+        val output = markRead.execute(
+            "",
+            buildJsonObject {
+                put("message_ids", JsonArray(listOf(JsonPrimitive("m1"), JsonPrimitive("m2"))))
+                put("mboxa", "box-token")
+            },
+        ).output
+
+        assertEquals(listOf("m1", "m2"), gateway.markedReadIds)
+        assertEquals("box-token", gateway.markedReadMboxa)
+        assertEquals("read", output["status"]!!.jsonPrimitive.contentOrNull)
+        assertEquals(2, output["updated_count"]!!.jsonPrimitive.int)
+    }
+
     private fun fixedClock(): Clock =
         Clock.fixed(Instant.parse("2026-05-17T00:00:00Z"), ZoneOffset.UTC)
 
@@ -173,6 +263,8 @@ class MailAgentToolTest {
         val details = mutableMapOf<String, MailMessageDetail>()
         var savedRequest: MailComposeRequest? = null
         var sentRequest: MailComposeRequest? = null
+        var markedReadIds: List<String> = emptyList()
+        var markedReadMboxa: String = ""
 
         override suspend fun folders(): ModuleEnvelope<MailFoldersData> =
             envelope("mail_folders", MailFoldersData())
@@ -194,6 +286,12 @@ class MailAgentToolTest {
                 "mail_detail",
                 details[messageId] ?: error("Missing detail $messageId"),
             )
+
+        override suspend fun markRead(messageIds: List<String>, mboxa: String): MailMarkReadResponse {
+            markedReadIds = messageIds
+            markedReadMboxa = mboxa
+            return MailMarkReadResponse(status = "read", messageIds = messageIds, updatedCount = messageIds.size)
+        }
 
         override suspend fun contacts(keyword: String, limit: Int): ModuleEnvelope<MailContactsData> =
             envelope("mail_contacts", MailContactsData(keyword = keyword))

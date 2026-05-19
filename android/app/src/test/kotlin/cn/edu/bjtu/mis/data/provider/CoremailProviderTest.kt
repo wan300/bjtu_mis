@@ -6,6 +6,7 @@ import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.model.MailComposeAttachment
 import cn.edu.bjtu.mis.model.MailComposeRequest
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.mockwebserver.Dispatcher
@@ -14,6 +15,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import java.io.File
 
@@ -176,6 +178,37 @@ class CoremailProviderTest {
     }
 
     @Test
+    fun markMessagesReadUpdatesReadFlag() = runBlocking {
+        MockWebServer().use { server ->
+            var captured = ""
+            server.dispatcher = object : CoremailDispatcher(server) {
+                override fun route(request: RecordedRequest): MockResponse {
+                    if (request.path?.startsWith("/coremail/s/json") == true &&
+                        request.requestUrl?.queryParameter("func") == "mbox:updateMessageInfos"
+                    ) {
+                        captured = request.body.readUtf8()
+                        return json("""{"code":"S_OK","var":{"updated":2}}""")
+                    }
+                    return unexpected(request)
+                }
+            }
+            val provider = provider(server)
+
+            val response = provider.markMessagesRead(listOf("2:abc+", "3:def"), mboxa = "box-token")
+
+            val payload = AppJson.parseToJsonElement(captured).jsonObject
+            assertEquals("true", payload["attrs"]?.jsonObject?.get("flags")?.jsonObject?.get("read")?.jsonPrimitive?.content)
+            assertEquals(
+                listOf("2:abc+", "3:def"),
+                payload["ids"]?.jsonArray?.map { it.jsonPrimitive.content },
+            )
+            assertEquals("box-token", payload["mboxa"]?.jsonPrimitive?.content)
+            assertEquals("read", response.status)
+            assertEquals(2, response.updatedCount)
+        }
+    }
+
+    @Test
     fun uploadAttachmentCreatesComposeAndUploadsChunks() = runBlocking {
         MockWebServer().use { server ->
             val content = ByteArray(2 * 1024 * 1024) { 1 } + byteArrayOf(2, 3, 4)
@@ -276,6 +309,33 @@ class CoremailProviderTest {
             assertEquals("2:draft-id", draft.draftId)
             assertTrue(draftPayload.contains("\"action\":\"save\""))
             assertEquals("to@example.edu", contacts.data.contacts.single().email)
+        }
+    }
+
+    @Test
+    fun ssoRedirectToLoginReportsExpiredSession() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    if (request.path == "/osys_sso_email/") {
+                        return MockResponse()
+                            .setResponseCode(302)
+                            .setHeader("Location", server.url("/auth/login?next=/osys_sso_email/"))
+                    }
+                    if (request.path?.startsWith("/auth/login") == true) {
+                        return MockResponse().setBody("<form id=\"login\"></form>")
+                    }
+                    return unexpected(request)
+                }
+            }
+            val provider = provider(server)
+
+            try {
+                provider.fetchFolders()
+                fail("Expected SessionExpiredException")
+            } catch (error: SessionExpiredException) {
+                assertTrue(error.message.orEmpty().contains("Coremail SSO"))
+            }
         }
     }
 
