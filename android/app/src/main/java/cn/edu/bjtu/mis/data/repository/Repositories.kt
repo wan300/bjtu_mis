@@ -16,10 +16,14 @@ import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.data.perf.PerfTrace
 import cn.edu.bjtu.mis.data.provider.AaProvider
 import cn.edu.bjtu.mis.data.provider.CoremailProvider
+import cn.edu.bjtu.mis.data.provider.EmploymentConsultationProvider
 import cn.edu.bjtu.mis.data.provider.SessionExpiredException
 import cn.edu.bjtu.mis.data.provider.SessionManager
 import cn.edu.bjtu.mis.data.provider.SessionValidationPolicy
 import cn.edu.bjtu.mis.data.provider.VeProvider
+import cn.edu.bjtu.mis.data.provider.ZhixingProvider
+import cn.edu.bjtu.mis.data.security.CredentialStore
+import cn.edu.bjtu.mis.data.security.LoginCredentials
 import cn.edu.bjtu.mis.model.AcademicProgressData
 import cn.edu.bjtu.mis.model.AutoLoginResult
 import cn.edu.bjtu.mis.model.CalendarData
@@ -30,6 +34,10 @@ import cn.edu.bjtu.mis.model.CourseSelectionAttemptResult
 import cn.edu.bjtu.mis.model.CourseSelectionData
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.EmptyRoomData
+import cn.edu.bjtu.mis.model.EmploymentArticleDetail
+import cn.edu.bjtu.mis.model.EmploymentConsultationData
+import cn.edu.bjtu.mis.model.EmploymentInfoDetail
+import cn.edu.bjtu.mis.model.EmploymentSectionType
 import cn.edu.bjtu.mis.model.ExamData
 import cn.edu.bjtu.mis.model.ExamItem
 import cn.edu.bjtu.mis.model.HomeworkData
@@ -59,6 +67,13 @@ import cn.edu.bjtu.mis.model.TimetableData
 import cn.edu.bjtu.mis.model.UserCourseDraft
 import cn.edu.bjtu.mis.model.UserTodoDraft
 import cn.edu.bjtu.mis.model.UserTodoItem
+import cn.edu.bjtu.mis.model.ZhixingAuthState
+import cn.edu.bjtu.mis.model.ZhixingHomeData
+import cn.edu.bjtu.mis.model.ZhixingLoginChallenge
+import cn.edu.bjtu.mis.model.ZhixingLoginOutcome
+import cn.edu.bjtu.mis.model.ZhixingLoginStatus
+import cn.edu.bjtu.mis.model.ZhixingSearchData
+import cn.edu.bjtu.mis.model.ZhixingThreadDetail
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
@@ -334,6 +349,7 @@ class SyncRepository(
         is MailMessagesData -> data.messages.size
         is MailFoldersData -> data.folders.size
         is StudentProfileData -> data.fields.size
+        is ZhixingHomeData -> data.latestPosts.size + data.rankItems.size
         is AcademicProgressData -> if (data.buckets.isNotEmpty()) data.buckets.size else data.courses.size
         else -> 0
     }
@@ -440,9 +456,10 @@ class ModuleRepository(
         courseId: String? = null,
         folderId: String = "0",
         search: String? = null,
+        categoryKey: String? = null,
     ): ModuleEnvelope<CourseResourcesData> =
         fetchLiveOrSnapshot(ModuleKeys.CourseResources) {
-            VeProvider(it).fetchCourseResources(term, courseId, folderId, search)
+            VeProvider(it).fetchCourseResources(term, courseId, folderId, search, categoryKey)
         }
 
     fun courseResourcesProgressive(
@@ -450,9 +467,10 @@ class ModuleRepository(
         courseId: String? = null,
         folderId: String = "0",
         search: String? = null,
+        categoryKey: String? = null,
     ): Flow<ProgressiveModuleState<CourseResourcesData>> =
         progressiveLiveOrSnapshot(ModuleKeys.CourseResources) { client ->
-            VeProvider(client).fetchCourseResourcesProgressive(term, courseId, folderId, search)
+            VeProvider(client).fetchCourseResourcesProgressive(term, courseId, folderId, search, categoryKey)
         }
 
     fun courseReplayProgressive(
@@ -580,6 +598,8 @@ class ModuleRepository(
         is MailMessagesData -> data.messages.size
         is MailFoldersData -> data.folders.size
         is StudentProfileData -> data.fields.size
+        is ZhixingHomeData -> data.latestPosts.size + data.rankItems.size
+        is EmploymentConsultationData -> data.articles.size
         else -> -1
     }
 }
@@ -594,16 +614,18 @@ class CourseResourceRepository(
         courseId: String? = null,
         folderId: String = "0",
         search: String? = null,
+        categoryKey: String? = null,
     ): ModuleEnvelope<CourseResourcesData> =
-        moduleRepository.courseResources(term, courseId, folderId, search)
+        moduleRepository.courseResources(term, courseId, folderId, search, categoryKey)
 
     fun listingProgressive(
         term: String? = null,
         courseId: String? = null,
         folderId: String = "0",
         search: String? = null,
+        categoryKey: String? = null,
     ): Flow<ProgressiveModuleState<CourseResourcesData>> =
-        moduleRepository.courseResourcesProgressive(term, courseId, folderId, search)
+        moduleRepository.courseResourcesProgressive(term, courseId, folderId, search, categoryKey)
 
     suspend fun download(rpId: String, filename: String, extension: String? = null): File =
         sessionManager.withAuthenticatedClient { client ->
@@ -802,7 +824,198 @@ class CourseReplayRepository(
     ): Boolean =
         sessionManager.withAuthenticatedClient {
             VeProvider(it).reportCourseReplayListen(userId, timetableId, courseId, listenTimeSeconds)
+    }
+}
+
+class EmploymentConsultationRepository(
+    private val syncRepository: SyncRepository,
+    private val client: BjtuHttpClient,
+) {
+    suspend fun home(forceRefresh: Boolean = false): ModuleEnvelope<EmploymentConsultationData> {
+        if (!forceRefresh) {
+            syncRepository.snapshot<EmploymentConsultationData>(ModuleKeys.EmploymentConsultation)?.let { return it }
         }
+        return runCatching {
+            val envelope = EmploymentConsultationProvider(client).fetchConsultationHome().copy(syncedAt = nowIso())
+            syncRepository.saveSnapshot(ModuleKeys.EmploymentConsultation, envelope)
+            envelope
+        }.getOrElse { error ->
+            syncRepository.snapshot<EmploymentConsultationData>(ModuleKeys.EmploymentConsultation)
+                ?: throw error
+        }
+    }
+
+    suspend fun article(articleId: String): ModuleEnvelope<EmploymentArticleDetail> {
+        val key = articleSnapshotKey(articleId)
+        return runCatching {
+            val envelope = EmploymentConsultationProvider(client).fetchArticle(articleId).copy(syncedAt = nowIso())
+            syncRepository.saveSnapshot(key, envelope)
+            envelope
+        }.getOrElse { error ->
+            syncRepository.snapshot<EmploymentArticleDetail>(key) ?: throw error
+        }
+    }
+
+    suspend fun infoDetail(
+        type: EmploymentSectionType,
+        itemId: String,
+    ): ModuleEnvelope<EmploymentInfoDetail> {
+        val key = infoDetailSnapshotKey(type, itemId)
+        return runCatching {
+            val envelope = EmploymentConsultationProvider(client).fetchInfoDetail(type, itemId).copy(syncedAt = nowIso())
+            syncRepository.saveSnapshot(key, envelope)
+            envelope
+        }.getOrElse { error ->
+            syncRepository.snapshot<EmploymentInfoDetail>(key) ?: throw error
+        }
+    }
+
+    private fun articleSnapshotKey(articleId: String): String =
+        "${ModuleKeys.EmploymentConsultation}:article:${articleId.trim()}"
+
+    private fun infoDetailSnapshotKey(type: EmploymentSectionType, itemId: String): String =
+        "${ModuleKeys.EmploymentConsultation}:detail:${type.name}:${itemId.trim()}"
+}
+
+class ZhixingRepository(
+    private val syncRepository: SyncRepository,
+    private val sessionManager: SessionManager,
+    private val credentialStore: CredentialStore,
+) {
+    private data class PendingLogin(
+        val username: String,
+        val password: String,
+        val challenge: ZhixingLoginChallenge,
+    )
+
+    private var pendingLogin: PendingLogin? = null
+
+    suspend fun home(forceRefresh: Boolean = false): ModuleEnvelope<ZhixingHomeData> {
+        if (!forceRefresh) {
+            syncRepository.snapshot<ZhixingHomeData>(ModuleKeys.Zhixing)?.let { return it }
+        }
+        return runCatching {
+            val envelope = sessionManager.withAuthenticatedClient { client ->
+                val provider = ZhixingProvider(client)
+                val home = provider.fetchHome()
+                val state = if (home.data.authState.loggedIn) {
+                    home.data.authState
+                } else {
+                    tryAutoLogin(provider) ?: home.data.authState
+                }
+                home.copy(data = home.data.copy(authState = state))
+            }.copy(syncedAt = nowIso())
+            syncRepository.saveSnapshot(ModuleKeys.Zhixing, envelope)
+            envelope
+        }.getOrElse { error ->
+            syncRepository.snapshot<ZhixingHomeData>(ModuleKeys.Zhixing)
+                ?: throw error
+        }
+    }
+
+    suspend fun thread(threadId: String, page: Int = 1, url: String? = null): ModuleEnvelope<ZhixingThreadDetail> =
+        sessionManager.withAuthenticatedClient { client ->
+            val provider = ZhixingProvider(client)
+            val first = if (url.isNullOrBlank()) {
+                provider.fetchThread(threadId, page)
+            } else {
+                provider.fetchThreadUrl(url, threadId, page)
+            }.copy(syncedAt = nowIso())
+            if (!first.data.restricted) return@withAuthenticatedClient first
+            val loggedIn = tryAutoLogin(provider)
+            if (loggedIn?.loggedIn == true) {
+                if (url.isNullOrBlank()) {
+                    provider.fetchThread(threadId, page)
+                } else {
+                    provider.fetchThreadUrl(url, threadId, page)
+                }.copy(syncedAt = nowIso())
+            } else {
+                first
+            }
+        }
+
+    suspend fun imageBytes(url: String, referer: String): ByteArray =
+        sessionManager.withAuthenticatedClient { client ->
+            ZhixingProvider(client).fetchImage(url, referer)
+        }
+
+    suspend fun search(keyword: String, page: Int = 1): ModuleEnvelope<ZhixingSearchData> =
+        sessionManager.withAuthenticatedClient { client ->
+            ZhixingProvider(client).search(keyword, page).copy(syncedAt = nowIso())
+        }
+
+    suspend fun authState(): ZhixingAuthState =
+        sessionManager.withAuthenticatedClient { client ->
+            val provider = ZhixingProvider(client)
+            val state = provider.authState()
+            if (state.loggedIn) state else tryAutoLogin(provider) ?: state
+        }
+
+    suspend fun login(username: String, password: String): ZhixingLoginOutcome =
+        sessionManager.withAuthenticatedClient { client ->
+            val outcome = ZhixingProvider(client).login(username, password)
+            when (outcome.status) {
+                ZhixingLoginStatus.Success -> {
+                    pendingLogin = null
+                    credentialStore.save(LoginCredentials(username.trim(), password))
+                    outcome
+                }
+                ZhixingLoginStatus.CaptchaRequired -> {
+                    val challenge = outcome.challenge
+                    if (challenge != null) {
+                        pendingLogin = PendingLogin(username.trim(), password, challenge)
+                    }
+                    outcome
+                }
+                ZhixingLoginStatus.Failure -> {
+                    pendingLogin = null
+                    outcome
+                }
+            }
+        }
+
+    suspend fun submitLoginCaptcha(challengeId: String, answer: String): ZhixingLoginOutcome =
+        sessionManager.withAuthenticatedClient { client ->
+            val pending = pendingLogin
+                ?: return@withAuthenticatedClient ZhixingLoginOutcome(
+                    status = ZhixingLoginStatus.Failure,
+                    message = "验证码上下文已失效，请重新登录。",
+                )
+            if (pending.challenge.challengeId != challengeId) {
+                return@withAuthenticatedClient ZhixingLoginOutcome(
+                    status = ZhixingLoginStatus.Failure,
+                    message = "验证码已刷新，请重新输入。",
+                )
+            }
+            val outcome = ZhixingProvider(client).submitLoginCaptcha(pending.challenge, answer)
+            if (outcome.status == ZhixingLoginStatus.Success) {
+                pendingLogin = null
+                credentialStore.save(LoginCredentials(pending.username, pending.password))
+                outcome.copy(authState = outcome.authState?.copy(username = pending.username))
+            } else {
+                outcome
+            }
+        }
+
+    suspend fun logout() {
+        pendingLogin = null
+        credentialStore.clear()
+        sessionManager.withAuthenticatedClient { client ->
+            ZhixingProvider(client).logout()
+        }
+    }
+
+    private suspend fun tryAutoLogin(provider: ZhixingProvider): ZhixingAuthState? {
+        val credentials = credentialStore.load() ?: return null
+        return runCatching {
+            val outcome = provider.login(credentials.loginName, credentials.password)
+            if (outcome.status == ZhixingLoginStatus.Success) {
+                outcome.authState
+            } else {
+                null
+            }
+        }.getOrNull()
+    }
 }
 
 data class MailUploadFile(

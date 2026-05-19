@@ -437,7 +437,9 @@ describe('requestLocalAgentChatCompletion', () => {
 			tool_calls: expect.any(Array)
 		});
 		expect(JSON.parse(requests[1].messages.at(-1).content).result).toBe(42);
-		expect(final.choices[0].message.content).toContain('I should calculate this before answering.');
+		expect(final.choices[0].message.content).not.toContain(
+			'I should calculate this before answering.'
+		);
 		expect(final.choices[0].message.content).toContain('The result is 42.');
 	});
 
@@ -659,7 +661,90 @@ describe('requestLocalAgentChatCompletion', () => {
 		expect(final.choices[0].message).not.toHaveProperty('reasoning_content');
 	});
 
-	it('streams provider reasoning snapshots before the provider turn finishes', async () => {
+	it('does not review final answers when local Agent review is disabled', async () => {
+		const requestProvider = vi.fn(async () => [
+			providerJsonResponse({
+				role: 'assistant',
+				content: 'Direct final answer.'
+			}),
+			new AbortController()
+		] as [Response, AbortController]);
+
+		const [res] = await requestLocalAgentChatCompletion({
+			body: { params: { local_agent_review: false } },
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+		const final = await res?.json();
+
+		expect(requestProvider).toHaveBeenCalledTimes(1);
+		expect(final.choices[0].message.content).toContain('Direct final answer.');
+	});
+
+	it('repairs final answers rejected by the optional local Agent review', async () => {
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+
+			if (requests.length === 1) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content: 'Draft answer.'
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			if (requests.length === 2) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content: '{"approved":false,"reason":"review rejected draft"}'
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			if (requests.length === 3) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content: 'Repaired final answer.'
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: '{"approved":true,"reason":""}'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		const [res] = await requestLocalAgentChatCompletion({
+			body: { params: { local_agent_review: true } },
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+		const final = await res?.json();
+
+		expect(requestProvider).toHaveBeenCalledTimes(4);
+		expect(requests[1]).toMatchObject({
+			stream: false,
+			temperature: 0
+		});
+		expect(requests[1]).not.toHaveProperty('tools');
+		expect(requests[1]).not.toHaveProperty('tool_choice');
+		expect(requests[2].messages.at(-1).content).toContain('review rejected draft');
+		expect(final.choices[0].message.content).toContain('Repaired final answer.');
+		expect(final.choices[0].message.content).not.toContain('Draft answer.');
+	});
+
+	it('does not stream provider reasoning before the provider turn is validated', async () => {
 		const controlled = controlledProviderStreamResponse();
 		const requestProvider = vi.fn(
 			async () => [controlled.response, new AbortController()] as [Response, AbortController]
@@ -685,11 +770,9 @@ describe('requestLocalAgentChatCompletion', () => {
 			]
 		});
 
-		const event = await readNextSseJsonEvent(reader!);
-		expect(event?.content).toContain('<details type="reasoning" done="false"');
-		expect(event?.content).toContain('Thinking...');
-		expect(event?.content).toContain('Still planning before any tool call.');
-		expect(event?.content).not.toContain('<details type="tool_calls"');
+		await expect(readNextSseJsonEvent(reader!, 50)).rejects.toThrow(
+			'Timed out waiting for SSE event.'
+		);
 
 		controlled.done();
 		await reader?.cancel().catch(() => undefined);
@@ -775,16 +858,14 @@ describe('requestLocalAgentChatCompletion', () => {
 		const streamText = await res?.text();
 		const events = parseSseJsonEvents(streamText);
 		const contentEvents = events.filter((event) => typeof event.content === 'string');
+		const finalDeltaText = events
+			.map((event) => event.choices?.[0]?.delta?.content ?? '')
+			.join('');
 
 		expect(requestProvider).toHaveBeenCalledTimes(2);
 		expect(JSON.parse(requests[1].messages.at(-1).content).result).toBe(9);
-		expect(contentEvents.length).toBeGreaterThanOrEqual(3);
-		expect(contentEvents[0].content).toContain('<details type="reasoning" done="false"');
-		expect(contentEvents[0].content).toContain('I should use the arithmetic tool.');
-		expect(contentEvents[0].content).not.toContain('<details type="tool_calls"');
 		const executingToolIndex = contentEvents.findIndex(
 			(event) =>
-				event.content.includes('<details type="reasoning" done="true"') &&
 				event.content.includes('<details type="tool_calls" done="false"') &&
 				event.content.includes('name="calculate_expression"')
 		);
@@ -794,11 +875,13 @@ describe('requestLocalAgentChatCompletion', () => {
 		const finalAnswerIndex = contentEvents.findIndex((event) =>
 			event.content.includes('The result is 9.')
 		);
-		expect(executingToolIndex).toBeGreaterThan(0);
+		expect(executingToolIndex).toBeGreaterThanOrEqual(0);
 		expect(completedToolIndex).toBeGreaterThan(executingToolIndex);
 		expect(contentEvents[completedToolIndex].content).toContain('result');
-		expect(finalAnswerIndex).toBeGreaterThan(completedToolIndex);
-		expect(contentEvents.at(-1).content).toContain('The result is 9.');
+		expect(finalAnswerIndex).toBe(-1);
+		expect(finalDeltaText.startsWith('\n')).toBe(true);
+		expect(finalDeltaText).toContain('The result is 9.');
+		expect(streamText).not.toContain('I should use the arithmetic tool.');
 		expect(streamText).toContain('data: [DONE]');
 	});
 
@@ -1473,6 +1556,9 @@ describe('requestLocalAgentChatCompletion', () => {
 		const streamText = await res?.text();
 		const events = parseSseJsonEvents(streamText);
 		const contentEvents = events.filter((event) => typeof event.content === 'string');
+		const finalDeltaText = events
+			.map((event) => event.choices?.[0]?.delta?.content ?? '')
+			.join('');
 
 		expect(requestProvider).toHaveBeenCalledTimes(2);
 		expect(executeNativeAgentTool).toHaveBeenCalledWith({
@@ -1481,12 +1567,91 @@ describe('requestLocalAgentChatCompletion', () => {
 			arguments: {}
 		});
 		expect(streamText).not.toContain('<agent_file_list');
-		expect(contentEvents.some((event) => event.content.includes('我先查看附件列表。'))).toBe(true);
+		expect(streamText).not.toContain('我先查看附件列表。');
 		expect(contentEvents.some((event) => event.content.includes('name="agent_file_list"'))).toBe(
 			true
 		);
-		expect(contentEvents.at(-1)?.content).toContain('需要带上 path 参数，例如 inbox。');
+		expect(finalDeltaText).toContain('需要带上 path 参数，例如 inbox。');
 		expect(streamText).toContain('data: [DONE]');
+	});
+
+	it('blocks streamed DSML tool protocol text and repairs without executing it', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		vi.mocked(listNativeAgentTools).mockResolvedValue([
+			{
+				type: 'function',
+				function: {
+					name: 'agent_file_list',
+					description: 'List files in the native Agent workspace.',
+					parameters: {
+						type: 'object',
+						properties: {
+							path: { type: 'string' }
+						},
+						required: ['path'],
+						additionalProperties: false
+					}
+				}
+			}
+		]);
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+
+			if (requests.length === 1) {
+				return [
+					providerStreamResponse([
+						{
+							choices: [
+								{
+									index: 0,
+									delta: {
+										content:
+											'先查看附件。\n\n<| | DSML | | tool_calls>\n<| | DSML | | invoke name="agent_file_list">\n<| | DSML | | parameter name="path" string="true">inbox</| | DSML | | parameter>\n</| | DSML | | invoke>\n</| | DSML | | tool_calls>'
+									}
+								}
+							]
+						}
+					]),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerStreamResponse([
+					{
+						choices: [
+							{
+								index: 0,
+								delta: {
+									content: '我会重新用可见文本回答。'
+								}
+							}
+						]
+					}
+				]),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		const [res] = await requestLocalAgentChatCompletion({
+			body: { params: { agent_workspace_id: 'workspace-1' } },
+			providerBody: { ...baseProviderBody(), stream: true },
+			requestProvider
+		});
+		const streamText = await res?.text();
+		const events = parseSseJsonEvents(streamText);
+		const finalDeltaText = events
+			.map((event) => event.choices?.[0]?.delta?.content ?? '')
+			.join('');
+
+		expect(requestProvider).toHaveBeenCalledTimes(2);
+		expect(requests[1].messages.at(-1).content).toContain('Internal retry instruction');
+		expect(executeNativeAgentTool).not.toHaveBeenCalled();
+		expect(streamText).not.toContain('DSML');
+		expect(streamText).not.toContain('invoke name=');
+		expect(finalDeltaText).toContain('我会重新用可见文本回答。');
 	});
 
 	it('falls back to local RAG search when the model does not call web tools', async () => {
@@ -1745,6 +1910,9 @@ describe('requestLocalAgentChatCompletion', () => {
 		const streamText = await res?.text();
 		const events = parseSseJsonEvents(streamText);
 		const contentEvents = events.filter((event) => typeof event.content === 'string');
+		const finalDeltaText = events
+			.map((event) => event.choices?.[0]?.delta?.content ?? '')
+			.join('');
 
 		expect(requestProvider).toHaveBeenCalledTimes(2);
 		expect(searchWeb).toHaveBeenCalledTimes(2);
@@ -1753,19 +1921,13 @@ describe('requestLocalAgentChatCompletion', () => {
 				event.content.includes('<details type="tool_calls" done="true"') &&
 				event.content.includes('failed to connect to lite.duckduckgo.com')
 		);
-		const fallbackReasoningIndex = contentEvents.findIndex(
-			(event) =>
-				event.content.includes('<details type="reasoning" done="false"') &&
-				event.content.includes('I will answer without web context.')
-		);
-		const finalAnswerIndex = contentEvents.findIndex((event) =>
-			event.content.includes('Fallback answer without web.')
-		);
 		expect(completedToolIndex).toBeGreaterThanOrEqual(0);
-		expect(fallbackReasoningIndex).toBeGreaterThan(completedToolIndex);
-		expect(finalAnswerIndex).toBeGreaterThan(fallbackReasoningIndex);
-		expect(contentEvents.at(-1).content).toContain('<details type="reasoning" done="true"');
-		expect(contentEvents.at(-1).content).toContain('Fallback answer without web.');
+		expect(contentEvents.some((event) => event.content.includes('I will answer without web context.'))).toBe(
+			false
+		);
+		expect(finalDeltaText).toContain('<details type="reasoning" done="true"');
+		expect(finalDeltaText).toContain('I will answer without web context.');
+		expect(finalDeltaText).toContain('Fallback answer without web.');
 	});
 
 	it('continues with normal completion when local web search fails', async () => {

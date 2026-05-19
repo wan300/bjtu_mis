@@ -104,9 +104,9 @@ class TimetableWidgetProvider : AppWidgetProvider() {
                     day = model.today,
                     emptyId = R.id.timetable_widget_today_empty,
                     rows = listOf(
-                        CourseRowIds(R.id.timetable_widget_today_course_1, R.id.timetable_widget_today_course_1_bar, R.id.timetable_widget_today_course_1_title, R.id.timetable_widget_today_course_1_detail),
-                        CourseRowIds(R.id.timetable_widget_today_course_2, R.id.timetable_widget_today_course_2_bar, R.id.timetable_widget_today_course_2_title, R.id.timetable_widget_today_course_2_detail),
-                        CourseRowIds(R.id.timetable_widget_today_course_3, R.id.timetable_widget_today_course_3_bar, R.id.timetable_widget_today_course_3_title, R.id.timetable_widget_today_course_3_detail),
+                        CourseRowIds(R.id.timetable_widget_today_course_1, R.id.timetable_widget_today_course_1_bar, R.id.timetable_widget_today_course_1_title, R.id.timetable_widget_today_course_1_time, R.id.timetable_widget_today_course_1_detail),
+                        CourseRowIds(R.id.timetable_widget_today_course_2, R.id.timetable_widget_today_course_2_bar, R.id.timetable_widget_today_course_2_title, R.id.timetable_widget_today_course_2_time, R.id.timetable_widget_today_course_2_detail),
+                        CourseRowIds(R.id.timetable_widget_today_course_3, R.id.timetable_widget_today_course_3_bar, R.id.timetable_widget_today_course_3_title, R.id.timetable_widget_today_course_3_time, R.id.timetable_widget_today_course_3_detail),
                     ),
                 )
                 bindDay(
@@ -114,9 +114,9 @@ class TimetableWidgetProvider : AppWidgetProvider() {
                     day = model.tomorrow,
                     emptyId = R.id.timetable_widget_tomorrow_empty,
                     rows = listOf(
-                        CourseRowIds(R.id.timetable_widget_tomorrow_course_1, R.id.timetable_widget_tomorrow_course_1_bar, R.id.timetable_widget_tomorrow_course_1_title, R.id.timetable_widget_tomorrow_course_1_detail),
-                        CourseRowIds(R.id.timetable_widget_tomorrow_course_2, R.id.timetable_widget_tomorrow_course_2_bar, R.id.timetable_widget_tomorrow_course_2_title, R.id.timetable_widget_tomorrow_course_2_detail),
-                        CourseRowIds(R.id.timetable_widget_tomorrow_course_3, R.id.timetable_widget_tomorrow_course_3_bar, R.id.timetable_widget_tomorrow_course_3_title, R.id.timetable_widget_tomorrow_course_3_detail),
+                        CourseRowIds(R.id.timetable_widget_tomorrow_course_1, R.id.timetable_widget_tomorrow_course_1_bar, R.id.timetable_widget_tomorrow_course_1_title, R.id.timetable_widget_tomorrow_course_1_time, R.id.timetable_widget_tomorrow_course_1_detail),
+                        CourseRowIds(R.id.timetable_widget_tomorrow_course_2, R.id.timetable_widget_tomorrow_course_2_bar, R.id.timetable_widget_tomorrow_course_2_title, R.id.timetable_widget_tomorrow_course_2_time, R.id.timetable_widget_tomorrow_course_2_detail),
+                        CourseRowIds(R.id.timetable_widget_tomorrow_course_3, R.id.timetable_widget_tomorrow_course_3_bar, R.id.timetable_widget_tomorrow_course_3_title, R.id.timetable_widget_tomorrow_course_3_time, R.id.timetable_widget_tomorrow_course_3_detail),
                     ),
                 )
                 setOnClickPendingIntent(R.id.timetable_widget_root, openHomeworkPendingIntent(context))
@@ -135,6 +135,7 @@ class TimetableWidgetProvider : AppWidgetProvider() {
                 if (course != null) {
                     views.setInt(ids.bar, "setBackgroundColor", stripeColor(course.title))
                     views.setTextViewText(ids.title, course.title)
+                    views.setTextViewText(ids.time, course.timeLabel)
                     views.setTextViewText(ids.detail, course.detail)
                 }
             }
@@ -162,6 +163,7 @@ class TimetableWidgetProvider : AppWidgetProvider() {
             val container: Int,
             val bar: Int,
             val title: Int,
+            val time: Int,
             val detail: Int,
         )
     }

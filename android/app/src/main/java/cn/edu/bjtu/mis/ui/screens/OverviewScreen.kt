@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.EventAvailable
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Grade
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.LibraryBooks
@@ -90,6 +91,8 @@ val navigationTargets = listOf(
     NavigationTarget(ModuleKeys.Calendar, "学年日历"),
     NavigationTarget(ModuleKeys.Homework, "作业"),
     NavigationTarget(ModuleKeys.Mail, "邮箱"),
+    NavigationTarget(ModuleKeys.Zhixing, "知行"),
+    NavigationTarget(ModuleKeys.EmploymentConsultation, "就业咨询"),
     NavigationTarget(ModuleKeys.OpenWebUiAgent, "作业助手"),
     NavigationTarget(ModuleKeys.CourseResources, "课程资源"),
     NavigationTarget(ModuleKeys.CourseReplay, "课程回放"),
@@ -155,6 +158,8 @@ private val ServiceGroups = listOf(
         entries = listOf(
             ServiceEntry(ModuleKeys.Calendar, "学年日历", "校历安排", Icons.Filled.CalendarMonth, DefaultPrimaryTint),
             ServiceEntry(ModuleKeys.Mail, "邮箱", "校内邮件", Icons.Filled.Email, Color(0xFF2F8DD8)),
+            ServiceEntry(ModuleKeys.Zhixing, "知行", "校园论坛", Icons.Filled.Forum, Color(0xFF4A8B57)),
+            ServiceEntry(ModuleKeys.EmploymentConsultation, "就业咨询", "指导预约", Icons.Filled.Psychology, Color(0xFFE0673D)),
             ServiceEntry(ModuleKeys.EmptyRooms, "空教室", "教室余量", Icons.Filled.MeetingRoom, Color(0xFF00A6A6)),
         ),
     ),

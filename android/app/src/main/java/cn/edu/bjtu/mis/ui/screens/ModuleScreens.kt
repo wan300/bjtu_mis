@@ -4287,16 +4287,19 @@ private fun CourseDetailPanel(
                     if (data.folders.isEmpty() && data.resources.isEmpty()) {
                         item(key = "$entryKey-resource-empty") { Text("暂无匹配资源。", style = MaterialTheme.typography.bodyMedium) }
                     } else {
-                        items(data.folders, key = { "$entryKey-folder-${it.folderId}" }) { folder ->
-                            InfoCard(folder.name, subtitle = "目录 ${folder.folderId}") {
+                        items(data.folders, key = { "$entryKey-folder-${it.categoryKey}-${it.folderId}" }) { folder ->
+                            InfoCard(folder.name, subtitle = "${folder.categoryLabel} · 目录 ${folder.folderId}") {
                                 Text("请到课程资源页继续浏览该目录。", style = MaterialTheme.typography.bodyMedium)
                             }
                         }
-                        items(data.resources, key = { "$entryKey-resource-${it.rpId}" }) { resource ->
-                            val downloadKey = "$entryKey|${resource.rpId}"
+                        items(data.resources, key = { "$entryKey-resource-${it.categoryKey}-${it.rpId}" }) { resource ->
+                            val downloadKey = "$entryKey|${resource.categoryKey}|${resource.rpId}"
+                            val subtitle = listOf(resource.categoryLabel, resource.uploadedAt)
+                                .filter { !it.isNullOrBlank() }
+                                .joinToString(" · ")
                             InfoCard(
                                 title = resource.name,
-                                subtitle = resource.uploadedAt,
+                                subtitle = subtitle.ifBlank { null },
                                 trailing = {
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         OutlinedButton(

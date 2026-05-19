@@ -103,9 +103,22 @@
 
                 <LinearLayout style="@style/TimetableWidgetCourseTextColumn">
 
-                    <TextView
-                        android:id="@+id/timetable_widget_today_course_1_title"
-                        style="@style/TimetableWidgetCourseTitle" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/timetable_widget_today_course_1_title"
+                            style="@style/TimetableWidgetCourseTitle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1" />
+
+                        <TextView
+                            android:id="@+id/timetable_widget_today_course_1_time"
+                            style="@style/TimetableWidgetCourseTime" />
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/timetable_widget_today_course_1_detail"
@@ -124,9 +137,22 @@
 
                 <LinearLayout style="@style/TimetableWidgetCourseTextColumn">
 
-                    <TextView
-                        android:id="@+id/timetable_widget_today_course_2_title"
-                        style="@style/TimetableWidgetCourseTitle" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/timetable_widget_today_course_2_title"
+                            style="@style/TimetableWidgetCourseTitle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1" />
+
+                        <TextView
+                            android:id="@+id/timetable_widget_today_course_2_time"
+                            style="@style/TimetableWidgetCourseTime" />
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/timetable_widget_today_course_2_detail"
@@ -145,9 +171,22 @@
 
                 <LinearLayout style="@style/TimetableWidgetCourseTextColumn">
 
-                    <TextView
-                        android:id="@+id/timetable_widget_today_course_3_title"
-                        style="@style/TimetableWidgetCourseTitle" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/timetable_widget_today_course_3_title"
+                            style="@style/TimetableWidgetCourseTitle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1" />
+
+                        <TextView
+                            android:id="@+id/timetable_widget_today_course_3_time"
+                            style="@style/TimetableWidgetCourseTime" />
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/timetable_widget_today_course_3_detail"
@@ -218,9 +257,22 @@
 
                 <LinearLayout style="@style/TimetableWidgetCourseTextColumn">
 
-                    <TextView
-                        android:id="@+id/timetable_widget_tomorrow_course_1_title"
-                        style="@style/TimetableWidgetCourseTitle" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/timetable_widget_tomorrow_course_1_title"
+                            style="@style/TimetableWidgetCourseTitle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1" />
+
+                        <TextView
+                            android:id="@+id/timetable_widget_tomorrow_course_1_time"
+                            style="@style/TimetableWidgetCourseTime" />
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/timetable_widget_tomorrow_course_1_detail"
@@ -239,9 +291,22 @@
 
                 <LinearLayout style="@style/TimetableWidgetCourseTextColumn">
 
-                    <TextView
-                        android:id="@+id/timetable_widget_tomorrow_course_2_title"
-                        style="@style/TimetableWidgetCourseTitle" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/timetable_widget_tomorrow_course_2_title"
+                            style="@style/TimetableWidgetCourseTitle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1" />
+
+                        <TextView
+                            android:id="@+id/timetable_widget_tomorrow_course_2_time"
+                            style="@style/TimetableWidgetCourseTime" />
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/timetable_widget_tomorrow_course_2_detail"
@@ -260,9 +325,22 @@
 
                 <LinearLayout style="@style/TimetableWidgetCourseTextColumn">
 
-                    <TextView
-                        android:id="@+id/timetable_widget_tomorrow_course_3_title"
-                        style="@style/TimetableWidgetCourseTitle" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/timetable_widget_tomorrow_course_3_title"
+                            style="@style/TimetableWidgetCourseTitle"
+                            android:layout_width="0dp"
+                            android:layout_weight="1" />
+
+                        <TextView
+                            android:id="@+id/timetable_widget_tomorrow_course_3_time"
+                            style="@style/TimetableWidgetCourseTime" />
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/timetable_widget_tomorrow_course_3_detail"

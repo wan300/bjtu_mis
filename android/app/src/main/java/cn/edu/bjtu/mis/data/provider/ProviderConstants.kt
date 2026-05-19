@@ -18,6 +18,11 @@ object ProviderConstants {
     const val VE_COURSE_RESOURCES_COURSE_TO_PAGE = "10450"
     const val VE_COURSE_REPLAY_COURSE_TO_PAGE = "10480"
     const val VE_COURSE_RESOURCES_DOC_TYPE = "1"
+    const val ZHIXING_BASE_URL = "https://zhixing.bjtu.edu.cn"
+    const val JOB_BASE_URL = "https://job.bjtu.edu.cn"
+    const val JOB_HOME_URL = "$JOB_BASE_URL/frontpage/bjtu/html/index.html"
+    const val JOB_GUIDANCE_CATEGORY_ID = "6"
+    const val JOB_CONSULT_APPOINTMENT_URL = "http://bjtu.jysd.com/consult"
 }
 
 internal fun isBjtuCasLoginUrl(url: String): Boolean {

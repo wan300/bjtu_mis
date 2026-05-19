@@ -20,6 +20,8 @@ import cn.edu.bjtu.mis.data.parser.parseVeUserInfo
 import cn.edu.bjtu.mis.model.CalendarData
 import cn.edu.bjtu.mis.model.CourseReplayData
 import cn.edu.bjtu.mis.model.CourseReplayPlaybackInfo
+import cn.edu.bjtu.mis.model.CourseResourceCategory
+import cn.edu.bjtu.mis.model.CourseResourceFolder
 import cn.edu.bjtu.mis.model.CourseResourceItem
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.CourseSummary
@@ -50,6 +52,49 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Base64
+
+internal const val COURSE_RESOURCE_ALL_CATEGORY_KEY = "all"
+
+internal data class CourseResourceCategoryConfig(
+    val key: String,
+    val label: String,
+    val courseToPage: String,
+    val docType: String,
+)
+
+internal val courseResourceCategoryConfigs: List<CourseResourceCategoryConfig> = listOf(
+    CourseResourceCategoryConfig("courseware", "电子课件", "10450", "1"),
+    CourseResourceCategoryConfig("lesson_plan", "教案设计", "10451", "5"),
+    CourseResourceCategoryConfig("experiment", "实验", "10453", "10"),
+)
+
+internal fun courseResourceCategoryModels(): List<CourseResourceCategory> =
+    listOf(CourseResourceCategory(COURSE_RESOURCE_ALL_CATEGORY_KEY, "全部")) +
+        courseResourceCategoryConfigs.map { CourseResourceCategory(it.key, it.label) }
+
+internal fun normalizeCourseResourceCategoryKey(categoryKey: String?): String {
+    val key = categoryKey?.trim().orEmpty()
+    return when {
+        key.isBlank() || key == COURSE_RESOURCE_ALL_CATEGORY_KEY -> COURSE_RESOURCE_ALL_CATEGORY_KEY
+        courseResourceCategoryConfigs.any { it.key == key } -> key
+        else -> COURSE_RESOURCE_ALL_CATEGORY_KEY
+    }
+}
+
+internal fun courseResourceConfigsFor(categoryKey: String?): List<CourseResourceCategoryConfig> {
+    val normalized = normalizeCourseResourceCategoryKey(categoryKey)
+    return if (normalized == COURSE_RESOURCE_ALL_CATEGORY_KEY) {
+        courseResourceCategoryConfigs
+    } else {
+        courseResourceCategoryConfigs.filter { it.key == normalized }
+    }
+}
+
+private data class CourseResourceFetchResult(
+    val tree: List<CourseResourceFolder>,
+    val folders: List<CourseResourceFolder>,
+    val resources: List<CourseResourceItem>,
+)
 
 internal fun mergeHomeworkItems(items: Iterable<cn.edu.bjtu.mis.model.HomeworkItem>): List<cn.edu.bjtu.mis.model.HomeworkItem> {
     val dedupedItems = linkedMapOf<String, cn.edu.bjtu.mis.model.HomeworkItem>()
@@ -397,19 +442,36 @@ class VeProvider(private val client: BjtuHttpClient) {
         courseId: String? = null,
         folderId: String = "0",
         search: String? = null,
+        categoryKey: String? = null,
     ): ModuleEnvelope<CourseResourcesData> {
         ensureStrictFlow("course resources")
         val currentTerm = term ?: parseCalendarTerms(
             getJsonObject("/ve/back/rp/common/teachCalendar.shtml", mapOf("method" to "queryCurrentXq"))
         ).second
+        val selectedCategoryKey = normalizeCourseResourceCategoryKey(categoryKey)
+        val categoryConfigs = courseResourceConfigsFor(selectedCategoryKey)
+        val categories = courseResourceCategoryModels()
 
         if (currentTerm.isNullOrBlank()) {
             return ModuleEnvelope(
                 module = "course_resources",
                 sourceSystem = "ve",
                 coverage = CoverageLevel.Provisional,
-                sourceParams = buildJsonObject { put("fallback_reason", "missing_current_term") },
-                data = buildCourseResourcesData(null, emptyList(), null, folderId, emptyList(), emptyList(), emptyList()),
+                sourceParams = buildJsonObject {
+                    put("fallback_reason", "missing_current_term")
+                    put("category_key", selectedCategoryKey)
+                },
+                data = buildCourseResourcesData(
+                    null,
+                    emptyList(),
+                    null,
+                    folderId,
+                    emptyList(),
+                    emptyList(),
+                    emptyList(),
+                    categories = categories,
+                    selectedCategoryKey = selectedCategoryKey,
+                ),
             )
         }
 
@@ -431,6 +493,8 @@ class VeProvider(private val client: BjtuHttpClient) {
             put("course_id", requestedCourseId.ifBlank { selected?.courseId?.toString().orEmpty() })
             put("folder_id", normalizedFolder)
             put("search", search.orEmpty())
+            put("category_key", selectedCategoryKey)
+            put("category_keys", categoryConfigs.joinToString(",") { it.key })
         }
 
         if (selected == null) {
@@ -439,59 +503,52 @@ class VeProvider(private val client: BjtuHttpClient) {
                 sourceSystem = "ve",
                 coverage = CoverageLevel.Verified,
                 sourceParams = sourceParams,
-                data = buildCourseResourcesData(currentTerm, courses, null, normalizedFolder, emptyList(), emptyList(), emptyList()),
-            )
-        }
-
-        return runCatching {
-            val context = openCourseResourcesContext(selected)
-            val baseParams = mapOf(
-                "courseId" to context["courseId"],
-                "cId" to context["cId"],
-                "xkhId" to context["xkhId"],
-                "xqCode" to context["xqCode"],
-                "docType" to ProviderConstants.VE_COURSE_RESOURCES_DOC_TYPE,
-            )
-            val treePayload = getJsonObject(
-                "/ve/back/coursePlatform/courseResource.shtml",
-                mapOf("method" to "stuQueryCourseResourceBag") + baseParams,
-            )
-            val listingPayload = getJsonObject(
-                "/ve/back/coursePlatform/courseResource.shtml",
-                mapOf(
-                    "method" to "stuQueryUploadResourceForCourseList",
-                    "up_id" to normalizedFolder,
-                    "searchName" to search.orEmpty(),
-                ) + baseParams,
-            )
-            val (folders, resources) = parseCourseResourceListing(listingPayload, normalizedFolder)
-            ModuleEnvelope(
-                module = "course_resources",
-                sourceSystem = "ve",
-                coverage = CoverageLevel.Verified,
-                sourceParams = sourceParams,
                 data = buildCourseResourcesData(
                     currentTerm,
                     courses,
-                    selected,
+                    null,
                     normalizedFolder,
-                    parseCourseResourceTree(treePayload),
-                    folders,
-                    resources,
+                    emptyList(),
+                    emptyList(),
+                    emptyList(),
+                    categories = categories,
+                    selectedCategoryKey = selectedCategoryKey,
                 ),
             )
-        }.getOrElse { error ->
-            ModuleEnvelope(
-                module = "course_resources",
-                sourceSystem = "ve",
-                coverage = CoverageLevel.Provisional,
-                sourceParams = buildJsonObject {
-                    sourceParams.forEach { (key, value) -> put(key, value) }
-                    put("fallback_reason", error.message.orEmpty())
-                },
-                data = buildCourseResourcesData(currentTerm, courses, selected, normalizedFolder, emptyList(), emptyList(), emptyList()),
-            )
         }
+
+        val results = mutableListOf<CourseResourceFetchResult>()
+        val errors = mutableListOf<String>()
+        categoryConfigs.forEach { category ->
+            runCatching {
+                fetchCourseResourceCategory(selected, category, normalizedFolder, search)
+            }.onSuccess {
+                results += it
+            }.onFailure { error ->
+                errors += courseResourceCategoryError(category, error)
+            }
+        }
+        val merged = mergeCourseResourceFetchResults(results)
+        return ModuleEnvelope(
+            module = "course_resources",
+            sourceSystem = "ve",
+            coverage = if (errors.isEmpty()) CoverageLevel.Verified else CoverageLevel.Provisional,
+            sourceParams = buildJsonObject {
+                sourceParams.forEach { (key, value) -> put(key, value) }
+                if (errors.isNotEmpty()) put("fallback_reason", errors.joinToString("; "))
+            },
+            data = buildCourseResourcesData(
+                currentTerm,
+                courses,
+                selected,
+                normalizedFolder,
+                merged.tree,
+                merged.folders,
+                merged.resources,
+                categories = categories,
+                selectedCategoryKey = selectedCategoryKey,
+            )
+        )
     }
 
     fun fetchCourseResourcesProgressive(
@@ -499,19 +556,36 @@ class VeProvider(private val client: BjtuHttpClient) {
         courseId: String? = null,
         folderId: String = "0",
         search: String? = null,
+        categoryKey: String? = null,
     ): Flow<ProgressiveModuleState<CourseResourcesData>> = flow {
         ensureStrictFlow("course resources")
         val currentTerm = term ?: parseCalendarTerms(
             getJsonObject("/ve/back/rp/common/teachCalendar.shtml", mapOf("method" to "queryCurrentXq"))
         ).second
+        val selectedCategoryKey = normalizeCourseResourceCategoryKey(categoryKey)
+        val categoryConfigs = courseResourceConfigsFor(selectedCategoryKey)
+        val categories = courseResourceCategoryModels()
 
         if (currentTerm.isNullOrBlank()) {
             val envelope = ModuleEnvelope(
                 module = "course_resources",
                 sourceSystem = "ve",
                 coverage = CoverageLevel.Provisional,
-                sourceParams = buildJsonObject { put("fallback_reason", "missing_current_term") },
-                data = buildCourseResourcesData(null, emptyList(), null, folderId, emptyList(), emptyList(), emptyList()),
+                sourceParams = buildJsonObject {
+                    put("fallback_reason", "missing_current_term")
+                    put("category_key", selectedCategoryKey)
+                },
+                data = buildCourseResourcesData(
+                    null,
+                    emptyList(),
+                    null,
+                    folderId,
+                    emptyList(),
+                    emptyList(),
+                    emptyList(),
+                    categories = categories,
+                    selectedCategoryKey = selectedCategoryKey,
+                ),
             )
             emit(ProgressiveModuleState(envelope = envelope, loading = false, complete = true))
             return@flow
@@ -535,14 +609,16 @@ class VeProvider(private val client: BjtuHttpClient) {
             put("course_id", requestedCourseId.ifBlank { selected?.courseId?.toString().orEmpty() })
             put("folder_id", normalizedFolder)
             put("search", search.orEmpty())
+            put("category_key", selectedCategoryKey)
+            put("category_keys", categoryConfigs.joinToString(",") { it.key })
         }
 
         fun envelope(
             coverage: CoverageLevel,
-            tree: List<cn.edu.bjtu.mis.model.CourseResourceFolder> = emptyList(),
-            folders: List<cn.edu.bjtu.mis.model.CourseResourceFolder> = emptyList(),
+            tree: List<CourseResourceFolder> = emptyList(),
+            folders: List<CourseResourceFolder> = emptyList(),
             resources: List<CourseResourceItem> = emptyList(),
-            error: Throwable? = null,
+            errors: List<String> = emptyList(),
         ): ModuleEnvelope<CourseResourcesData> =
             ModuleEnvelope(
                 module = "course_resources",
@@ -550,9 +626,19 @@ class VeProvider(private val client: BjtuHttpClient) {
                 coverage = coverage,
                 sourceParams = buildJsonObject {
                     sourceParams.forEach { (key, value) -> put(key, value) }
-                    error?.message?.let { put("fallback_reason", it) }
+                    if (errors.isNotEmpty()) put("fallback_reason", errors.joinToString("; "))
                 },
-                data = buildCourseResourcesData(currentTerm, courses, selected, normalizedFolder, tree, folders, resources),
+                data = buildCourseResourcesData(
+                    currentTerm,
+                    courses,
+                    selected,
+                    normalizedFolder,
+                    tree,
+                    folders,
+                    resources,
+                    categories = categories,
+                    selectedCategoryKey = selectedCategoryKey,
+                ),
             )
 
         val courseEnvelope = envelope(CoverageLevel.Provisional)
@@ -562,62 +648,106 @@ class VeProvider(private val client: BjtuHttpClient) {
                 loading = selected != null,
                 complete = selected == null,
                 loadedCount = 1,
-                totalCount = if (selected == null) 1 else 2,
+                totalCount = if (selected == null) 1 else 1 + categoryConfigs.size,
             )
         )
         if (selected == null) return@flow
 
-        runCatching {
-            val context = openCourseResourcesContext(selected)
-            val baseParams = mapOf(
-                "courseId" to context["courseId"],
-                "cId" to context["cId"],
-                "xkhId" to context["xkhId"],
-                "xqCode" to context["xqCode"],
-                "docType" to ProviderConstants.VE_COURSE_RESOURCES_DOC_TYPE,
-            )
-            val treePayload = getJsonObject(
-                "/ve/back/coursePlatform/courseResource.shtml",
-                mapOf("method" to "stuQueryCourseResourceBag") + baseParams,
-            )
-            val listingPayload = getJsonObject(
-                "/ve/back/coursePlatform/courseResource.shtml",
-                mapOf(
-                    "method" to "stuQueryUploadResourceForCourseList",
-                    "up_id" to normalizedFolder,
-                    "searchName" to search.orEmpty(),
-                ) + baseParams,
-            )
-            val (folders, resources) = parseCourseResourceListing(listingPayload, normalizedFolder)
-            envelope(
-                coverage = CoverageLevel.Verified,
-                tree = parseCourseResourceTree(treePayload),
-                folders = folders,
-                resources = resources,
-            )
-        }.onSuccess {
+        val results = mutableListOf<CourseResourceFetchResult>()
+        val errors = mutableListOf<String>()
+        categoryConfigs.forEachIndexed { index, category ->
+            runCatching {
+                fetchCourseResourceCategory(selected, category, normalizedFolder, search)
+            }.onSuccess {
+                results += it
+            }.onFailure { error ->
+                errors += courseResourceCategoryError(category, error)
+            }
+            val merged = mergeCourseResourceFetchResults(results)
             emit(
                 ProgressiveModuleState(
-                    envelope = it,
-                    loading = false,
-                    complete = true,
-                    loadedCount = 2,
-                    totalCount = 2,
-                )
-            )
-        }.onFailure { error ->
-            emit(
-                ProgressiveModuleState(
-                    envelope = envelope(CoverageLevel.Provisional, error = error),
-                    loading = false,
-                    complete = true,
-                    loadedCount = 1,
-                    totalCount = 2,
-                    errors = listOf(error.message ?: "course_resources_detail_failed"),
+                    envelope = envelope(
+                        coverage = CoverageLevel.Provisional,
+                        tree = merged.tree,
+                        folders = merged.folders,
+                        resources = merged.resources,
+                        errors = errors,
+                    ),
+                    loading = index < categoryConfigs.lastIndex,
+                    complete = false,
+                    loadedCount = 2 + index,
+                    totalCount = 1 + categoryConfigs.size,
+                    errors = errors,
                 )
             )
         }
+        val merged = mergeCourseResourceFetchResults(results)
+        emit(
+            ProgressiveModuleState(
+                envelope = envelope(
+                    coverage = if (errors.isEmpty()) CoverageLevel.Verified else CoverageLevel.Provisional,
+                    tree = merged.tree,
+                    folders = merged.folders,
+                    resources = merged.resources,
+                    errors = errors,
+                ),
+                loading = false,
+                complete = true,
+                loadedCount = 1 + categoryConfigs.size,
+                totalCount = 1 + categoryConfigs.size,
+                errors = errors,
+            )
+        )
     }
+
+    private suspend fun fetchCourseResourceCategory(
+        course: CourseSummary,
+        category: CourseResourceCategoryConfig,
+        folderId: String,
+        search: String?,
+    ): CourseResourceFetchResult {
+        val context = openCourseResourcesContext(course, category.courseToPage)
+        val baseParams = mapOf(
+            "courseId" to context["courseId"],
+            "cId" to context["cId"],
+            "xkhId" to context["xkhId"],
+            "xqCode" to context["xqCode"],
+            "docType" to category.docType,
+        )
+        val treePayload = getJsonObject(
+            "/ve/back/coursePlatform/courseResource.shtml",
+            mapOf("method" to "stuQueryCourseResourceBag") + baseParams,
+        )
+        val listingPayload = getJsonObject(
+            "/ve/back/coursePlatform/courseResource.shtml",
+            mapOf(
+                "method" to "stuQueryUploadResourceForCourseList",
+                "up_id" to folderId,
+                "searchName" to search.orEmpty(),
+            ) + baseParams,
+        )
+        val (folders, resources) = parseCourseResourceListing(
+            listingPayload,
+            folderId,
+            category.key,
+            category.label,
+        )
+        return CourseResourceFetchResult(
+            tree = parseCourseResourceTree(treePayload, category.key, category.label),
+            folders = folders,
+            resources = resources,
+        )
+    }
+
+    private fun mergeCourseResourceFetchResults(results: List<CourseResourceFetchResult>): CourseResourceFetchResult =
+        CourseResourceFetchResult(
+            tree = results.flatMap { it.tree },
+            folders = results.flatMap { it.folders },
+            resources = results.flatMap { it.resources },
+        )
+
+    private fun courseResourceCategoryError(category: CourseResourceCategoryConfig, error: Throwable): String =
+        "${category.label}: ${error.message ?: "course_resources_detail_failed"}"
 
     suspend fun downloadCourseResource(rpId: String, target: File): FileResponse {
         ensureStrictFlow("download")
@@ -1099,7 +1229,7 @@ class VeProvider(private val client: BjtuHttpClient) {
         return parseHomeworkAttachments(payload)
     }
 
-    private suspend fun openCourseResourcesContext(course: CourseSummary): Map<String, String> {
+    private suspend fun openCourseResourcesContext(course: CourseSummary, courseToPage: String): Map<String, String> {
         val coursePage = client.getText(
             ProviderConstants.VE_COURSE_PLATFORM_BASE_URL,
             params = buildCoursePageParams(course),
@@ -1112,7 +1242,7 @@ class VeProvider(private val client: BjtuHttpClient) {
             ?: throw IllegalStateException("课程缺少 teacherId：${course.courseId}")
         val resourcesPage = client.getText(
             ProviderConstants.VE_COURSE_PLATFORM_BASE_URL,
-            params = buildCoursePageParams(course, ProviderConstants.VE_COURSE_RESOURCES_COURSE_TO_PAGE, teacherId),
+            params = buildCoursePageParams(course, courseToPage, teacherId),
             headers = mapOf("Referer" to coursePlatformReferer),
         )
         rememberCoursePlatformContext(resourcesPage.url, resourcesPage.body)

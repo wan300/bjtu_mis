@@ -8,6 +8,7 @@ import cn.edu.bjtu.mis.model.CourseReplayPlaybackInfo
 import cn.edu.bjtu.mis.model.CourseReplayStreamChoice
 import cn.edu.bjtu.mis.model.CourseResourceFolder
 import cn.edu.bjtu.mis.model.CourseResourceItem
+import cn.edu.bjtu.mis.model.CourseResourceCategory
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.CourseSummary
 import cn.edu.bjtu.mis.model.HomeworkAttachment
@@ -205,7 +206,11 @@ fun parseStudentProfile(payload: JsonObject): StudentProfileData {
     return profile.copy(fields = fields)
 }
 
-fun parseCourseResourceTree(payload: JsonObject): List<CourseResourceFolder> =
+fun parseCourseResourceTree(
+    payload: JsonObject,
+    categoryKey: String = "courseware",
+    categoryLabel: String = "电子课件",
+): List<CourseResourceFolder> =
     payload.list("nodes").mapNotNull { item ->
         val obj = item as? JsonObject ?: return@mapNotNull null
         val id = obj.text("id") ?: return@mapNotNull null
@@ -214,12 +219,16 @@ fun parseCourseResourceTree(payload: JsonObject): List<CourseResourceFolder> =
             folderId = id,
             name = name,
             parentId = obj.firstText("pId", "pid", "parent_id"),
+            categoryKey = categoryKey,
+            categoryLabel = categoryLabel,
         )
     }
 
 fun parseCourseResourceListing(
     payload: JsonObject,
     folderId: String,
+    categoryKey: String = "courseware",
+    categoryLabel: String = "电子课件",
 ): Pair<List<CourseResourceFolder>, List<CourseResourceItem>> {
     val folders = payload.list("bagList").mapNotNull { item ->
         val obj = item as? JsonObject ?: return@mapNotNull null
@@ -229,6 +238,8 @@ fun parseCourseResourceListing(
             folderId = id,
             name = name,
             parentId = obj.firstText("pId", "pid", "up_id") ?: folderId,
+            categoryKey = categoryKey,
+            categoryLabel = categoryLabel,
         )
     }
     val resources = payload.list("resList").mapNotNull { item ->
@@ -251,6 +262,8 @@ fun parseCourseResourceListing(
             clickCount = obj.firstInt("clicks", "click_count"),
             canDownload = obj.text("stu_download") == "2",
             folderId = folderId,
+            categoryKey = categoryKey,
+            categoryLabel = categoryLabel,
         )
     }
     return folders to resources
@@ -264,11 +277,15 @@ fun buildCourseResourcesData(
     tree: List<CourseResourceFolder>,
     folders: List<CourseResourceFolder>,
     resources: List<CourseResourceItem>,
+    categories: List<CourseResourceCategory> = emptyList(),
+    selectedCategoryKey: String = "all",
 ): CourseResourcesData = CourseResourcesData(
     currentTerm = currentTerm,
     courses = courses,
     selectedCourseId = selectedCourse?.courseId,
     folderId = folderId,
+    categories = categories,
+    selectedCategoryKey = selectedCategoryKey,
     tree = tree,
     folders = folders,
     resources = resources,

@@ -34,6 +34,17 @@ class AppCookieJar : CookieJar {
         lock.withLock { cookies.clear() }
     }
 
+    fun clearForDomain(domainSuffix: String) {
+        val normalized = domainSuffix.trim().trimStart('.').lowercase()
+        if (normalized.isBlank()) return
+        lock.withLock {
+            cookies.entries.removeIf { entry ->
+                val domain = entry.value.domain.trimStart('.').lowercase()
+                domain == normalized || domain.endsWith(".$normalized")
+            }
+        }
+    }
+
     fun snapshot(): List<Cookie> = lock.withLock { cookies.values.toList() }
 
     fun replaceAll(next: List<Cookie>) {

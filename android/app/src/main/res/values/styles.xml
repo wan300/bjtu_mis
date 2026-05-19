@@ -46,6 +46,17 @@
         <item name="android:textStyle">bold</item>
     </style>
 
+    <style name="TimetableWidgetCourseTime">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">6dp</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textColor">#475467</item>
+        <item name="android:textSize">10sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
     <style name="TimetableWidgetCourseDetail">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>

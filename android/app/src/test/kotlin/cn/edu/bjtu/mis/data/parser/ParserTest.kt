@@ -216,12 +216,35 @@ class ParserTest {
             }
             """.trimIndent()
         ).jsonObject
-        val (folders, resources) = parseCourseResourceListing(payload, "0")
+        val (folders, resources) = parseCourseResourceListing(payload, "0", "experiment", "实验")
         assertEquals("8", folders.first().folderId)
+        assertEquals("experiment", folders.first().categoryKey)
+        assertEquals("实验", folders.first().categoryLabel)
         assertEquals("1001", resources.first().rpId)
+        assertEquals("experiment", resources.first().categoryKey)
+        assertEquals("实验", resources.first().categoryLabel)
         assertEquals("/rp/2026/03/17/swf/demo.pdf", resources.first().playUrl)
         assertEquals("/rp/2026/03/17/demo.pdf", resources.first().resUrl)
         assertTrue(resources.first().canDownload)
+    }
+
+    @Test
+    fun parseCourseResourceTreeKeepsCategoryMetadata() {
+        val payload = AppJson.parseToJsonElement(
+            """
+            {
+              "nodes": [{"id": 0, "name": "教案设计"}],
+              "STATUS": "2"
+            }
+            """.trimIndent()
+        ).jsonObject
+
+        val folders = parseCourseResourceTree(payload, "lesson_plan", "教案设计")
+
+        assertEquals("0", folders.single().folderId)
+        assertEquals("教案设计", folders.single().name)
+        assertEquals("lesson_plan", folders.single().categoryKey)
+        assertEquals("教案设计", folders.single().categoryLabel)
     }
 
     @Test

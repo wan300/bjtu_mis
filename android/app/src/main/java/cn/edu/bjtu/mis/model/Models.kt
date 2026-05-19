@@ -343,10 +343,18 @@ data class HomeworkSubmitResponse(
 )
 
 @Serializable
+data class CourseResourceCategory(
+    val key: String,
+    val label: String,
+)
+
+@Serializable
 data class CourseResourceFolder(
     val folderId: String,
     val name: String,
     val parentId: String? = null,
+    val categoryKey: String = "courseware",
+    val categoryLabel: String = "电子课件",
 )
 
 @Serializable
@@ -365,6 +373,8 @@ data class CourseResourceItem(
     val clickCount: Int? = null,
     val canDownload: Boolean = false,
     val folderId: String = "0",
+    val categoryKey: String = "courseware",
+    val categoryLabel: String = "电子课件",
 )
 
 @Serializable
@@ -373,6 +383,8 @@ data class CourseResourcesData(
     val courses: List<CourseSummary> = emptyList(),
     val selectedCourseId: Int? = null,
     val folderId: String = "0",
+    val categories: List<CourseResourceCategory> = emptyList(),
+    val selectedCategoryKey: String = "all",
     val tree: List<CourseResourceFolder> = emptyList(),
     val folders: List<CourseResourceFolder> = emptyList(),
     val resources: List<CourseResourceItem> = emptyList(),
@@ -587,6 +599,276 @@ data class MailContactsData(
 )
 
 @Serializable
+data class ZhixingAuthState(
+    val loggedIn: Boolean = false,
+    val username: String? = null,
+    val message: String? = null,
+)
+
+@Serializable
+data class ZhixingLoginChallenge(
+    val challengeId: String,
+    val auth: String,
+    val formhash: String,
+    val loginhash: String,
+    val referer: String,
+    val seccodeHash: String,
+    val seccodeModId: String,
+    val imageDataUrl: String,
+    val message: String? = null,
+)
+
+@Serializable
+enum class ZhixingLoginStatus {
+    Success,
+    CaptchaRequired,
+    Failure,
+}
+
+@Serializable
+data class ZhixingLoginOutcome(
+    val status: ZhixingLoginStatus,
+    val authState: ZhixingAuthState? = null,
+    val challenge: ZhixingLoginChallenge? = null,
+    val message: String? = null,
+    val remainingAttempts: Int? = null,
+) {
+    val succeeded: Boolean
+        get() = status == ZhixingLoginStatus.Success
+}
+
+@Serializable
+data class ZhixingPostSummary(
+    val threadId: String,
+    val title: String,
+    val url: String,
+    val forumName: String? = null,
+    val author: String? = null,
+    val excerpt: String? = null,
+)
+
+@Serializable
+data class ZhixingRankItem(
+    val threadId: String,
+    val title: String,
+    val url: String,
+    val forumName: String? = null,
+    val rankLabel: String? = null,
+)
+
+@Serializable
+data class ZhixingForumEntry(
+    val id: String,
+    val name: String,
+    val url: String,
+    val description: String? = null,
+)
+
+@Serializable
+data class ZhixingAttachment(
+    val name: String,
+    val url: String? = null,
+    val size: String? = null,
+)
+
+@Serializable
+enum class ZhixingContentBlockType {
+    Text,
+    Image,
+}
+
+@Serializable
+data class ZhixingContentBlock(
+    val type: ZhixingContentBlockType,
+    val text: String? = null,
+    val imageUrl: String? = null,
+    val alt: String? = null,
+)
+
+@Serializable
+data class ZhixingThreadPost(
+    val author: String? = null,
+    val floor: String? = null,
+    val postedAt: String? = null,
+    val content: String,
+    val contentBlocks: List<ZhixingContentBlock> = emptyList(),
+)
+
+@Serializable
+data class ZhixingThreadDetail(
+    val threadId: String,
+    val title: String,
+    val url: String,
+    val forumName: String? = null,
+    val canonicalUrl: String? = null,
+    val page: Int = 1,
+    val totalPosts: Int = 0,
+    val restricted: Boolean = false,
+    val message: String? = null,
+    val posts: List<ZhixingThreadPost> = emptyList(),
+    val attachments: List<ZhixingAttachment> = emptyList(),
+)
+
+@Serializable
+data class ZhixingHomeData(
+    val authState: ZhixingAuthState = ZhixingAuthState(),
+    val latestPosts: List<ZhixingPostSummary> = emptyList(),
+    val rankItems: List<ZhixingRankItem> = emptyList(),
+    val forums: List<ZhixingForumEntry> = emptyList(),
+)
+
+@Serializable
+data class EmploymentArticleAttachment(
+    val name: String,
+    val url: String,
+)
+
+@Serializable
+data class EmploymentArticleSummary(
+    val id: String,
+    val title: String,
+    val url: String,
+    val releaseDate: String? = null,
+    val description: String? = null,
+    val publisher: String? = null,
+    val imageUrl: String? = null,
+    val isExternalLink: Boolean = false,
+)
+
+@Serializable
+data class EmploymentArticleDetail(
+    val id: String,
+    val title: String,
+    val url: String,
+    val releaseDate: String? = null,
+    val description: String? = null,
+    val publisher: String? = null,
+    val contentText: String = "",
+    val contentHtml: String = "",
+    val attachments: List<EmploymentArticleAttachment> = emptyList(),
+    val isExternalLink: Boolean = false,
+)
+
+@Serializable
+data class EmploymentContactInfo(
+    val title: String,
+    val phone: String? = null,
+    val email: String? = null,
+    val location: String? = null,
+    val description: String? = null,
+)
+
+@Serializable
+enum class EmploymentSectionType {
+    CareerTalk,
+    JobFair,
+    Recruitment,
+    Internship,
+}
+
+@Serializable
+data class EmploymentInfoSection(
+    val type: EmploymentSectionType,
+    val title: String,
+    val listUrl: String,
+    val items: List<EmploymentInfoSummary> = emptyList(),
+)
+
+@Serializable
+data class EmploymentInfoSummary(
+    val id: String,
+    val type: EmploymentSectionType,
+    val title: String,
+    val url: String,
+    val organization: String? = null,
+    val startTime: String? = null,
+    val endTime: String? = null,
+    val location: String? = null,
+    val browseNumber: String? = null,
+    val logoUrl: String? = null,
+    val statusLabel: String? = null,
+    val education: String? = null,
+    val majorName: String? = null,
+    val positionCount: Int? = null,
+    val isExternalLink: Boolean = false,
+)
+
+@Serializable
+data class EmploymentCompanyInfo(
+    val name: String? = null,
+    val logoUrl: String? = null,
+    val nature: String? = null,
+    val scale: String? = null,
+    val website: String? = null,
+    val introduction: String? = null,
+    val url: String? = null,
+    val address: String? = null,
+)
+
+@Serializable
+data class EmploymentPositionInfo(
+    val name: String,
+    val education: String? = null,
+    val demandNumber: String? = null,
+    val majorName: String? = null,
+    val cityName: String? = null,
+    val description: String? = null,
+)
+
+@Serializable
+data class EmploymentInfoDetail(
+    val id: String,
+    val type: EmploymentSectionType,
+    val title: String,
+    val url: String,
+    val organization: String? = null,
+    val startTime: String? = null,
+    val endTime: String? = null,
+    val location: String? = null,
+    val browseNumber: String? = null,
+    val statusLabel: String? = null,
+    val contentText: String = "",
+    val contentHtml: String = "",
+    val company: EmploymentCompanyInfo? = null,
+    val positions: List<EmploymentPositionInfo> = emptyList(),
+    val contactsName: String? = null,
+    val telephone: String? = null,
+    val email: String? = null,
+    val phoneNumber: String? = null,
+    val resumeReceiveEmail: String? = null,
+    val onlineApplicationUrl: String? = null,
+    val attachments: List<EmploymentArticleAttachment> = emptyList(),
+    val isExternalLink: Boolean = false,
+)
+
+@Serializable
+data class EmploymentConsultationData(
+    val sections: List<EmploymentInfoSection> = emptyList(),
+    val articles: List<EmploymentArticleSummary> = emptyList(),
+    val consultationGuide: EmploymentArticleDetail? = null,
+    val contacts: List<EmploymentContactInfo> = emptyList(),
+    val appointmentUrl: String,
+    val sourceUrl: String,
+)
+
+@Serializable
+data class ZhixingSearchResult(
+    val threadId: String,
+    val title: String,
+    val url: String,
+    val forumName: String? = null,
+    val author: String? = null,
+    val postedAt: String? = null,
+    val excerpt: String? = null,
+)
+
+@Serializable
+data class ZhixingSearchData(
+    val keyword: String,
+    val results: List<ZhixingSearchResult> = emptyList(),
+)
+
+@Serializable
 data class ProfileField(
     val label: String,
     val value: String,
@@ -766,4 +1048,6 @@ object ModuleKeys {
     const val CourseReplay = "course_replay"
     const val EmptyRooms = "empty_rooms"
     const val Mail = "mail"
+    const val Zhixing = "zhixing"
+    const val EmploymentConsultation = "employment_consultation"
 }

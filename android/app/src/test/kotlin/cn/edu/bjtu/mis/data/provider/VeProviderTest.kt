@@ -77,6 +77,31 @@ class VeProviderTest {
         assertEquals(false, params.containsKey("timetableId"))
     }
 
+    @Test
+    fun courseResourceCategoryConfigsMatchCapturedVeModules() {
+        val configs = courseResourceCategoryConfigs.associateBy { it.key }
+
+        assertEquals("10450", configs.getValue("courseware").courseToPage)
+        assertEquals("1", configs.getValue("courseware").docType)
+        assertEquals("10451", configs.getValue("lesson_plan").courseToPage)
+        assertEquals("5", configs.getValue("lesson_plan").docType)
+        assertEquals("10453", configs.getValue("experiment").courseToPage)
+        assertEquals("10", configs.getValue("experiment").docType)
+    }
+
+    @Test
+    fun courseResourceAllCategoryExpandsToEveryConfiguredCategory() {
+        assertEquals(
+            listOf("courseware", "lesson_plan", "experiment"),
+            courseResourceConfigsFor("all").map { it.key },
+        )
+        assertEquals(
+            listOf("courseware", "lesson_plan", "experiment"),
+            courseResourceConfigsFor(null).map { it.key },
+        )
+        assertEquals(listOf("experiment"), courseResourceConfigsFor("experiment").map { it.key })
+    }
+
     private fun homework(id: Int?, title: String, submittedAt: String?): HomeworkItem =
         HomeworkItem(
             homeworkId = id,

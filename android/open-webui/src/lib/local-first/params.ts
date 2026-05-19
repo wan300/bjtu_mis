@@ -14,6 +14,7 @@ const OPEN_WEBUI_ONLY_PARAMS = new Set([
 	'stream_response',
 	'stream_delta_chunk_size',
 	'function_calling',
+	'local_agent_review',
 	'reasoning_tags',
 	'system'
 ]);

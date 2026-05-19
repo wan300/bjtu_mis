@@ -51,10 +51,17 @@ type ProviderTurn = {
 	raw?: JsonRecord;
 	sources?: JsonRecord[];
 	statuses?: JsonRecord[];
+	streamContent?: string;
 };
 
-type ParseProviderTurnOptions = {
-	onPartialTurn?: (turn: ProviderTurn) => void;
+type AgentTurnDecision =
+	| { kind: 'tool_calls'; turn: ProviderTurn }
+	| { kind: 'final'; turn: ProviderTurn }
+	| { kind: 'invalid'; turn: ProviderTurn; reason: string };
+
+type FinalAnswerReviewResult = {
+	approved: boolean;
+	reason: string;
 };
 
 type LocalToolMessage = {
@@ -693,42 +700,6 @@ const emitLocalDisplaySnapshot = (context: LocalAgentRunContext, finalContent = 
 	}
 };
 
-const hideInlineAgentToolFragmentsForDisplay = (
-	content: string,
-	availableToolNames: Set<string>
-) => {
-	if (!content.includes('<agent_')) {
-		return content;
-	}
-
-	const toolTagRegex = /<(agent_[A-Za-z0-9_]+)\b[^>]*\/?>/g;
-	let match: RegExpExecArray | null;
-
-	while ((match = toolTagRegex.exec(content)) !== null) {
-		const name = match[1];
-		if (availableToolNames.has(name)) {
-			return content.slice(0, match.index).replace(/\n{3,}/g, '\n\n').trim();
-		}
-	}
-
-	return content;
-};
-
-const emitLocalPartialTurnSnapshot = (
-	context: LocalAgentRunContext,
-	turn: ProviderTurn,
-	availableToolNames: Set<string>
-) => {
-	const displayContent = hideInlineAgentToolFragmentsForDisplay(
-		turn.content ?? '',
-		availableToolNames
-	);
-	emitLocalDisplaySnapshot(
-		context,
-		formatTurnContent({ ...turn, content: displayContent }, { final: false })
-	);
-};
-
 const finalizeLocalAgentTurn = (
 	turn: ProviderTurn,
 	context: LocalAgentRunContext
@@ -738,13 +709,15 @@ const finalizeLocalAgentTurn = (
 	if (context.displayOutput.length === 0) {
 		return {
 			...turn,
-			content
+			content,
+			streamContent: content
 		};
 	}
 
 	return {
 		...turn,
-		content: serializeLocalDisplayOutput(context.displayOutput, content)
+		content: serializeLocalDisplayOutput(context.displayOutput, content),
+		streamContent: content ? `\n${content}` : ''
 	};
 };
 
@@ -1229,10 +1202,60 @@ const normalizeInlineXmlToolTurn = (
 	};
 };
 
+const FINAL_ANSWER_LEAK_PATTERNS: { label: string; regex: RegExp }[] = [
+	{ label: 'DSML tool protocol marker', regex: /\bDSML\b/i },
+	{ label: 'tool_calls XML marker', regex: /<\s*\/?\s*tool_calls\b|tool_calls\s*>/i },
+	{ label: 'tool invocation marker', regex: /\binvoke\s+name\s*=/i },
+	{ label: 'tool parameter marker', regex: /\bparameter\s+name\s*=/i },
+	{
+		label: 'rendered tool call details',
+		regex: /<details\s+type\s*=\s*["']tool_calls["']/i
+	},
+	{ label: 'unparsed native Agent tool tag', regex: /<\s*\/?\s*agent_[A-Za-z0-9_]+\b/i }
+];
+
+const findFinalAnswerProtocolLeak = (turn: ProviderTurn) => {
+	const visibleText = [turn.content ?? '', turn.reasoning ?? ''].join('\n');
+	for (const pattern of FINAL_ANSWER_LEAK_PATTERNS) {
+		if (pattern.regex.test(visibleText)) {
+			return pattern.label;
+		}
+	}
+	return null;
+};
+
+const decideAgentTurn = (
+	turn: ProviderTurn,
+	availableToolNames: Set<string>
+): AgentTurnDecision => {
+	const normalizedTurn = normalizeInlineXmlToolTurn(turn, availableToolNames);
+
+	if (normalizedTurn.toolCalls.length > 0) {
+		return {
+			kind: 'tool_calls',
+			turn: {
+				...normalizedTurn,
+				content: ''
+			}
+		};
+	}
+
+	const leak = findFinalAnswerProtocolLeak(normalizedTurn);
+	if (leak) {
+		return {
+			kind: 'invalid',
+			turn: normalizedTurn,
+			reason: `Detected leaked tool protocol text: ${leak}.`
+		};
+	}
+
+	return { kind: 'final', turn: normalizedTurn };
+};
+
 const buildAssistantToolCallMessage = (turn: ProviderTurn): JsonRecord => {
 	const message: JsonRecord = {
 		role: 'assistant',
-		content: turn.content || null,
+		content: null,
 		tool_calls: turn.toolCalls
 	};
 	const reasoning = turn.reasoning ?? '';
@@ -1295,32 +1318,7 @@ const parseSseEvent = (eventText: string) =>
 		.join('\n')
 		.trim();
 
-const createPartialStreamTurn = (
-	content: string,
-	reasoning: string,
-	streamedToolCalls: Map<number, LocalToolCall>,
-	startedAt: number,
-	usage?: JsonRecord
-): ProviderTurn => {
-	const toolCalls = normalizeToolCalls([...streamedToolCalls.values()]);
-	const reasoningDone = Boolean((content ?? '').trim() || toolCalls.length > 0);
-
-	return {
-		content,
-		toolCalls,
-		reasoning,
-		reasoningDone,
-		reasoningDuration: reasoning
-			? Math.max(0, Math.round((Date.now() - startedAt) / 1000))
-			: undefined,
-		usage
-	};
-};
-
-const parseStreamTurn = async (
-	res: Response,
-	options: ParseProviderTurnOptions = {}
-): Promise<ProviderTurn> => {
+const parseStreamTurn = async (res: Response): Promise<ProviderTurn> => {
 	if (!res.body) {
 		return { content: '', toolCalls: [] };
 	}
@@ -1354,7 +1352,6 @@ const parseStreamTurn = async (
 					usage = chunk.usage;
 				}
 
-				let hasDelta = false;
 				for (const choice of chunk?.choices ?? []) {
 					const delta = choice?.delta ?? choice?.message ?? {};
 					const contentDelta = contentToText(delta?.content);
@@ -1363,24 +1360,13 @@ const parseStreamTurn = async (
 
 					if (contentDelta) {
 						content += contentDelta;
-						hasDelta = true;
 					}
 					if (reasoningDelta) {
 						reasoning += reasoningDelta;
-						hasDelta = true;
 					}
 					for (const toolCallDelta of toolCallDeltas) {
 						mergeToolCallDelta(streamedToolCalls, toolCallDelta);
 					}
-					if (toolCallDeltas.length > 0) {
-						hasDelta = true;
-					}
-				}
-
-				if (hasDelta) {
-					options.onPartialTurn?.(
-						createPartialStreamTurn(content, reasoning, streamedToolCalls, startedAt, usage)
-					);
 				}
 			}
 
@@ -1415,17 +1401,13 @@ const parseJsonTurn = async (res: Response): Promise<ProviderTurn> => {
 	};
 };
 
-const parseProviderTurn = async (
-	res: Response,
-	stream: boolean,
-	options: ParseProviderTurnOptions = {}
-): Promise<ProviderTurn> => {
+const parseProviderTurn = async (res: Response, stream: boolean): Promise<ProviderTurn> => {
 	if (!res.ok) {
 		const text = await res.text().catch(() => '');
 		throw new Error(text || `Local provider request failed with status ${res.status}.`);
 	}
 
-	return stream ? parseStreamTurn(res, options) : parseJsonTurn(res);
+	return stream ? parseStreamTurn(res) : parseJsonTurn(res);
 };
 
 const runWebSearchToolCall = async (
@@ -1563,6 +1545,101 @@ const buildRetryLimitTurn = (maxRetries: number): ProviderTurn => ({
 	toolCalls: []
 });
 
+const buildInvalidTurnMessage = (): ProviderTurn => ({
+	content:
+		'Error: The local agent response was blocked because it contained internal tool protocol text. Please retry the request.',
+	toolCalls: []
+});
+
+const buildRepairInstructionMessage = (
+	reason: string,
+	availableToolNames: Set<string>
+): JsonRecord => {
+	const toolList = [...availableToolNames].slice(0, 80).join(', ');
+	return {
+		role: 'user',
+		content: [
+			'Internal retry instruction. Your previous assistant turn was not shown to the user because it violated the local Agent output protocol.',
+			`Reason: ${reason}`,
+			'Regenerate the previous assistant turn using exactly one valid mode:',
+			'1. If a tool is needed, call a provided tool using the native OpenAI tool_calls field only. Do not write tool syntax in message text.',
+			'2. If no tool is needed, write only the user-visible final answer.',
+			'Never output DSML, <tool_calls>, <details type="tool_calls">, invoke name=, parameter name=, or raw <agent_...> tags.',
+			toolList ? `Available tool names: ${toolList}` : ''
+		]
+			.filter(Boolean)
+			.join('\n')
+	};
+};
+
+const shouldReviewLocalAgentFinal = (body: JsonRecord) => body?.params?.local_agent_review === true;
+
+const parseReviewResult = (content: string): FinalAnswerReviewResult | null => {
+	const trimmed = content.trim();
+	const jsonText = trimmed.match(/\{[\s\S]*\}/)?.[0] ?? trimmed;
+	try {
+		const parsed = JSON.parse(jsonText);
+		if (typeof parsed?.approved !== 'boolean') {
+			return null;
+		}
+		return {
+			approved: parsed.approved,
+			reason: typeof parsed.reason === 'string' ? parsed.reason : ''
+		};
+	} catch {
+		return null;
+	}
+};
+
+const reviewFinalAnswer = async ({
+	answer,
+	providerBody,
+	requestProvider,
+	onActiveController
+}: {
+	answer: string;
+	providerBody: JsonRecord;
+	requestProvider: LocalProviderRequest;
+	onActiveController: (controller: AbortController) => void;
+}): Promise<FinalAnswerReviewResult> => {
+	try {
+		const reviewBody: JsonRecord = {
+			...providerBody,
+			stream: false,
+			temperature: 0,
+			messages: [
+				{
+					role: 'system',
+					content:
+						'You are a strict reviewer for a local Agent output gateway. Return strict JSON only: {"approved": boolean, "reason": string}. Approve only if the answer is user-visible final text and contains no internal tool protocol text.'
+				},
+				{
+					role: 'user',
+					content: `Review this final answer for leaked tool protocol text. Reject DSML, <tool_calls>, invoke name=, parameter name=, <details type="tool_calls">, or raw <agent_...> tags.\n\n${answer}`
+				}
+			]
+		};
+		delete reviewBody.tools;
+		delete reviewBody.tool_choice;
+		delete reviewBody.stream_options;
+
+		const [res, requestController] = await requestProvider(reviewBody);
+		onActiveController(requestController);
+		if (!res) {
+			return { approved: false, reason: 'Final answer review request failed.' };
+		}
+
+		const reviewTurn = await parseProviderTurn(res, false);
+		const parsed = parseReviewResult(reviewTurn.content);
+		return parsed ?? { approved: false, reason: 'Final answer review returned invalid JSON.' };
+	} catch (error) {
+		return {
+			approved: false,
+			reason: `Final answer review failed: ${getErrorMessage(error)}`
+		};
+	}
+};
+
 const buildJsonResponse = (turn: ProviderTurn) => {
 	const raw = turn.raw ? structuredClone(turn.raw) : {};
 	if (!Array.isArray(raw.choices) || !raw.choices[0]?.message) {
@@ -1605,11 +1682,31 @@ const buildStreamResponse = (
 	controller: AbortController
 ) => {
 	const encoder = new TextEncoder();
+	const enqueueFinalDeltaContent = (
+		content: string,
+		enqueueEvent: (data: JsonRecord) => void
+	) => {
+		if (!content.trim()) {
+			return;
+		}
+
+		const chunkSize = 24;
+		for (let index = 0; index < content.length; index += chunkSize) {
+			enqueueEvent({
+				choices: [
+					{
+						index: 0,
+						delta: { content: content.slice(index, index + chunkSize) },
+						finish_reason: null
+					}
+				]
+			});
+		}
+	};
 
 	return new Response(
 		new ReadableStream({
 			async start(streamController) {
-				let contentSnapshotEmitted = false;
 				const enqueueEvent = (data: JsonRecord) => {
 					if (!controller.signal.aborted) {
 						streamController.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
@@ -1619,7 +1716,6 @@ const buildStreamResponse = (
 				try {
 					const turn = await run({
 						emitContentSnapshot: (content: string) => {
-							contentSnapshotEmitted = true;
 							enqueueEvent({ content });
 						}
 					});
@@ -1631,14 +1727,8 @@ const buildStreamResponse = (
 						enqueueEvent({ sources: turn.sources });
 					}
 
-					if (!controller.signal.aborted && turn.content) {
-						if (contentSnapshotEmitted || turn.content.includes('<details type="tool_calls"')) {
-							enqueueEvent({ content: turn.content });
-						} else {
-							enqueueEvent({
-								choices: [{ index: 0, delta: { content: turn.content }, finish_reason: null }]
-							});
-						}
+					if (!controller.signal.aborted) {
+						enqueueFinalDeltaContent(turn.streamContent ?? turn.content, enqueueEvent);
 					}
 
 					if (!controller.signal.aborted && turn.usage) {
@@ -1681,15 +1771,13 @@ const runWebSearchRagFallback = async ({
 	requestProvider,
 	context,
 	activeController,
-	onActiveController,
-	onPartialTurn
+	onActiveController
 }: {
 	providerBody: JsonRecord;
 	requestProvider: LocalProviderRequest;
 	context: LocalAgentRunContext;
 	activeController: AbortController | null;
 	onActiveController: (controller: AbortController) => void;
-	onPartialTurn?: (turn: ProviderTurn) => void;
 }) => {
 	const originalMessages = [...(providerBody.messages ?? [])];
 
@@ -1699,10 +1787,7 @@ const runWebSearchRagFallback = async ({
 		if (!res) {
 			throw new Error('Local provider request failed.');
 		}
-		return attachLocalAgentMetadata(
-			await parseProviderTurn(res, Boolean(providerBody.stream), { onPartialTurn }),
-			context
-		);
+		return parseProviderTurn(res, Boolean(providerBody.stream));
 	};
 
 	const query = getLastUserQuery(originalMessages);
@@ -1733,10 +1818,7 @@ const runWebSearchRagFallback = async ({
 			if (!res) {
 				throw new Error('Local provider request failed.');
 			}
-			return attachLocalAgentMetadata(
-				await parseProviderTurn(res, Boolean(providerBody.stream), { onPartialTurn }),
-				context
-			);
+			return parseProviderTurn(res, Boolean(providerBody.stream));
 		}
 
 		const webContext = createSearchContext(results);
@@ -1759,10 +1841,7 @@ const runWebSearchRagFallback = async ({
 			throw new Error('Local provider request failed.');
 		}
 
-		return attachLocalAgentMetadata(
-			await parseProviderTurn(res, Boolean(providerBody.stream), { onPartialTurn }),
-			context
-		);
+		return parseProviderTurn(res, Boolean(providerBody.stream));
 	} catch (error) {
 		markWebSearchUnavailable(context, error);
 
@@ -1862,10 +1941,97 @@ export const requestLocalAgentChatCompletion = async ({
 		void releaseKeepAlive();
 	});
 
+	const reviewFinalAnswers = shouldReviewLocalAgentFinal(body);
+	let repairAttempts = 0;
+	const enqueueRepairRetry = (reason: string) => {
+		if (repairAttempts >= 1) {
+			return false;
+		}
+		repairAttempts += 1;
+		messages.push(buildRepairInstructionMessage(reason, availableToolNames));
+		return true;
+	};
+
+	const markWebSearchComplete = () => {
+		if (!webSearchEnabled) {
+			return;
+		}
+		context.statuses = context.statuses.map((status) =>
+			status.description === 'Searching the web' ? { ...status, done: true } : status
+		);
+	};
+
+	const requestWebSearchFallbackTurn = () =>
+		runWebSearchRagFallback({
+			providerBody,
+			requestProvider,
+			context,
+			activeController,
+			onActiveController: (nextController) => {
+				activeController = nextController;
+			}
+		});
+
+	type PreparedAgentTurn =
+		| { kind: 'final'; turn: ProviderTurn }
+		| { kind: 'retry' }
+		| { kind: 'tool_calls'; turn: ProviderTurn };
+
+	const prepareFinalTurn = async (turn: ProviderTurn): Promise<PreparedAgentTurn> => {
+		const decision = decideAgentTurn(turn, availableToolNames);
+
+		if (decision.kind === 'tool_calls') {
+			return decision;
+		}
+
+		if (decision.kind === 'invalid') {
+			if (enqueueRepairRetry(decision.reason)) {
+				return { kind: 'retry' };
+			}
+			return {
+				kind: 'final',
+				turn: finalizeLocalAgentTurn(
+					attachLocalAgentMetadata(buildInvalidTurnMessage(), context),
+					context
+				)
+			};
+		}
+
+		const finalAnswer = formatTurnContent(decision.turn);
+		if (reviewFinalAnswers) {
+			const review = await reviewFinalAnswer({
+				answer: finalAnswer,
+				providerBody,
+				requestProvider,
+				onActiveController: (nextController) => {
+					activeController = nextController;
+				}
+			});
+
+			if (!review.approved) {
+				const reason = review.reason || 'Final answer review rejected the response.';
+				if (enqueueRepairRetry(reason)) {
+					return { kind: 'retry' };
+				}
+				return {
+					kind: 'final',
+					turn: finalizeLocalAgentTurn(
+						attachLocalAgentMetadata(buildInvalidTurnMessage(), context),
+						context
+					)
+				};
+			}
+		}
+
+		markWebSearchComplete();
+		return {
+			kind: 'final',
+			turn: finalizeLocalAgentTurn(attachLocalAgentMetadata(decision.turn, context), context)
+		};
+	};
+
 	const run = async (callbacks?: { emitContentSnapshot: (content: string) => void }) => {
 		context.emitContentSnapshot = callbacks?.emitContentSnapshot;
-		const onPartialTurn = (turn: ProviderTurn) =>
-			emitLocalPartialTurnSnapshot(context, turn, availableToolNames);
 
 		try {
 			for (let iteration = 0; iteration < maxModelRounds; iteration += 1) {
@@ -1873,7 +2039,8 @@ export const requestLocalAgentChatCompletion = async ({
 					throw new DOMException('The local agent request was aborted.', 'AbortError');
 				}
 
-				let res: Response | null;
+				let res: Response | null = null;
+				let turn: ProviderTurn | null = null;
 				try {
 					const [providerResponse, requestController] = await requestProvider({
 						...agentBody,
@@ -1883,99 +2050,83 @@ export const requestLocalAgentChatCompletion = async ({
 					activeController = requestController;
 				} catch (error) {
 					if (webSearchEnabled) {
-						return finalizeLocalAgentTurn(
-							await runWebSearchRagFallback({
-								providerBody,
-								requestProvider,
-								context,
-								activeController,
-								onActiveController: (nextController) => {
-									activeController = nextController;
-								},
-								onPartialTurn
-							}),
-							context
-						);
+						const fallbackDecision = await prepareFinalTurn(await requestWebSearchFallbackTurn());
+						if (fallbackDecision.kind === 'retry') {
+							continue;
+						}
+						if (fallbackDecision.kind === 'final') {
+							return fallbackDecision.turn;
+						}
+						turn = fallbackDecision.turn;
+					} else {
+						throw error;
 					}
-					throw error;
 				}
 
-				if (!res) {
+				if (!res && !turn) {
 					throw new Error('Local provider request failed.');
 				}
 
-				let turn: ProviderTurn;
-				try {
-					turn = await parseProviderTurn(res, Boolean(providerBody.stream), { onPartialTurn });
-				} catch (error) {
-					if (webSearchEnabled) {
-						return finalizeLocalAgentTurn(
-							await runWebSearchRagFallback({
-								providerBody,
-								requestProvider,
-								context,
-								activeController,
-								onActiveController: (nextController) => {
-									activeController = nextController;
-								},
-								onPartialTurn
-							}),
-							context
-						);
+				if (res) {
+					try {
+						turn = await parseProviderTurn(res, Boolean(providerBody.stream));
+					} catch (error) {
+						if (webSearchEnabled) {
+							const fallbackDecision = await prepareFinalTurn(await requestWebSearchFallbackTurn());
+							if (fallbackDecision.kind === 'retry') {
+								continue;
+							}
+							if (fallbackDecision.kind === 'final') {
+								return fallbackDecision.turn;
+							}
+							turn = fallbackDecision.turn;
+						} else {
+							throw error;
+						}
 					}
-					throw error;
 				}
-				turn = normalizeInlineXmlToolTurn(turn, availableToolNames);
+				if (!turn) {
+					throw new Error('Local provider request failed.');
+				}
 
-				if (turn.toolCalls.length === 0) {
+				const decision = await prepareFinalTurn(turn);
+
+				if (decision.kind === 'retry') {
+					continue;
+				}
+
+				if (decision.kind === 'final') {
 					if (webSearchEnabled && iteration === 0 && context.sources.length === 0) {
-						return finalizeLocalAgentTurn(
-							await runWebSearchRagFallback({
-								providerBody,
-								requestProvider,
-								context,
-								activeController,
-								onActiveController: (nextController) => {
-									activeController = nextController;
-								},
-								onPartialTurn
-							}),
-							context
-						);
+						const fallbackDecision = await prepareFinalTurn(await requestWebSearchFallbackTurn());
+						if (fallbackDecision.kind === 'retry') {
+							continue;
+						}
+						if (fallbackDecision.kind === 'final') {
+							return fallbackDecision.turn;
+						}
+						turn = fallbackDecision.turn;
+					} else {
+						return decision.turn;
 					}
-
-					if (webSearchEnabled) {
-						context.statuses = context.statuses.map((status) =>
-							status.description === 'Searching the web' ? { ...status, done: true } : status
-						);
-					}
-					return finalizeLocalAgentTurn(attachLocalAgentMetadata(turn, context), context);
 				}
 
+				turn = decision.kind === 'tool_calls' ? decision.turn : turn;
 				context.toolCallCount += turn.toolCalls.length;
 				if (context.toolCallCount > maxToolCalls || iteration >= maxModelRounds - 1) {
 					if (webSearchEnabled) {
 						context.forceRagFallback = true;
-						return finalizeLocalAgentTurn(
-							await runWebSearchRagFallback({
-								providerBody,
-								requestProvider,
-								context,
-								activeController,
-								onActiveController: (nextController) => {
-									activeController = nextController;
-								},
-								onPartialTurn
-							}),
-							context
-						);
+						const fallbackDecision = await prepareFinalTurn(await requestWebSearchFallbackTurn());
+						if (fallbackDecision.kind === 'retry') {
+							continue;
+						}
+						return fallbackDecision.kind === 'final'
+							? fallbackDecision.turn
+							: finalizeLocalAgentTurn(
+									attachLocalAgentMetadata(buildRetryLimitTurn(maxRetries), context),
+									context
+								);
 					}
 					return finalizeLocalAgentTurn(buildRetryLimitTurn(maxRetries), context);
-				}
-
-				const displayContent = formatTurnContent(turn);
-				if (displayContent) {
-					context.displayOutput.push({ type: 'message', content: displayContent });
 				}
 
 				for (const toolCall of turn.toolCalls) {
@@ -2019,36 +2170,24 @@ export const requestLocalAgentChatCompletion = async ({
 				messages.push(...toolMessages);
 
 				if (context.forceRagFallback) {
-					return finalizeLocalAgentTurn(
-						await runWebSearchRagFallback({
-							providerBody,
-							requestProvider,
-							context,
-							activeController,
-							onActiveController: (nextController) => {
-								activeController = nextController;
-							},
-							onPartialTurn
-						}),
-						context
-					);
+					const fallbackDecision = await prepareFinalTurn(await requestWebSearchFallbackTurn());
+					if (fallbackDecision.kind === 'retry') {
+						continue;
+					}
+					return fallbackDecision.kind === 'final'
+						? fallbackDecision.turn
+						: finalizeLocalAgentTurn(
+								attachLocalAgentMetadata(buildRetryLimitTurn(maxRetries), context),
+								context
+							);
 				}
 			}
 
 			if (webSearchEnabled) {
-				return finalizeLocalAgentTurn(
-					await runWebSearchRagFallback({
-						providerBody,
-						requestProvider,
-						context,
-						activeController,
-						onActiveController: (nextController) => {
-							activeController = nextController;
-						},
-						onPartialTurn
-					}),
-					context
-				);
+				const fallbackDecision = await prepareFinalTurn(await requestWebSearchFallbackTurn());
+				if (fallbackDecision.kind === 'final') {
+					return fallbackDecision.turn;
+				}
 			}
 
 			return finalizeLocalAgentTurn(buildRetryLimitTurn(maxRetries), context);

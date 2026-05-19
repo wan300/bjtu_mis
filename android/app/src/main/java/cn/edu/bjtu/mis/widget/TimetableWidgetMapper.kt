@@ -10,6 +10,7 @@ import java.time.format.DateTimeFormatter
 
 data class TimetableWidgetCourse(
     val title: String,
+    val timeLabel: String,
     val detail: String,
 )
 
@@ -105,13 +106,16 @@ object TimetableWidgetMapper {
     }
 
     private fun courseModel(entry: CourseEntry): TimetableWidgetCourse {
-        val detail = listOfNotNull(
-            entry.locationLabel(),
-            entry.timeRange?.takeIf { it.isNotBlank() } ?: entry.period.takeIf { it.isNotBlank() },
-        ).joinToString(" · ")
+        val timeLabel = entry.timeRange
+            ?.takeIf { it.isNotBlank() }
+            ?.replace(Regex("""\s*-\s*"""), "-")
+            ?: entry.period.takeIf { it.isNotBlank() }
+            ?: "时间待补充"
+        val detail = entry.locationLabel().orEmpty()
         return TimetableWidgetCourse(
             title = entry.courseName.ifBlank { "未命名课程" },
-            detail = detail.ifBlank { "时间地点待补充" },
+            timeLabel = timeLabel,
+            detail = detail.ifBlank { "地点待补充" },
         )
     }
 

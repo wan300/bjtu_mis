@@ -29,8 +29,9 @@ interface CredentialStore {
 class SecureCredentialStore(
     context: Context,
     private val alias: String = "bjtu_mis_login_credentials_key",
+    fileName: String = "login_credentials.bin",
 ) : CredentialStore {
-    private val file: File = File(context.filesDir, "login_credentials.bin")
+    private val file: File = File(context.filesDir, fileName)
 
     override fun save(credentials: LoginCredentials) {
         val plainText = AppJson.encodeToString(credentials)

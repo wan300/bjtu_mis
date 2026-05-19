@@ -152,6 +152,148 @@ TEXTUAL_CONTENT_HINTS = (
     "html",
 )
 
+PAGE_STRUCTURE_SCRIPT = r"""
+() => {
+  const limit = (value, max = 160) => String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
+  const visible = (el) => {
+    const style = window.getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+  };
+  const selectorFor = (el) => {
+    if (!el || !el.tagName) return "";
+    if (el.id) return `${el.tagName.toLowerCase()}#${CSS.escape(el.id)}`;
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === Node.ELEMENT_NODE && parts.length < 4) {
+      let part = node.tagName.toLowerCase();
+      const testId = node.getAttribute("data-testid") || node.getAttribute("data-test");
+      const name = node.getAttribute("name");
+      if (testId) part += `[data-testid="${CSS.escape(testId)}"]`;
+      else if (name) part += `[name="${CSS.escape(name)}"]`;
+      else if (node.classList.length) part += `.${CSS.escape(Array.from(node.classList)[0])}`;
+      parts.unshift(part);
+      node = node.parentElement;
+    }
+    return parts.join(" > ");
+  };
+  const describe = (el) => ({
+    selector: selectorFor(el),
+    tag: el.tagName.toLowerCase(),
+    type: el.getAttribute("type") || "",
+    role: el.getAttribute("role") || "",
+    name: el.getAttribute("name") || "",
+    id: el.id || "",
+    text: limit(el.innerText || el.textContent || el.getAttribute("aria-label") || el.getAttribute("title") || ""),
+    href: el.href || "",
+    action: el.action || "",
+    method: el.method || "",
+    visible: visible(el),
+  });
+  const take = (selector, max) => Array.from(document.querySelectorAll(selector)).slice(0, max).map(describe);
+  const forms = Array.from(document.forms).slice(0, 30).map((form) => ({
+    ...describe(form),
+    fields: Array.from(form.querySelectorAll("input, textarea, select, button")).slice(0, 80).map((field) => ({
+      ...describe(field),
+      placeholder: limit(field.getAttribute("placeholder") || ""),
+      value_length: "value" in field ? String(field.value || "").length : 0,
+      checked: "checked" in field ? Boolean(field.checked) : undefined,
+    })),
+  }));
+  return {
+    url: location.href,
+    title: document.title,
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    headings: take("h1,h2,h3", 80),
+    forms,
+    links: take("a[href]", 160),
+    buttons: take("button,input[type=button],input[type=submit],[role=button]", 160),
+    inputs: Array.from(document.querySelectorAll("input,textarea,select")).slice(0, 160).map((field) => ({
+      ...describe(field),
+      placeholder: limit(field.placeholder || field.getAttribute("placeholder") || ""),
+      value_length: "value" in field ? String(field.value || "").length : 0,
+    })),
+    tables: Array.from(document.querySelectorAll("table")).slice(0, 30).map((table) => ({
+      ...describe(table),
+      headers: Array.from(table.querySelectorAll("th")).slice(0, 40).map((th) => limit(th.innerText || th.textContent || "")),
+      rows: table.querySelectorAll("tr").length,
+    })),
+    frames: Array.from(document.querySelectorAll("iframe,frame")).slice(0, 30).map(describe),
+  };
+}
+"""
+
+OPERATION_RECORDER_SCRIPT = r"""
+(() => {
+  if (window.__bjtuOperationRecorderInstalled) return;
+  window.__bjtuOperationRecorderInstalled = true;
+  const limit = (value, max = 160) => String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
+  const selectorFor = (el) => {
+    if (!el || !el.tagName) return "";
+    if (el.id) return `${el.tagName.toLowerCase()}#${CSS.escape(el.id)}`;
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === Node.ELEMENT_NODE && parts.length < 4) {
+      let part = node.tagName.toLowerCase();
+      const testId = node.getAttribute("data-testid") || node.getAttribute("data-test");
+      const name = node.getAttribute("name");
+      if (testId) part += `[data-testid="${CSS.escape(testId)}"]`;
+      else if (name) part += `[name="${CSS.escape(name)}"]`;
+      else if (node.classList.length) part += `.${CSS.escape(Array.from(node.classList)[0])}`;
+      parts.unshift(part);
+      node = node.parentElement;
+    }
+    return parts.join(" > ");
+  };
+  const describe = (el) => {
+    if (!el || !el.tagName) return {};
+    const payload = {
+      selector: selectorFor(el),
+      tag: el.tagName.toLowerCase(),
+      type: el.getAttribute("type") || "",
+      role: el.getAttribute("role") || "",
+      name: el.getAttribute("name") || "",
+      id: el.id || "",
+      text: limit(el.innerText || el.textContent || el.getAttribute("aria-label") || el.getAttribute("title") || ""),
+      href: el.href || "",
+      action: el.action || "",
+      method: el.method || "",
+    };
+    if ("value" in el) payload.value_length = String(el.value || "").length;
+    if ("checked" in el) payload.checked = Boolean(el.checked);
+    return payload;
+  };
+  const emit = (operation, target, extra = {}) => {
+    const record = {
+      operation,
+      url: location.href,
+      title: document.title,
+      target: describe(target),
+      extra,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    };
+    if (typeof window.__bjtuRecordOperation === "function") {
+      window.__bjtuRecordOperation(record).catch(() => {});
+    }
+  };
+  document.addEventListener("click", (event) => {
+    emit("click", event.target, { x: event.clientX, y: event.clientY, button: event.button });
+  }, true);
+  document.addEventListener("change", (event) => {
+    emit("change", event.target);
+  }, true);
+  document.addEventListener("submit", (event) => {
+    emit("submit", event.target, {
+      action: event.target && event.target.action,
+      method: event.target && event.target.method,
+    });
+  }, true);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") emit("enter", document.activeElement || event.target);
+  }, true);
+})();
+"""
+
 INERT_PAGE_URLS = {
     "",
     "about:blank",
@@ -412,10 +554,44 @@ class JsonlWriter:
             self._file.close()
 
 
+async def capture_page_structure(
+    page: Any,
+    writer: JsonlWriter,
+    *,
+    reason: str,
+    label: str | None = None,
+) -> None:
+    try:
+        structure = await page.evaluate(PAGE_STRUCTURE_SCRIPT)
+    except Exception as exc:
+        writer.write(
+            {
+                "event": "page_structure_error",
+                "reason": reason,
+                "label": label,
+                "error": str(exc),
+                "page_url": sanitize_url(getattr(page, "url", "")),
+            }
+        )
+        return
+
+    writer.write(
+        {
+            "event": "page_structure",
+            "reason": reason,
+            "label": label,
+            "page_url": sanitize_url(getattr(page, "url", "")),
+            "structure": structure,
+        }
+    )
+
+
 @dataclass
 class CaptureResult:
     output_dir: Path
     network_log: Path
+    page_structure_log: Path
+    operation_log: Path
     manifest_path: Path
 
 
@@ -435,8 +611,12 @@ async def record_mail_traffic(
     run_id = f"{label}_{timestamp_slug()}"
     output_dir = settings.logs_dir / run_id
     network_log = output_dir / "network.jsonl"
+    page_structure_log = output_dir / "page_structure.jsonl"
+    operation_log = output_dir / "operation_log.jsonl"
     manifest_path = output_dir / "manifest.json"
     writer = JsonlWriter(network_log)
+    structure_writer = JsonlWriter(page_structure_log)
+    operation_writer = JsonlWriter(operation_log)
     lock = FileLock(settings.login_lock_path, stale_after_seconds=60 * 60 * 8)
     lock.acquire()
     closed = asyncio.Event()
@@ -445,14 +625,58 @@ async def record_mail_traffic(
     request_ids: dict[int, int] = {}
     request_counter = 0
     recording_enabled = True
+    recording_page: Any | None = None
+    pending_structure_tasks: set[asyncio.Task[Any]] = set()
+    last_structure_capture: dict[tuple[int, str], float] = {}
 
     def next_request_id() -> int:
         nonlocal request_counter
         request_counter += 1
         return request_counter
 
+    def schedule_page_structure_capture(
+        page: Any,
+        reason: str,
+        label_text: str | None = None,
+        *,
+        min_interval_seconds: float = 1.0,
+        delay_seconds: float = 0.0,
+    ) -> None:
+        if not recording_enabled:
+            return
+        now = time.monotonic()
+        key = (id(page), reason)
+        if min_interval_seconds > 0 and now - last_structure_capture.get(key, 0) < min_interval_seconds:
+            return
+        last_structure_capture[key] = now
+
+        async def run_capture() -> None:
+            if delay_seconds > 0:
+                await asyncio.sleep(delay_seconds)
+            if not recording_enabled:
+                return
+            await capture_page_structure(
+                page,
+                structure_writer,
+                reason=reason,
+                label=label_text,
+            )
+
+        task = asyncio.create_task(run_capture())
+        pending_structure_tasks.add(task)
+        task.add_done_callback(pending_structure_tasks.discard)
+
     def log_marker(label_text: str) -> None:
-        writer.write({"event": "marker", "label": label_text})
+        payload = {"event": "marker", "label": label_text}
+        writer.write(payload)
+        operation_writer.write(payload)
+        if recording_page is not None:
+            loop.call_soon_threadsafe(
+                schedule_page_structure_capture,
+                recording_page,
+                "marker",
+                label_text,
+            )
 
     def marker_thread() -> None:
         print("")
@@ -487,6 +711,8 @@ async def record_mail_traffic(
             "unless --open-fallback-url is provided."
         ),
         "network_log": str(network_log),
+        "page_structure_log": str(page_structure_log),
+        "operation_log": str(operation_log),
         "profile_dir": str(settings.profile_dir),
         "max_response_bytes": max_response_bytes,
         "max_request_chars": max_request_chars,
@@ -513,6 +739,88 @@ async def record_mail_traffic(
                 browser_closed.set()
 
             context.on("close", on_context_close)
+
+            attached_page_ids: set[int] = set()
+
+            async def log_browser_operation(source: dict[str, Any], payload: dict[str, Any]) -> None:
+                if not recording_enabled:
+                    return
+                operation = dict(payload) if isinstance(payload, dict) else {"raw": str(payload)}
+                operation["event"] = "browser_operation"
+                if operation.get("url"):
+                    operation["url"] = sanitize_url(str(operation["url"]))
+                operation_writer.write(operation)
+                page = source.get("page") if isinstance(source, dict) else None
+                if page is not None:
+                    schedule_page_structure_capture(
+                        page,
+                        "interaction",
+                        str(operation.get("operation") or ""),
+                        min_interval_seconds=1.5,
+                        delay_seconds=0.35,
+                    )
+
+            def on_frame_navigated(page: Any, frame: Any) -> None:
+                try:
+                    if frame != page.main_frame:
+                        return
+                except Exception:
+                    return
+                payload = {
+                    "event": "navigation",
+                    "url": sanitize_url(getattr(frame, "url", "") or getattr(page, "url", "")),
+                    "title": "",
+                }
+                operation_writer.write(payload)
+                schedule_page_structure_capture(
+                    page,
+                    "navigation",
+                    min_interval_seconds=1.0,
+                    delay_seconds=0.5,
+                )
+
+            def attach_page_events(page: Any) -> None:
+                page_id = id(page)
+                if page_id in attached_page_ids:
+                    return
+                attached_page_ids.add(page_id)
+                page.on(
+                    "domcontentloaded",
+                    lambda: schedule_page_structure_capture(
+                        page,
+                        "domcontentloaded",
+                        min_interval_seconds=1.0,
+                        delay_seconds=0.1,
+                    ),
+                )
+                page.on(
+                    "load",
+                    lambda: schedule_page_structure_capture(
+                        page,
+                        "load",
+                        min_interval_seconds=1.0,
+                        delay_seconds=0.1,
+                    ),
+                )
+                page.on("framenavigated", lambda frame: on_frame_navigated(page, frame))
+
+            async def install_operation_recorder(page: Any) -> None:
+                try:
+                    await page.evaluate(OPERATION_RECORDER_SCRIPT)
+                except Exception as exc:
+                    operation_writer.write(
+                        {
+                            "event": "operation_recorder_install_error",
+                            "page_url": sanitize_url(getattr(page, "url", "")),
+                            "error": str(exc),
+                        }
+                    )
+
+            await context.expose_binding("__bjtuRecordOperation", log_browser_operation)
+            await context.add_init_script(script=OPERATION_RECORDER_SCRIPT)
+            for existing_page in context.pages:
+                attach_page_events(existing_page)
+            context.on("page", attach_page_events)
 
             def on_request(request: Request) -> None:
                 if not recording_enabled:
@@ -592,6 +900,10 @@ async def record_mail_traffic(
                 settings.mis_home_url,
                 open_fallback_url=open_fallback_url,
             )
+            recording_page = page
+            for existing_page in context.pages:
+                attach_page_events(existing_page)
+                await install_operation_recorder(existing_page)
             manifest["initial_page_url"] = getattr(page, "url", "")
             manifest["initial_page_action"] = page_action
             manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -601,6 +913,19 @@ async def record_mail_traffic(
                     "page_action": page_action,
                     "page_url": sanitize_url(getattr(page, "url", "")),
                 }
+            )
+            operation_writer.write(
+                {
+                    "event": "capture_page_ready",
+                    "page_action": page_action,
+                    "page_url": sanitize_url(getattr(page, "url", "")),
+                }
+            )
+            schedule_page_structure_capture(
+                page,
+                "capture_page_ready",
+                page_action,
+                min_interval_seconds=0,
             )
 
             while not closed.is_set():
@@ -619,13 +944,29 @@ async def record_mail_traffic(
                 print("Recording stopped. Close the browser window manually to finish the command.")
                 await browser_closed.wait()
     finally:
-        writer.write({"event": "capture_finished", "finished_at": utcnow_iso()})
+        recording_enabled = False
+        for task in list(pending_structure_tasks):
+            task.cancel()
+        if pending_structure_tasks:
+            await asyncio.gather(*pending_structure_tasks, return_exceptions=True)
+        finished_payload = {"event": "capture_finished", "finished_at": utcnow_iso()}
+        writer.write(finished_payload)
+        operation_writer.write(finished_payload)
+        structure_writer.write(finished_payload)
         writer.close()
+        operation_writer.close()
+        structure_writer.close()
         lock.release()
 
     manifest["finished_at"] = utcnow_iso()
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    return CaptureResult(output_dir=output_dir, network_log=network_log, manifest_path=manifest_path)
+    return CaptureResult(
+        output_dir=output_dir,
+        network_log=network_log,
+        page_structure_log=page_structure_log,
+        operation_log=operation_log,
+        manifest_path=manifest_path,
+    )
 
 
 def resolve_capture_log(settings: Settings, capture: str | None, label: str = "mail") -> Path:

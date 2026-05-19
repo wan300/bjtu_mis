@@ -15,6 +15,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -32,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import cn.edu.bjtu.mis.data.repository.CourseResourceRepository
 import cn.edu.bjtu.mis.data.repository.DocumentPreview
+import cn.edu.bjtu.mis.model.CourseResourceCategory
 import cn.edu.bjtu.mis.model.CourseResourceItem
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.ModuleEnvelope
@@ -51,6 +53,7 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var selectedCourseId by remember { mutableStateOf("") }
+    var selectedCategoryKey by remember { mutableStateOf("all") }
     var folderId by remember { mutableStateOf("0") }
     var search by remember { mutableStateOf("") }
     var state by remember { mutableStateOf(ProgressiveModuleState<CourseResourcesData>()) }
@@ -59,7 +62,11 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
     var previewTarget by remember { mutableStateOf<CourseResourcesPreviewTarget?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    fun load(nextFolder: String = folderId, nextCourse: String = selectedCourseId) {
+    fun load(
+        nextFolder: String = folderId,
+        nextCourse: String = selectedCourseId,
+        nextCategory: String = selectedCategoryKey,
+    ) {
         scope.launch {
             state = ProgressiveModuleState()
             error = null
@@ -68,9 +75,11 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
                     courseId = nextCourse.ifBlank { null },
                     folderId = nextFolder,
                     search = search.ifBlank { null },
+                    categoryKey = nextCategory,
                 ).collect { next ->
                     next.envelope?.data?.let { data ->
                         selectedCourseId = data.selectedCourseId?.toString().orEmpty()
+                        selectedCategoryKey = data.selectedCategoryKey
                         folderId = data.folderId
                     }
                     state = next
@@ -138,7 +147,18 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
                 onValueChange = {
                     selectedCourseId = it
                     folderId = "0"
-                    load("0", it)
+                    load(nextFolder = "0", nextCourse = it)
+                },
+            )
+        }
+        item {
+            CourseResourceCategorySelector(
+                categories = state.envelope?.data?.categories.orEmpty(),
+                value = selectedCategoryKey,
+                onValueChange = {
+                    selectedCategoryKey = it
+                    folderId = "0"
+                    load(nextFolder = "0", nextCategory = it)
                 },
             )
         }
@@ -147,7 +167,7 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
                 OutlinedTextField(
                     value = search,
                     onValueChange = { search = it },
-                    label = { Text("搜索课件名称") },
+                    label = { Text("搜索资源名称") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )
@@ -183,6 +203,10 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
                         if (!currentTerm.isNullOrBlank()) {
                             AssistChip(onClick = {}, label = { Text(currentTerm) })
                         }
+                        val categoryLabel = data.categories.firstOrNull { it.key == data.selectedCategoryKey }?.label
+                        if (!categoryLabel.isNullOrBlank()) {
+                            AssistChip(onClick = {}, label = { Text(categoryLabel) })
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             AssistChip(onClick = {}, label = { Text("${data.resources.size} 个文件") })
                             AssistChip(onClick = {}, label = { Text("${data.folders.size} 个目录") })
@@ -196,20 +220,24 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
                         }
                     }
                 }
-                items(data.folders, key = { it.folderId }) { folder ->
+                items(data.folders, key = { "${it.categoryKey}:${it.folderId}" }) { folder ->
                     InfoCard(
                         title = folder.name,
-                        subtitle = "目录 ${folder.folderId}",
+                        subtitle = "${folder.categoryLabel} · 目录 ${folder.folderId}",
                         modifier = Modifier.clickable {
+                            selectedCategoryKey = folder.categoryKey
                             folderId = folder.folderId
-                            load(folder.folderId)
+                            load(nextFolder = folder.folderId, nextCategory = folder.categoryKey)
                         },
                     ) {
                         Text("点击进入目录")
                     }
                 }
-                items(data.resources, key = { it.rpId }) { resource ->
-                    InfoCard(resource.name, subtitle = resource.uploadedAt) {
+                items(data.resources, key = { "${it.categoryKey}:${it.rpId}" }) { resource ->
+                    val subtitle = listOf(resource.categoryLabel, resource.uploadedAt)
+                        .filter { !it.isNullOrBlank() }
+                        .joinToString(" · ")
+                    InfoCard(resource.name, subtitle = subtitle.ifBlank { null }) {
                         Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
                             KeyValue("类型", resource.extension, Modifier.weight(1f))
                             KeyValue("大小", resource.size?.let { "$it MB" }, Modifier.weight(1f))
@@ -234,7 +262,25 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
                 }
             }
         }
+}
+
+@Composable
+private fun CourseResourceCategorySelector(
+    categories: List<CourseResourceCategory>,
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    if (categories.isEmpty()) return
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        categories.forEach { category ->
+            FilterChip(
+                selected = category.key == value,
+                onClick = { onValueChange(category.key) },
+                label = { Text(category.label) },
+            )
+        }
     }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

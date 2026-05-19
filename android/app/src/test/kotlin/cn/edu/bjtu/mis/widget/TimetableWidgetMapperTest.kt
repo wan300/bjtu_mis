@@ -29,10 +29,13 @@ class TimetableWidgetMapperTest {
         assertEquals("5.18", model.today.dateLabel)
         assertEquals("周一", model.today.weekdayLabel)
         assertEquals(listOf("Linux操作系统与网络编程"), model.today.courses.map { it.title })
+        assertEquals("14:10-16:00", model.today.courses.single().timeLabel)
+        assertEquals("海淀西校区", model.today.courses.single().detail)
         assertEquals("明天", model.tomorrow.label)
         assertEquals("5.19", model.tomorrow.dateLabel)
         assertEquals("周二", model.tomorrow.weekdayLabel)
         assertEquals(listOf("勤工助学"), model.tomorrow.courses.map { it.title })
+        assertEquals("16:20-18:10", model.tomorrow.courses.single().timeLabel)
     }
 
     @Test

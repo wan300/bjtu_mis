@@ -80,6 +80,8 @@ async def run_command(args: argparse.Namespace) -> int:
         )
         print(f"Capture saved: {result.output_dir}")
         print(f"Network log: {result.network_log}")
+        print(f"Page structure log: {result.page_structure_log}")
+        print(f"Operation log: {result.operation_log}")
         return 0
     if args.command == "analyze-mail-capture":
         network_log = resolve_capture_log(settings, args.capture)

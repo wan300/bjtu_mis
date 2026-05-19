@@ -39,7 +39,9 @@ python test\automation\cli.py record-mail --open-fallback-url
 ```text
 captures/logs/mail_YYYYMMDD_HHMMSS/
 ├── manifest.json
-└── network.jsonl
+├── network.jsonl
+├── operation_log.jsonl
+└── page_structure.jsonl
 ```
 
 `captures/` 已在 `.gitignore` 中，不要把这些日志提交或分享出去。
@@ -59,7 +61,8 @@ MARK 拉黑发件人
 MARK 解除拉黑
 ```
 
-标记会写入 `network.jsonl`，后续分析会按标记分段，方便判断哪个接口对应哪个动作。
+标记会写入 `network.jsonl` 和 `operation_log.jsonl`，后续分析会按标记分段，方便判断哪个接口对应哪个动作。
+录制器也会自动记录点击、变更、提交、回车和导航，并在页面加载、交互和标记时写入结构化页面摘要。输入框内容不会落盘，只记录字段类型、名称、占位符和内容长度。
 
 ## 3. 建议录制的完整功能路径
 

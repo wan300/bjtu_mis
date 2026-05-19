@@ -22,6 +22,7 @@ describe('buildLocalProviderBody', () => {
 				stream_response: false,
 				stream_delta_chunk_size: 6,
 				function_calling: 'native',
+				local_agent_review: true,
 				reasoning_tags: ['think'],
 				system: 'hidden'
 			}),
@@ -36,6 +37,7 @@ describe('buildLocalProviderBody', () => {
 		expect(body).not.toHaveProperty('stream_response');
 		expect(body).not.toHaveProperty('stream_delta_chunk_size');
 		expect(body).not.toHaveProperty('function_calling');
+		expect(body).not.toHaveProperty('local_agent_review');
 		expect(body).not.toHaveProperty('reasoning_tags');
 		expect(body).not.toHaveProperty('system');
 	});

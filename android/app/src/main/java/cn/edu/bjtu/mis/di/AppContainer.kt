@@ -32,12 +32,14 @@ import cn.edu.bjtu.mis.data.provider.SessionManager
 import cn.edu.bjtu.mis.data.repository.CourseReplayRepository
 import cn.edu.bjtu.mis.data.repository.CourseResourceRepository
 import cn.edu.bjtu.mis.data.repository.CourseSelectionRepository
+import cn.edu.bjtu.mis.data.repository.EmploymentConsultationRepository
 import cn.edu.bjtu.mis.data.repository.HomeworkAttachmentRepository
 import cn.edu.bjtu.mis.data.repository.MailRepository
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
 import cn.edu.bjtu.mis.data.repository.OverviewRepository
 import cn.edu.bjtu.mis.data.repository.SessionRepository
 import cn.edu.bjtu.mis.data.repository.SyncRepository
+import cn.edu.bjtu.mis.data.repository.ZhixingRepository
 import cn.edu.bjtu.mis.data.security.SecureCookieStore
 import cn.edu.bjtu.mis.data.security.SecureCredentialStore
 import cn.edu.bjtu.mis.ui.theme.AppThemeStore
@@ -80,6 +82,24 @@ class AppContainer(context: Context) {
     val mailRepository: MailRepository by lazy {
         PerfTrace.measure("AppContainer.mailRepository") {
             MailRepository(appContext, database.dao(), sessionManager)
+        }
+    }
+    val zhixingRepository: ZhixingRepository by lazy {
+        PerfTrace.measure("AppContainer.zhixingRepository") {
+            ZhixingRepository(
+                syncRepository = syncRepository,
+                sessionManager = sessionManager,
+                credentialStore = SecureCredentialStore(
+                    appContext,
+                    alias = "bjtu_mis_zhixing_credentials_key",
+                    fileName = "zhixing_credentials.bin",
+                ),
+            )
+        }
+    }
+    val employmentConsultationRepository: EmploymentConsultationRepository by lazy {
+        PerfTrace.measure("AppContainer.employmentConsultationRepository") {
+            EmploymentConsultationRepository(syncRepository, httpClient)
         }
     }
     val homeworkReminderRunner = HomeworkReminderRunner(

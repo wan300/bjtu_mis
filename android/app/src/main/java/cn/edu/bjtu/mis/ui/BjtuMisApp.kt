@@ -56,6 +56,7 @@ import cn.edu.bjtu.mis.ui.screens.CourseReplayScreen
 import cn.edu.bjtu.mis.ui.screens.CourseResourcesScreen
 import cn.edu.bjtu.mis.ui.screens.CourseSelectionScreen
 import cn.edu.bjtu.mis.ui.screens.EmptyRoomsScreen
+import cn.edu.bjtu.mis.ui.screens.EmploymentConsultationScreen
 import cn.edu.bjtu.mis.ui.screens.ExamsScreen
 import cn.edu.bjtu.mis.ui.screens.HomeworkScreen
 import cn.edu.bjtu.mis.ui.screens.LoginScreen
@@ -69,6 +70,7 @@ import cn.edu.bjtu.mis.ui.screens.ProfileTrainingInfoScreen
 import cn.edu.bjtu.mis.ui.screens.ScoresScreen
 import cn.edu.bjtu.mis.ui.screens.ServicesScreen
 import cn.edu.bjtu.mis.ui.screens.TimetableScreen
+import cn.edu.bjtu.mis.ui.screens.ZhixingScreen
 import cn.edu.bjtu.mis.ui.screens.navigationTargets
 import cn.edu.bjtu.mis.ui.theme.AppThemeOption
 import cn.edu.bjtu.mis.ui.theme.BjtuMisSystemBars
@@ -458,6 +460,8 @@ private fun ModuleRoute(
             onOpenAgent = { onNavigate(ModuleKeys.OpenWebUiAgent) },
         )
         ModuleKeys.Mail -> MailScreen(container.mailRepository)
+        ModuleKeys.Zhixing -> ZhixingScreen(container.zhixingRepository)
+        ModuleKeys.EmploymentConsultation -> EmploymentConsultationScreen(container.employmentConsultationRepository)
         ModuleKeys.CourseResources -> CourseResourcesScreen(container.courseResourceRepository)
         ModuleKeys.CourseReplay -> CourseReplayScreen(container.courseReplayRepository, container.httpClient.client)
         ModuleKeys.EmptyRooms -> EmptyRoomsScreen(container.moduleRepository)
