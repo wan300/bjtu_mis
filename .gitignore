@@ -91,3 +91,5 @@ __pycache__/
 .coverage
 coverage.xml
 htmlcov/
+# Local browser automation scripts
+test/

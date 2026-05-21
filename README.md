@@ -1,55 +1,83 @@
-# BJTU MIS Android
+<h1 align="center">BJTU MIS Android</h1>
 
-BJTU MIS Android 是一款为北京交通大学同学准备的校园学习服务 App，方便在手机上查看 MIS / 教学服务中的常用信息。
+<p align="center">
+  <img src="docs/img/readmeimg.png" alt="BJTU MIS Android 应用展示" width="720" />
+</p>
 
-你可以在应用里查看个人信息、课表、成绩、考试安排、作业、课程资源、空教室和校历，使用校园邮箱，离线查看已同步内容，接收作业提醒，也可以通过内置智能助手整理作业要求和相关资料。
+BJTU MIS Android 是面向北京交通大学学生的校园学习服务 App。它把 MIS、教学服务、校园邮箱和作业辅助能力整合到手机端，帮助你更快查看课程与学习信息，并在离线场景下继续访问已同步的数据。
 
-## 目录结构
+## 适合谁使用
 
-```text
-.
-├── android/                 # Kotlin + Jetpack Compose Android 工程
-│   ├── app/                 # Android 应用源码、资源、测试
-│   ├── open-webui/          # 嵌入到 Android WebView 的 Open WebUI 前端
-│   ├── capacitor-android/   # 本地维护的 Capacitor Android bridge
-│   ├── docs/                # Android 相关设计文档
-│   ├── gradle/
-│   └── README.md
-├── test/automation/         # 辅助网络录制工具
-├── .gitignore
-└── README.md
-```
+- 北京交通大学在校学生
+- 希望在手机上集中查看课程、成绩、考试、作业和校园邮箱的用户
+- 需要在作业资料较多时快速整理要求、附件和参考信息的用户
 
-## 功能概览
+## 主要功能
 
-- 学业服务：个人信息、培养方案、成绩、课表、考试、学年日历、作业、选课、空教室、课程资源、课程回放。
-- 校园邮箱：Coremail 文件夹、邮件列表、详情、联系人、草稿与发送能力。
-- 本地数据：加密凭据、Cookie 持久化、Room 数据快照、后台同步、会话保活和作业提醒。
-- 嵌入式 Open WebUI：作为应用内 Agent 界面运行，支持 local-first provider、原生 SSE、原生 HTTP、设备工具、网页搜索和安全存储桥接。
-- 作业 Agent 协助：作业卡片可一键打开 Open WebUI Agent，自动传递作业要求、截止时间和用户补充说明。
+- 学业信息：个人信息、培养方案、课表、成绩、考试安排、校历、作业、选课、空教室、课程资源与课程回放。
+- 校园邮箱：查看 Coremail 文件夹、邮件列表、邮件详情、联系人、草稿和发送流程。
+- 本地同步：支持登录凭据安全保存、Cookie 持久化、Room 本地快照、后台同步、会话保活和作业提醒。
+- 离线查看：已同步的常用信息可以在没有网络或校园服务不稳定时继续查看。
+- 内置智能助手：在应用内打开 Open WebUI Agent，围绕作业要求、附件资料和用户补充说明生成分析、步骤或答案草稿。
+- 附件处理：作业附件会导入助手工作区，支持按需读取、解压和整理常见文档、压缩包与输出文件。
 
-## Agent 当前实现
+## 使用前准备
 
-- Android 端通过 `NativeAgentHomeworkHandoffStore` 暂存作业上下文，Open WebUI 启动后消费一次性 handoff 并生成待发送草稿。
-- `NativeAgentToolsPlugin` 将 Android 工具注册给 Open WebUI local-first agent loop。当前暴露的工具覆盖工作区文件读写、常用归档解压与 ZIP 打包、PDF/DOCX 提取与生成、受限代码运行、Coremail 邮件能力和结果打包。
-- 作业附件会自动下载并导入 Agent workspace。压缩包不在 handoff 阶段自动解压，Agent 需要通过 `agent_archive_extract` 按需解压到 `work/attachments/`。当前支持 `zip`/`jar`、`tar`、`tar.gz`/`tgz`、`tar.bz2`/`tbz2`、`gz` 和 `bz2`，并对路径穿越、条目数量、单文件大小和总大小做限制。
-- Open WebUI 聊天界面会显示作业附件导入状态。附件准备期间会阻止提交，避免模型在文件未导入完成时开始分析。
-- Coremail Agent 工具不依赖 workspace，可用于按最近天数或显式日期区间读取邮件、生成摘要上下文、搜索联系人、保存草稿，并可按邮件 ID 将未读邮件标记为已读。`agent_mail_send` 必须经过用户确认弹窗后才会真正发送。
-- Agent 只能生成分析、步骤、答案草稿或 `output/` 下的文件，不会自动提交课程平台作业。
-- 旧原生 Agent 的 Room 表、前台服务、API Key 和模型配置已废弃；应用启动时会清理遗留配置，数据库迁移到版本 7 时会删除旧 Agent 表。
+- 一台 Android 设备或 Android 模拟器。
+- 可正常访问北京交通大学相关校园服务的网络环境。
+- 你的校园账号及对应密码。
+- 如需使用邮箱能力，请确认账号已开通并可访问 Coremail。
 
-## 环境要求
+## 快速开始
 
-- Android Studio
+1. 安装并打开 BJTU MIS Android。
+2. 在登录页输入校园账号信息。
+3. 首次进入后等待应用同步常用数据。
+4. 在首页选择课表、成绩、考试、作业、邮箱等模块。
+5. 需要处理作业时，打开作业卡片并进入内置 Agent，根据提示补充要求或说明。
+
+## 常用场景
+
+### 查看课程与考试
+
+进入课表或考试模块即可查看当前已同步的信息。若学校服务临时不可用，应用会优先展示本地已有快照。
+
+### 跟进作业
+
+在作业模块中查看截止时间、作业要求和附件状态。作业附件会被导入到 Agent 工作区，助手可以基于这些资料生成整理结果或答题草稿。
+
+### 使用校园邮箱
+
+在邮箱模块中查看邮件文件夹、邮件列表和详情。发送邮件前会经过用户确认，不会在未确认的情况下自动发出。
+
+### 离线访问
+
+应用会保留已同步的课程、作业、邮箱等数据快照。离线时可以继续查看已有内容，重新联网后再同步更新。
+
+## 隐私与安全
+
+- 登录凭据和关键会话信息保存在本地安全存储中。
+- 应用只在需要访问校园服务、同步数据或执行用户操作时使用账号信息。
+- 内置 Agent 主要用于生成分析、步骤、草稿或输出文件，不会自动提交课程平台作业。
+- 邮件发送需要用户在应用内确认后才会执行。
+
+## 问题排查
+
+- 登录失败：确认账号密码正确，并检查当前网络是否可以访问校园服务。
+- 数据没有更新：下拉刷新或重新进入模块，必要时切换到稳定网络后再次同步。
+- 附件未准备完成：等待导入状态完成后再提交给 Agent 处理。
+- 邮箱不可用：确认 Coremail 账号状态正常，并检查校园邮箱服务是否可访问。
+- 应用异常退出：重新打开应用后再次进入对应模块；如问题持续出现，请保留复现步骤和设备信息。
+
+## 源码构建
+
+如果你希望从源码自行构建应用，请使用 Android Studio 打开 `android/` 目录，并准备以下环境：
+
 - JDK 17
-- Android SDK，项目当前 `compileSdk = 35`、`minSdk = 26`
-- Node.js 与 npm，用于构建嵌入式 Open WebUI。`android/open-webui/package.json` 当前要求 Node `>=18.13.0 <=22.x.x`
+- Android SDK，当前项目使用 `compileSdk = 35`、`minSdk = 26`
+- Node.js 与 npm，用于构建嵌入式 Open WebUI 前端；`android/open-webui/package.json` 当前要求 Node `>=18.13.0 <=22.x.x`
 
-## 开发与构建
-
-用 Android Studio 打开 `android/`，等待 Gradle 同步后运行 `app` target。
-
-命令行构建与测试：
+命令行构建：
 
 ```powershell
 Set-Location android
@@ -57,9 +85,7 @@ Set-Location android
 .\gradlew.bat assembleDebug
 ```
 
-`assembleDebug` 和 `assembleRelease` 会在 `preBuild` 阶段自动执行 Open WebUI 前端构建：安装依赖、运行移动端构建、同步 `open-webui/build` 到 `app/src/main/assets/public`，并移除 sourcemap。
-
-Open WebUI 前端单独检查：
+前端单独检查：
 
 ```powershell
 Set-Location android\open-webui
@@ -68,21 +94,9 @@ npm run check
 npm run test:frontend -- --run
 ```
 
-## 当前技术栈
-
-- Kotlin、Jetpack Compose、Material 3
-- OkHttp、Jsoup、kotlinx.serialization
-- Room、DataStore、WorkManager
-- Android Keystore 风格的本地安全存储
-- PyTorch Android 验证码模型推理
-- Capacitor WebView bridge、Open WebUI、Svelte、Vite
-- AndroidX JavaScriptEngine 与 Chaquopy 受限代码运行
-- Media3、PDFBox Android、FileProvider
-
 ## 说明
 
-- Android 工程保留在 `android/` 下，不提升到仓库根目录。
-- 验证码模型随 Android assets 打包，路径为 `android/app/src/main/assets/bjtu_captcha_crnn.pt`。
-- 测试 fixture 随 Android 测试资源维护，路径为 `android/app/src/test/resources/fixtures/`。
-- 本地 SDK 配置 `android/local.properties` 不提交；Android Studio 会按本机环境重新生成。
-- `android/open-webui/node_modules/`、`android/open-webui/build/`、`android/app/src/main/assets/public/`、APK/AAB 和 Room schema 都是本机或构建生成内容，不应提交。
+- Android 工程位于 `android/`。
+- 本地 SDK 配置文件 `android/local.properties` 不应提交。
+- Open WebUI 构建产物、Android 构建产物、APK/AAB、Room schema 和本地缓存均不应提交。
+- `test/` 目录包含本地浏览器自动化与网页数据采集脚本，已作为本地工具目录忽略。
