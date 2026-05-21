@@ -2,6 +2,7 @@ package cn.edu.bjtu.mis.data.provider
 
 import cn.edu.bjtu.mis.data.network.AppCookieJar
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
+import cn.edu.bjtu.mis.model.EmploymentInfoQuery
 import cn.edu.bjtu.mis.model.EmploymentSectionType
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.Dispatcher
@@ -14,123 +15,92 @@ import org.junit.Test
 
 class EmploymentConsultationProviderTest {
     @Test
-    fun fetchHomeUsesFourCoreListsAndGuidanceData() = runBlocking {
+    fun fetchHomeUsesPagedCoreListsSearchOptionsAndGuidanceData() = runBlocking {
         MockWebServer().use { server ->
-            var careerToken = ""
-            var jobFairToken = ""
-            val recruitmentBodies = mutableListOf<String>()
-            var guidanceBody = ""
+            val requestBodies = mutableMapOf<String, MutableList<String>>()
             var guidanceDetailToken = ""
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     val path = request.requestUrl?.encodedPath.orEmpty()
+                    requestBodies.getOrPut(path) { mutableListOf() } += request.body.readUtf8()
                     return when (path) {
                         "/f/ajaxHome/getToken" -> json("""{"state":1,"msg":"ok","data":"TOKEN"}""")
-                        "/f/ajaxHome/ajax_findRecruitmentFairLimitList" -> {
-                            careerToken = request.getHeader("token").orEmpty()
-                            assertEquals("10", request.requestUrl?.queryParameter("num"))
-                            assertEquals("1", request.requestUrl?.queryParameter("positionType"))
-                            json(
-                                """
-                                {"state":1,"object":[{
-                                  "id":"talk-id",
-                                  "title":"校园宣讲会",
-                                  "startTime":"2026-05-21 15:00:00",
-                                  "field":{"name":"就业中心118"},
-                                  "corporationinfo":{"name":"宣讲单位"},
-                                  "url":"/f/recruitmentFair/show?recruitmentFairId=talk-id"
-                                }]}
-                                """.trimIndent(),
-                            )
-                        }
-                        "/f/ajaxHome/ajax_findBilateralchosefairLimitList" -> {
-                            jobFairToken = request.getHeader("token").orEmpty()
-                            assertEquals("10", request.requestUrl?.queryParameter("num"))
-                            json(
-                                """
-                                {"state":1,"object":[{
-                                  "id":"fair-id",
-                                  "title":"春季双选会",
-                                  "startTime":"2026-05-22 09:00:00",
-                                  "place":"线上",
-                                  "url":"/f/bilateralchosefair/show?bilateralchosefairId=fair-id"
-                                }]}
-                                """.trimIndent(),
-                            )
-                        }
-                        "/f/ajaxHome/ajax_findRecruitmentinfoLimitList" -> {
-                            val body = request.body.readUtf8()
-                            recruitmentBodies += body
+                        "/f/recruitmentFair/ajax_frontRecruitfair" -> json(pagedListJson("talk-id", "校园宣讲会", EmploymentSectionType.CareerTalk))
+                        "/f/bilateralchosefair/ajax_frontBilateralchosefair" -> json(pagedListJson("fair-id", "春季双选会", EmploymentSectionType.JobFair))
+                        "/f/recruitmentinfo/ajax_frontRecruitinfo" -> {
+                            val body = requestBodies.getValue(path).last()
                             val positionType = Regex("""positionType=([^&]+)""").find(body)?.groupValues?.get(1)
-                            json(recruitmentListJson(positionType ?: "1"))
+                            json(pagedListJson(if (positionType == "2") "intern-id" else "job-id", if (positionType == "2") "实习信息" else "招聘信息", EmploymentSectionType.Recruitment))
                         }
-                        "/f/newsCenter/ajax_list" -> {
-                            guidanceBody = request.body.readUtf8()
-                            json(
-                                """
-                                {
-                                  "state": 1,
-                                  "msg": "ok",
-                                  "object": {
-                                    "newsPage": {
-                                      "list": [{
-                                        "id": "guide-id",
-                                        "title": "个性化咨询",
-                                        "releaseDate": "2020-10-08 14:53",
-                                        "url": "/frontpage/bjtu/html/newsDetail.html?id=guide-id",
-                                        "description": "咨询说明"
-                                      }]
-                                    }
-                                  }
-                                }
-                                """.trimIndent(),
-                            )
-                        }
+                        "/f/recruitmentinfo/ajax_search" -> json(filterOptionsJson())
+                        "/f/newsCenter/ajax_list" -> json(guidanceListJson())
                         "/f/newsCenter/ajax_view" -> {
                             guidanceDetailToken = request.getHeader("token").orEmpty()
                             assertEquals("guide-id", request.requestUrl?.queryParameter("id"))
-                            json(
-                                """
-                                {
-                                  "state": 1,
-                                  "msg": "ok",
-                                  "object": {
-                                    "article": {
-                                      "id": "guide-id",
-                                      "title": "个性化咨询",
-                                      "url": "/frontpage/bjtu/html/newsDetail.html?id=guide-id",
-                                      "articleData": {
-                                        "content": "<p>预约：http://bjtu.jysd.com/consult</p>"
-                                      }
-                                    }
-                                  }
-                                }
-                                """.trimIndent(),
-                            )
+                            json(guidanceDetailJson())
                         }
                         else -> MockResponse().setResponseCode(404)
                     }
                 }
             }
 
-            val provider = EmploymentConsultationProvider(
-                client = BjtuHttpClient(AppCookieJar()),
-                baseUrl = server.url("/").toString().trimEnd('/'),
-            )
+            val provider = provider(server)
 
             val home = provider.fetchConsultationHome(pageSize = 10)
 
-            assertEquals("TOKEN", careerToken)
-            assertEquals("TOKEN", jobFairToken)
+            assertTrue(requestBodies.getValue("/f/recruitmentFair/ajax_frontRecruitfair").single().contains("pageSize=10"))
+            assertTrue(requestBodies.getValue("/f/bilateralchosefair/ajax_frontBilateralchosefair").single().contains("pageSize=10"))
+            assertTrue(requestBodies.getValue("/f/recruitmentinfo/ajax_frontRecruitinfo").any { it.contains("positionType=1") })
+            assertTrue(requestBodies.getValue("/f/recruitmentinfo/ajax_frontRecruitinfo").any { it.contains("positionType=2") })
+            assertTrue(requestBodies.getValue("/f/recruitmentinfo/ajax_search").single().contains("positionType=1"))
             assertEquals("TOKEN", guidanceDetailToken)
-            assertTrue(recruitmentBodies.any { it.contains("positionType=1") })
-            assertTrue(recruitmentBodies.any { it.contains("positionType=2") })
-            assertEquals(ProviderConstants.JOB_GUIDANCE_CATEGORY_ID, Regex("""categoryId=([^&]+)""").find(guidanceBody)?.groupValues?.get(1))
             assertEquals("employment_consultation", home.module)
             assertEquals(4, home.data.sections.size)
             assertEquals("校园宣讲会", home.data.sections.first { it.type == EmploymentSectionType.CareerTalk }.items.single().title)
-            assertEquals("招聘信息", home.data.sections.first { it.type == EmploymentSectionType.Recruitment }.title)
+            assertEquals("机关", home.data.filters.corporationNatures.first().label)
             assertEquals("http://bjtu.jysd.com/consult", home.data.appointmentUrl)
+        }
+    }
+
+    @Test
+    fun fetchInfoPageSendsAdvancedRecruitmentFilters() = runBlocking {
+        MockWebServer().use { server ->
+            var body = ""
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val path = request.requestUrl?.encodedPath.orEmpty()
+                    return when (path) {
+                        "/f/ajaxHome/getToken" -> json("""{"state":1,"msg":"ok","data":"TOKEN"}""")
+                        "/f/recruitmentinfo/ajax_frontRecruitinfo" -> {
+                            body = request.body.readUtf8()
+                            json(pagedListJson("job-id", "算法工程师招聘", EmploymentSectionType.Recruitment))
+                        }
+                        else -> MockResponse().setResponseCode(404)
+                    }
+                }
+            }
+
+            val page = provider(server).fetchInfoPage(
+                EmploymentInfoQuery(
+                    type = EmploymentSectionType.Recruitment,
+                    pageNo = 3,
+                    pageSize = 15,
+                    title = "算法",
+                    city = "110000",
+                    corporationNature = "02",
+                    industry = "it",
+                ),
+            )
+
+            assertTrue(body.contains("pageNo=3"))
+            assertTrue(body.contains("pageSize=15"))
+            assertTrue(body.contains("positionType=1"))
+            assertTrue(body.contains("city=110000"))
+            assertTrue(body.contains("title=%E7%AE%97%E6%B3%95"))
+            assertTrue(body.contains("corporationNature=02"))
+            assertTrue(body.contains("corporationinfo.industry=it"))
+            assertEquals(3, page.data.pageNo)
+            assertEquals("算法工程师招聘", page.data.items.single().title)
         }
     }
 
@@ -160,10 +130,7 @@ class EmploymentConsultationProviderTest {
                 }
             }
 
-            val provider = EmploymentConsultationProvider(
-                client = BjtuHttpClient(AppCookieJar()),
-                baseUrl = server.url("/").toString().trimEnd('/'),
-            )
+            val provider = provider(server)
 
             val careerTalk = provider.fetchInfoDetail(EmploymentSectionType.CareerTalk, "talk-id")
             val jobFair = provider.fetchInfoDetail(EmploymentSectionType.JobFair, "fair-id")
@@ -178,17 +145,89 @@ class EmploymentConsultationProviderTest {
         }
     }
 
-    private fun recruitmentListJson(positionType: String): String =
+    private fun provider(server: MockWebServer): EmploymentConsultationProvider =
+        EmploymentConsultationProvider(
+            client = BjtuHttpClient(AppCookieJar()),
+            baseUrl = server.url("/").toString().trimEnd('/'),
+        )
+
+    private fun pagedListJson(id: String, title: String, type: EmploymentSectionType): String {
+        val url = when (type) {
+            EmploymentSectionType.CareerTalk -> "/f/recruitmentFair/show?recruitmentFairId=$id"
+            EmploymentSectionType.JobFair -> "/f/bilateralchosefair/show?bilateralchosefairId=$id"
+            EmploymentSectionType.Recruitment,
+            EmploymentSectionType.Internship -> "/f/recruitmentinfo/show?recruitmentId=$id"
+        }
+        return """
+        {
+          "state": 1,
+          "object": {
+            "pageNo": 3,
+            "pageSize": 15,
+            "count": 31,
+            "totalPage": 3,
+            "list": [{
+              "id": "$id",
+              "title": "$title",
+              "startTime": "2026-05-21 15:00:00",
+              "positionNum": 1,
+              "education": "本科",
+              "place": "线上",
+              "url": "$url",
+              "corporationinfo": {"name": "招聘单位"}
+            }]
+          }
+        }
+        """.trimIndent()
+    }
+
+    private fun filterOptionsJson(): String =
         """
-        {"state":1,"object":[{
-          "id":"${if (positionType == "2") "intern-id" else "job-id"}",
-          "title":"${if (positionType == "2") "实习信息" else "招聘信息"}",
-          "positionType":"$positionType",
-          "positionNum":1,
-          "education":"本科",
-          "url":"/f/recruitmentinfo/show?recruitmentId=${if (positionType == "2") "intern-id" else "job-id"}",
-          "corporationinfo":{"name":"招聘单位"}
-        }]}
+        {
+          "state": 1,
+          "object": {
+            "corporationNature": [{"value": "01", "label": "机关"}],
+            "industry": [{"value": "it", "label": "信息传输、软件和信息技术服务业"}],
+            "positionType": [{"value": "1", "label": "招聘信息"}, {"value": "2", "label": "实习信息"}]
+          }
+        }
+        """.trimIndent()
+
+    private fun guidanceListJson(): String =
+        """
+        {
+          "state": 1,
+          "msg": "ok",
+          "object": {
+            "newsPage": {
+              "list": [{
+                "id": "guide-id",
+                "title": "个性化咨询",
+                "releaseDate": "2020-10-08 14:53",
+                "url": "/frontpage/bjtu/html/newsDetail.html?id=guide-id",
+                "description": "咨询说明"
+              }]
+            }
+          }
+        }
+        """.trimIndent()
+
+    private fun guidanceDetailJson(): String =
+        """
+        {
+          "state": 1,
+          "msg": "ok",
+          "object": {
+            "article": {
+              "id": "guide-id",
+              "title": "个性化咨询",
+              "url": "/frontpage/bjtu/html/newsDetail.html?id=guide-id",
+              "articleData": {
+                "content": "<p>预约：http://bjtu.jysd.com/consult</p>"
+              }
+            }
+          }
+        }
         """.trimIndent()
 
     private fun careerTalkDetailJson(): String =

@@ -28,6 +28,8 @@ import cn.edu.bjtu.mis.ui.theme.AppThemeOption
 fun OpenWebUiAgentScreen(
     repository: ModuleRepository,
     themeOption: AppThemeOption,
+    modifier: Modifier = Modifier,
+    visible: Boolean = true,
     onBackHandlerChanged: ((() -> Boolean)?) -> Unit,
 ) {
     var studentName by remember { mutableStateOf<String?>(null) }
@@ -35,6 +37,7 @@ fun OpenWebUiAgentScreen(
     val agentTheme = when (themeOption) {
         AppThemeOption.Default -> OpenWebUiAgentFragment.AGENT_THEME_LIGHT
         AppThemeOption.MascotGold -> OpenWebUiAgentFragment.AGENT_THEME_DARK
+        AppThemeOption.IllustrationRose -> OpenWebUiAgentFragment.AGENT_THEME_LIGHT
     }
 
     LaunchedEffect(repository) {
@@ -49,7 +52,7 @@ fun OpenWebUiAgentScreen(
             onBackHandlerChanged(null)
         }
         Box(
-            modifier = Modifier.fillMaxSize(),
+            modifier = modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
             CircularProgressIndicator()
@@ -62,6 +65,7 @@ fun OpenWebUiAgentScreen(
         ?: error("OpenWebUiAgentScreen requires a FragmentActivity context")
     val fragmentManager = activity.supportFragmentManager
     val containerId = remember { View.generateViewId() }
+    var previousVisible by remember { mutableStateOf<Boolean?>(null) }
 
     DisposableEffect(fragmentManager, containerId) {
         onBackHandlerChanged {
@@ -80,10 +84,11 @@ fun OpenWebUiAgentScreen(
     }
 
     AndroidView(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         factory = { viewContext ->
             FragmentContainerView(viewContext).apply {
                 id = containerId
+                visibility = if (visible) View.VISIBLE else View.INVISIBLE
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -91,13 +96,20 @@ fun OpenWebUiAgentScreen(
             }
         },
         update = { container ->
-            val fragment = fragmentManager.findFragmentById(container.id) as? OpenWebUiAgentFragment
+            val becameVisible = previousVisible != true && visible
+            previousVisible = visible
+            container.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+            var fragment = fragmentManager.findFragmentById(container.id) as? OpenWebUiAgentFragment
             if (fragment == null && !fragmentManager.isStateSaved) {
                 fragmentManager.beginTransaction()
                     .replace(container.id, OpenWebUiAgentFragment.newInstance(studentName, agentTheme))
                     .commitNow()
+                fragment = fragmentManager.findFragmentById(container.id) as? OpenWebUiAgentFragment
             } else {
                 fragment?.updatePreferredTheme(agentTheme)
+            }
+            if (visible && becameVisible) {
+                fragment?.notifyHomeworkHandoffAvailable()
             }
         },
     )

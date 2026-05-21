@@ -24,7 +24,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -33,6 +37,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.model.ProgressiveModuleState
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+
+private const val LoadingMascotHalfBounceMillis = 650
+
+private val LoadingMascotDrawables = intArrayOf(
+    R.drawable.loading_mascot_01,
+    R.drawable.loading_mascot_02,
+    R.drawable.loading_mascot_03,
+    R.drawable.loading_mascot_04,
+    R.drawable.loading_mascot_05,
+    R.drawable.loading_mascot_06,
+    R.drawable.loading_mascot_07,
+    R.drawable.loading_mascot_08,
+)
 
 sealed interface LoadState<out T> {
     data object Loading : LoadState<Nothing>
@@ -190,19 +209,27 @@ fun ProgressiveStatus(state: ProgressiveModuleState<*>, modifier: Modifier = Mod
 
 @Composable
 private fun BouncingLoadingMascot() {
+    var mascotIndex by remember { mutableStateOf(0) }
     val transition = rememberInfiniteTransition(label = "loadingMascot")
     val offsetY by transition.animateFloat(
         initialValue = 0f,
         targetValue = -10f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 650, easing = FastOutSlowInEasing),
+            animation = tween(durationMillis = LoadingMascotHalfBounceMillis, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse,
         ),
         label = "loadingMascotOffset",
     )
 
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            delay(LoadingMascotHalfBounceMillis * 2L)
+            mascotIndex = (mascotIndex + 1) % LoadingMascotDrawables.size
+        }
+    }
+
     Image(
-        painter = painterResource(R.drawable.loading_mascot),
+        painter = painterResource(LoadingMascotDrawables[mascotIndex]),
         contentDescription = null,
         modifier = Modifier
             .size(96.dp)

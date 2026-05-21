@@ -189,7 +189,8 @@ export const getDefaultLocalSettings = () => ({
 	autoTags: false,
 	autoFollowUps: false,
 	params: {
-		stream_response: true
+		stream_response: true,
+		local_agent_review: true
 	},
 	showChangelog: false,
 	showUpdateToast: false,
@@ -199,19 +200,27 @@ export const getDefaultLocalSettings = () => ({
 	imageCompressionInChannels: false
 });
 
-export const mergeLocalSettings = (settings: Record<string, unknown> = {}) => ({
-	...getDefaultLocalSettings(),
-	...settings,
-	directConnections: {
-		...DEFAULT_DIRECT_CONNECTIONS,
-		...(settings?.directConnections as Record<string, unknown> | undefined)
-	},
-	localWebSearch: {
-		...DEFAULT_LOCAL_WEB_SEARCH_SETTINGS,
-		...(settings?.localWebSearch as Record<string, unknown> | undefined)
-	},
-	pinnedMenuItems: Array.isArray(settings?.pinnedMenuItems) ? settings.pinnedMenuItems : []
-});
+export const mergeLocalSettings = (settings: Record<string, unknown> = {}) => {
+	const defaults = getDefaultLocalSettings();
+
+	return {
+		...defaults,
+		...settings,
+		directConnections: {
+			...DEFAULT_DIRECT_CONNECTIONS,
+			...(settings?.directConnections as Record<string, unknown> | undefined)
+		},
+		localWebSearch: {
+			...DEFAULT_LOCAL_WEB_SEARCH_SETTINGS,
+			...(settings?.localWebSearch as Record<string, unknown> | undefined)
+		},
+		params: {
+			...defaults.params,
+			...(settings?.params as Record<string, unknown> | undefined)
+		},
+		pinnedMenuItems: Array.isArray(settings?.pinnedMenuItems) ? settings.pinnedMenuItems : []
+	};
+};
 
 export const ensureLocalSession = () => {
 	if (!browser) {

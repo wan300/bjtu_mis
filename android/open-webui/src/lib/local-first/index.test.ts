@@ -4,6 +4,7 @@ import {
 	getDefaultLocalSettings,
 	getLocalBackendConfig,
 	getLocalUser,
+	mergeLocalSettings,
 	resolveLocalUserName,
 	shouldUseLocalFirstClient
 } from './index';
@@ -44,6 +45,19 @@ describe('shouldUseLocalFirstClient', () => {
 			fetchPageCount: 3,
 			maxPageChars: 12000,
 			timeoutMs: 15000
+		});
+		expect(getDefaultLocalSettings().params.local_agent_review).toBe(true);
+	});
+
+	it('merges local settings params with default local Agent review enabled', () => {
+		expect(mergeLocalSettings({ params: { stream_response: false } }).params).toMatchObject({
+			stream_response: false,
+			local_agent_review: true
+		});
+
+		expect(mergeLocalSettings({ params: { local_agent_review: false } }).params).toMatchObject({
+			stream_response: true,
+			local_agent_review: false
 		});
 	});
 

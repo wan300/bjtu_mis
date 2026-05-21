@@ -1,6 +1,7 @@
 package cn.edu.bjtu.mis.data.parser
 
 import cn.edu.bjtu.mis.data.provider.ProviderConstants
+import cn.edu.bjtu.mis.model.EmploymentInfoQuery
 import cn.edu.bjtu.mis.model.EmploymentSectionType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -122,6 +123,76 @@ class EmploymentParserTest {
         assertEquals(2, recruitments.single().positionCount)
         assertEquals("本科", internships.single().education)
         assertFalse(recruitments.single().isExternalLink)
+    }
+
+    @Test
+    fun parseEmploymentInfoPageReadsPagedObjectList() {
+        val page = parseEmploymentInfoPage(
+            """
+            {
+              "state": 1,
+              "object": {
+                "pageNo": 2,
+                "pageSize": 15,
+                "count": 31,
+                "totalPage": 3,
+                "list": [{
+                  "id": "job-id-2",
+                  "title": "算法工程师招聘",
+                  "positionNum": 3,
+                  "education": "硕士",
+                  "cityName": "北京市",
+                  "url": "/f/recruitmentinfo/show?recruitmentId=job-id-2",
+                  "corporationinfo": {
+                    "name": "招聘单位"
+                  }
+                }]
+              }
+            }
+            """.trimIndent(),
+            EmploymentInfoQuery(
+                type = EmploymentSectionType.Recruitment,
+                pageNo = 2,
+                pageSize = 15,
+                title = "算法",
+            ),
+        )
+
+        assertEquals(2, page.pageNo)
+        assertEquals(15, page.pageSize)
+        assertEquals(31, page.totalCount)
+        assertEquals(3, page.totalPage)
+        assertTrue(page.hasNext)
+        assertEquals("算法工程师招聘", page.items.single().title)
+        assertEquals("北京市", page.items.single().location)
+    }
+
+    @Test
+    fun parseEmploymentFilterOptionsReadsAdvancedFilters() {
+        val options = parseEmploymentFilterOptions(
+            """
+            {
+              "state": 1,
+              "object": {
+                "corporationNature": [
+                  {"value": "01", "label": "机关"},
+                  {"value": "02", "label": "国有企业"}
+                ],
+                "industry": [
+                  {"value": "it", "label": "信息传输、软件和信息技术服务业"}
+                ],
+                "positionType": [
+                  {"value": "1", "label": "招聘信息"},
+                  {"value": "2", "label": "实习信息"}
+                ]
+              }
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals("机关", options.corporationNatures.first().label)
+        assertEquals("it", options.industries.single().value)
+        assertEquals("实习信息", options.positionTypes[1].label)
     }
 
     @Test

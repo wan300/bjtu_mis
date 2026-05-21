@@ -36,7 +36,11 @@ import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.EmptyRoomData
 import cn.edu.bjtu.mis.model.EmploymentArticleDetail
 import cn.edu.bjtu.mis.model.EmploymentConsultationData
+import cn.edu.bjtu.mis.model.EmploymentFilterOption
+import cn.edu.bjtu.mis.model.EmploymentFilterOptions
 import cn.edu.bjtu.mis.model.EmploymentInfoDetail
+import cn.edu.bjtu.mis.model.EmploymentInfoPage
+import cn.edu.bjtu.mis.model.EmploymentInfoQuery
 import cn.edu.bjtu.mis.model.EmploymentSectionType
 import cn.edu.bjtu.mis.model.ExamData
 import cn.edu.bjtu.mis.model.ExamItem
@@ -856,6 +860,51 @@ class EmploymentConsultationRepository(
         }
     }
 
+    suspend fun infoPage(
+        query: EmploymentInfoQuery,
+        forceRefresh: Boolean = false,
+    ): ModuleEnvelope<EmploymentInfoPage> {
+        val normalizedQuery = query.copy(
+            pageNo = query.pageNo.coerceAtLeast(1),
+            pageSize = query.pageSize.coerceAtLeast(1),
+            title = query.title.trim(),
+            city = query.city.trim(),
+            cityName = query.cityName.trim(),
+            corporationNature = query.corporationNature.trim(),
+            corporationNatureLabel = query.corporationNatureLabel.trim(),
+            industry = query.industry.trim(),
+            industryLabel = query.industryLabel.trim(),
+        )
+        val key = infoPageSnapshotKey(normalizedQuery)
+        if (!forceRefresh) {
+            syncRepository.snapshot<EmploymentInfoPage>(key)?.let { return it }
+        }
+        return runCatching {
+            val envelope = EmploymentConsultationProvider(client).fetchInfoPage(normalizedQuery).copy(syncedAt = nowIso())
+            syncRepository.saveSnapshot(key, envelope)
+            envelope
+        }.getOrElse { error ->
+            syncRepository.snapshot<EmploymentInfoPage>(key) ?: throw error
+        }
+    }
+
+    suspend fun filterOptions(forceRefresh: Boolean = false): ModuleEnvelope<EmploymentFilterOptions> {
+        val key = "${ModuleKeys.EmploymentConsultation}:filters"
+        if (!forceRefresh) {
+            syncRepository.snapshot<EmploymentFilterOptions>(key)?.let { return it }
+        }
+        return runCatching {
+            val envelope = EmploymentConsultationProvider(client).fetchFilterOptions().copy(syncedAt = nowIso())
+            syncRepository.saveSnapshot(key, envelope)
+            envelope
+        }.getOrElse { error ->
+            syncRepository.snapshot<EmploymentFilterOptions>(key) ?: throw error
+        }
+    }
+
+    suspend fun cityOptions(parentId: String): ModuleEnvelope<List<EmploymentFilterOption>> =
+        EmploymentConsultationProvider(client).fetchCityOptions(parentId).copy(syncedAt = nowIso())
+
     suspend fun infoDetail(
         type: EmploymentSectionType,
         itemId: String,
@@ -872,6 +921,19 @@ class EmploymentConsultationRepository(
 
     private fun articleSnapshotKey(articleId: String): String =
         "${ModuleKeys.EmploymentConsultation}:article:${articleId.trim()}"
+
+    private fun infoPageSnapshotKey(query: EmploymentInfoQuery): String =
+        listOf(
+            ModuleKeys.EmploymentConsultation,
+            "page",
+            query.type.name,
+            query.pageNo.toString(),
+            query.pageSize.toString(),
+            query.title,
+            query.city,
+            query.corporationNature,
+            query.industry,
+        ).joinToString(":") { it.replace(":", "_") }
 
     private fun infoDetailSnapshotKey(type: EmploymentSectionType, itemId: String): String =
         "${ModuleKeys.EmploymentConsultation}:detail:${type.name}:${itemId.trim()}"

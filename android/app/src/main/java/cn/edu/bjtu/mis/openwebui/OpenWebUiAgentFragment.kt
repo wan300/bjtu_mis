@@ -126,6 +126,15 @@ class OpenWebUiAgentFragment : Fragment() {
         return true
     }
 
+    fun notifyHomeworkHandoffAvailable() {
+        bridge?.webView?.evaluateJavascript(
+            """
+            window.dispatchEvent(new CustomEvent('bjtu-mis:homework-handoff'));
+            """.trimIndent(),
+            null,
+        )
+    }
+
     fun updatePreferredTheme(theme: String) {
         val nextTheme = normalizeAgentTheme(theme)
         if (nextTheme == preferredTheme) return

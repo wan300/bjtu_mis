@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.room.Room
 import cn.edu.bjtu.mis.data.agent.document.DocumentTool
 import cn.edu.bjtu.mis.data.agent.runtime.RuntimeManager
-import cn.edu.bjtu.mis.data.agent.search.SearchTool
 import cn.edu.bjtu.mis.data.agent.tools.ArchiveTool
 import cn.edu.bjtu.mis.data.agent.tools.CodeTool
 import cn.edu.bjtu.mis.data.agent.tools.FileTool
@@ -142,11 +141,10 @@ class AppContainer(context: Context) {
     val agentToolRegistry: ToolRegistry by lazy {
         PerfTrace.measure("AppContainer.agentToolRegistry") {
             ToolRegistry(
-                FileTool(agentWorkspaceManager).tools() +
+                    FileTool(agentWorkspaceManager).tools() +
                     ArchiveTool(agentWorkspaceManager).tools() +
                     DocumentTool(appContext, agentWorkspaceManager).tools() +
-                    CodeTool(agentWorkspaceManager, agentRuntimeManager).tools() +
-                    SearchTool().tools() +
+                    CodeTool(agentRuntimeManager).tools() +
                     MailAgentTool(mailRepository).tools() +
                     PackageTool(agentWorkspaceManager).tools()
             )

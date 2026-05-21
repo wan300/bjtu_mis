@@ -94,6 +94,8 @@
 	} from '$lib/local-first/native-agent-tools';
 	import {
 		HOMEWORK_DRAFT_PREPARING_I18N_KEY,
+		HOMEWORK_HANDOFF_EVENT,
+		createNativeHomeworkDraftState,
 		shouldBlockHomeworkDraftSubmit
 	} from '$lib/local-first/homework-agent';
 	import { requestLocalChatCompletion } from '$lib/local-first/providers';
@@ -216,6 +218,23 @@
 	let dragged = false;
 	let generationController = null;
 
+	type LocalFirstRunState = {
+		chatId: string;
+		responseMessageId: string;
+		history: {
+			messages: Record<string, any>;
+			currentId: string | null;
+		};
+		selectedModels: string[];
+		params: Record<string, any>;
+		chatFiles: any[];
+		nativeAgentWorkspaceId: string | null;
+		temporaryChatEnabled: boolean;
+		controller: AbortController | null;
+	};
+
+	const localFirstRuns = new Map<string, LocalFirstRunState>();
+
 	let chat = null;
 	let tags = [];
 
@@ -241,6 +260,7 @@
 	let nativeAgentGeneratedFilesComponent: NativeAgentGeneratedFiles | undefined;
 	let nativeAgentGeneratedFilesRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 	let homeworkDraftPreparing = false;
+	let homeworkHandoffConsumeInFlight = false;
 
 	const refreshNativeAgentGeneratedFiles = async () => {
 		if (!nativeAgentWorkspaceId) {
@@ -280,6 +300,45 @@
 		return nativeAgentGeneratedFilesComponent.openWorkspacePath(value);
 	});
 
+	const isLocalFirstRunVisible = (run: LocalFirstRunState | null | undefined) =>
+		!run || run.chatId === $chatId;
+
+	const getLocalFirstRunForChat = (targetChatId: string) =>
+		[...localFirstRuns.values()].find((run) => run.chatId === targetChatId) ?? null;
+
+	const syncVisibleLocalFirstRun = (run: LocalFirstRunState) => {
+		if (!isLocalFirstRunVisible(run)) {
+			return;
+		}
+
+		history = run.history;
+		params = run.params;
+		chatFiles = run.chatFiles;
+		nativeAgentWorkspaceId = run.nativeAgentWorkspaceId;
+		generating = !run.history.messages[run.responseMessageId]?.done;
+		generationController = run.controller;
+	};
+
+	const persistLocalFirstRun = async (run: LocalFirstRunState) => {
+		if (!run.chatId || run.temporaryChatEnabled) {
+			return null;
+		}
+
+		const updatedChat = await updateChatById(localStorage.token, run.chatId, {
+			models: run.selectedModels,
+			history: run.history,
+			messages: createMessagesList(run.history, run.history.currentId),
+			params: run.params,
+			files: run.chatFiles
+		});
+
+		if (isLocalFirstRunVisible(run)) {
+			chat = updatedChat;
+		}
+
+		return updatedChat;
+	};
+
 	$: if (chatIdProp) {
 		navigateHandler();
 	}
@@ -297,6 +356,8 @@
 		messageInput?.setText('');
 
 		files = [];
+		generating = false;
+		generationController = null;
 		nativeAgentWorkspaceId = null;
 		nativeAgentAttachments = [];
 		nativeAgentAttachmentFailures = [];
@@ -410,53 +471,73 @@
 		}
 	};
 
-	const consumeHomeworkAgentDraft = async () => {
-		if (!isLocalFirstClient()) {
-			return false;
+	const fetchPendingHomeworkAgentDraft = async (): Promise<NativeAgentHomeworkDraft> => {
+		if (!isLocalFirstClient() || homeworkHandoffConsumeInFlight) {
+			return { hasPending: false };
 		}
 
+		homeworkHandoffConsumeInFlight = true;
 		homeworkDraftPreparing = true;
 		try {
-			const handoff: NativeAgentHomeworkDraft = await consumePendingHomeworkDraft().catch((error) => {
+			return await consumePendingHomeworkDraft().catch((error) => {
 				console.error('Failed to consume native homework draft:', error);
 				toast.error($i18n.t('Failed to prepare homework draft.'));
 				return { hasPending: false } satisfies NativeAgentHomeworkDraft;
 			});
-
-			if (!handoff?.hasPending) {
-				return false;
-			}
-
-			nativeAgentWorkspaceId = handoff.workspaceId ?? null;
-			nativeAgentAttachments = handoff.attachments ?? [];
-			nativeAgentAttachmentFailures = handoff.failedAttachments ?? [];
-			if (nativeAgentWorkspaceId) {
-				params = { ...params, agent_workspace_id: nativeAgentWorkspaceId };
-				await refreshNativeAgentGeneratedFiles();
-			}
-
-			const draft = handoff.draft ?? '';
-			prompt = draft;
-			messageInput?.setText(draft);
-			document.getElementById('chat-input')?.focus();
-			const importedCount = nativeAgentAttachments.length;
-			const failedCount = nativeAgentAttachmentFailures.length;
-			toast.success(
-				$i18n.t('Homework draft prepared. Imported {{count}} attachment(s).', {
-					count: importedCount
-				})
-			);
-			if (failedCount > 0) {
-				toast.warning(
-					$i18n.t('{{count}} homework attachment(s) could not be imported.', {
-						count: failedCount
-					})
-				);
-			}
-			return true;
 		} finally {
 			homeworkDraftPreparing = false;
+			homeworkHandoffConsumeInFlight = false;
 		}
+	};
+
+	const applyHomeworkAgentDraft = async (handoff: NativeAgentHomeworkDraft) => {
+		const draftState = createNativeHomeworkDraftState(handoff);
+		if (!draftState) {
+			return false;
+		}
+
+		nativeAgentWorkspaceId = draftState.workspaceId;
+		nativeAgentAttachments = draftState.attachments;
+		nativeAgentAttachmentFailures = draftState.failures;
+		params = { ...params, ...draftState.params };
+		if (nativeAgentWorkspaceId) {
+			await refreshNativeAgentGeneratedFiles();
+		} else {
+			nativeAgentGeneratedFiles = [];
+		}
+
+		prompt = draftState.prompt;
+		messageInput?.setText(draftState.prompt);
+		document.getElementById('chat-input')?.focus();
+		const importedCount = nativeAgentAttachments.length;
+		const failedCount = nativeAgentAttachmentFailures.length;
+		toast.success(
+			$i18n.t('Homework draft prepared. Imported {{count}} attachment(s).', {
+				count: importedCount
+			})
+		);
+		if (failedCount > 0) {
+			toast.warning(
+				$i18n.t('{{count}} homework attachment(s) could not be imported.', {
+					count: failedCount
+				})
+			);
+		}
+		return true;
+	};
+
+	const consumeHomeworkAgentDraft = async () => {
+		const handoff = await fetchPendingHomeworkAgentDraft();
+		return applyHomeworkAgentDraft(handoff);
+	};
+
+	const handleNativeHomeworkHandoff = async () => {
+		const handoff = await fetchPendingHomeworkAgentDraft();
+		if (!handoff?.hasPending) {
+			return;
+		}
+
+		await initNewChat(handoff);
 	};
 
 	const modelSupportsFeature = (model, feature) =>
@@ -875,6 +956,10 @@
 				pendingMailSendConfirmation = { request, resolve };
 			});
 		});
+		const nativeHomeworkHandoffHandler = () => {
+			void handleNativeHomeworkHandoff();
+		};
+		window.addEventListener(HOMEWORK_HANDOFF_EVENT, nativeHomeworkHandoffHandler);
 
 		$audioQueue?.destroy();
 
@@ -1006,6 +1091,7 @@
 				}
 				pendingMailSendConfirmation?.resolve(false);
 				pendingMailSendConfirmation = null;
+				window.removeEventListener(HOMEWORK_HANDOFF_EVENT, nativeHomeworkHandoffHandler);
 				window.removeEventListener('message', onMessageHandler);
 				$socket?.off('events', chatEventHandler);
 				audioQueueInstance?.destroy();
@@ -1268,8 +1354,14 @@
 	// Web functions
 	//////////////////////////
 
-	const initNewChat = async () => {
+	const initNewChat = async (homeworkHandoff: unknown = null) => {
 		console.log('initNewChat');
+		const pendingHomeworkHandoff =
+			homeworkHandoff &&
+			typeof homeworkHandoff === 'object' &&
+			'hasPending' in homeworkHandoff
+				? (homeworkHandoff as NativeAgentHomeworkDraft)
+				: null;
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
 		}
@@ -1394,6 +1486,8 @@
 
 		chatFiles = [];
 		params = {};
+		generating = false;
+		generationController = null;
 		nativeAgentWorkspaceId = null;
 		nativeAgentAttachments = [];
 		nativeAgentAttachmentFailures = [];
@@ -1451,7 +1545,9 @@
 			showControls.set(true);
 		}
 
-		const consumedHomeworkDraft = await consumeHomeworkAgentDraft();
+		const consumedHomeworkDraft = pendingHomeworkHandoff
+			? await applyHomeworkAgentDraft(pendingHomeworkHandoff)
+			: await consumeHomeworkAgentDraft();
 
 		// Consume one-shot desktop event (e.g. Spotlight query, call shortcut)
 		if (!consumedHomeworkDraft && $desktopEvent) {
@@ -1554,6 +1650,16 @@
 
 				params = chatContent?.params ?? {};
 				chatFiles = chatContent?.files ?? [];
+				const localFirstRun = getLocalFirstRunForChat($chatId);
+				if (localFirstRun) {
+					selectedModels = structuredClone(localFirstRun.selectedModels);
+					history = localFirstRun.history;
+					params = localFirstRun.params;
+					chatFiles = localFirstRun.chatFiles;
+					nativeAgentWorkspaceId = localFirstRun.nativeAgentWorkspaceId;
+					generating = !history.messages[localFirstRun.responseMessageId]?.done;
+					generationController = localFirstRun.controller;
+				}
 				nativeAgentWorkspaceId =
 					typeof params?.agent_workspace_id === 'string' && params.agent_workspace_id.trim()
 						? params.agent_workspace_id.trim()
@@ -1597,6 +1703,7 @@
 					currentMessage &&
 					currentMessage.role === 'assistant' &&
 					!currentMessage.done &&
+					!localFirstRun &&
 					(!taskIds || taskIds.length === 0)
 				) {
 					currentMessage.done = true;
@@ -1656,16 +1763,28 @@
 		}
 	};
 
-	const chatCompletedHandler = async (_chatId, modelId, responseMessageId, messages) => {
-		if (isLocalFirstClient() && _chatId && !$temporaryChatEnabled) {
-			await saveChatHandler(_chatId, history);
+	const chatCompletedHandler = async (
+		_chatId,
+		modelId,
+		responseMessageId,
+		messages,
+		localFirstRun: LocalFirstRunState | null = null
+	) => {
+		if (isLocalFirstClient() && _chatId) {
+			if (localFirstRun) {
+				await persistLocalFirstRun(localFirstRun);
+			} else if (!$temporaryChatEnabled) {
+				await saveChatHandler(_chatId, history);
+			}
 		}
 
 		if ($chatId == _chatId && !$temporaryChatEnabled) {
 			currentChatPage.set(1);
 			await chats.set(await getChatList(localStorage.token, $currentChatPage));
 		}
-		taskIds = null;
+		if (!localFirstRun || isLocalFirstRunVisible(localFirstRun)) {
+			taskIds = null;
+		}
 	};
 
 	const chatActionHandler = async (_chatId, actionId, modelId, responseMessageId, event = null) => {
@@ -1847,11 +1966,22 @@
 		message.content = convertReasoningTagsToDetails(message.content ?? '');
 	};
 
-	const runLocalChatCompletion = async (body, responseMessage, responseMessageId, _chatId) => {
+	const runLocalChatCompletion = async (
+		body,
+		responseMessage,
+		responseMessageId,
+		_chatId,
+		localFirstRun: LocalFirstRunState
+	) => {
 		try {
-			generating = true;
+			if (isLocalFirstRunVisible(localFirstRun)) {
+				generating = true;
+			}
 			const [res, controller] = await requestLocalChatCompletion(body);
-			generationController = controller;
+			localFirstRun.controller = controller;
+			if (isLocalFirstRunVisible(localFirstRun)) {
+				generationController = controller;
+			}
 
 			if (!res) {
 				throw new Error('Network Problem');
@@ -1871,7 +2001,7 @@
 					const { value, content, reasoning, done, sources, status, selectedModelId, error, usage } =
 						update;
 					if (error) {
-						await chatCompletionEventHandler({ error }, responseMessage, _chatId);
+						await chatCompletionEventHandler({ error }, responseMessage, _chatId, localFirstRun);
 						break;
 					}
 
@@ -1896,30 +2026,40 @@
 							...(usage ? { usage } : {})
 						},
 						responseMessage,
-						_chatId
+						_chatId,
+						localFirstRun
 					);
 				}
 			} else {
 				const data = await res.json();
-				await chatCompletionEventHandler(data, responseMessage, _chatId);
+				await chatCompletionEventHandler(data, responseMessage, _chatId, localFirstRun);
 			}
 
-			await chatCompletionEventHandler({ done: true }, responseMessage, _chatId);
+			await chatCompletionEventHandler({ done: true }, responseMessage, _chatId, localFirstRun);
 		} catch (error: any) {
 			if (error?.name !== 'AbortError') {
-				await handleOpenAIError(error, responseMessage);
-				toast.error(`${error?.error?.message ?? error?.message ?? error}`);
+				await handleOpenAIError(error, responseMessage, {
+					showToast: isLocalFirstRunVisible(localFirstRun)
+				});
+				if (isLocalFirstRunVisible(localFirstRun)) {
+					toast.error(`${error?.error?.message ?? error?.message ?? error}`);
+				}
 			}
 
 			responseMessage.done = true;
-			history.messages[responseMessageId] = responseMessage;
-			history.currentId = responseMessageId;
-			if (_chatId && !$temporaryChatEnabled) {
-				await saveChatHandler(_chatId, history);
+			localFirstRun.history.messages[responseMessageId] = responseMessage;
+			localFirstRun.history.currentId = responseMessageId;
+			syncVisibleLocalFirstRun(localFirstRun);
+			if (_chatId) {
+				await persistLocalFirstRun(localFirstRun);
 			}
 		} finally {
-			generating = false;
-			generationController = null;
+			localFirstRun.controller = null;
+			localFirstRuns.delete(localFirstRun.responseMessageId);
+			if (isLocalFirstRunVisible(localFirstRun)) {
+				generating = false;
+				generationController = null;
+			}
 		}
 	};
 
@@ -2051,7 +2191,15 @@
 		}
 	};
 
-	const chatCompletionEventHandler = async (data, message, chatId) => {
+	const chatCompletionEventHandler = async (
+		data,
+		message,
+		chatId,
+		localFirstRun: LocalFirstRunState | null = null
+	) => {
+		const targetHistory = localFirstRun?.history ?? history;
+		const visibleRun = isLocalFirstRunVisible(localFirstRun);
+		const workspaceId = localFirstRun?.nativeAgentWorkspaceId ?? nativeAgentWorkspaceId;
 		const {
 			id,
 			done,
@@ -2072,7 +2220,7 @@
 		}
 
 		if (error) {
-			await handleOpenAIError(error, message);
+			await handleOpenAIError(error, message, { showToast: visibleRun });
 		}
 
 		if (sources && !message?.sources) {
@@ -2118,10 +2266,12 @@
 						message.content = convertReasoningTagsToDetails(message.content);
 					}
 
-					triggerHapticFeedback();
+					if (visibleRun) {
+						triggerHapticFeedback();
+					}
 
 					// Emit chat event for TTS (only when call overlay is active)
-					if ($showCallOverlay) {
+					if (visibleRun && $showCallOverlay) {
 						const messageContentParts = getMessageContentParts(
 							removeAllDetails(message.content),
 							$config?.audio?.tts?.split_on ?? 'punctuation'
@@ -2152,10 +2302,12 @@
 			// REALTIME_CHAT_SAVE is disabled
 			message.content = content;
 
-			triggerHapticFeedback();
+			if (visibleRun) {
+				triggerHapticFeedback();
+			}
 
 			// Emit chat event for TTS (only when call overlay is active)
-			if ($showCallOverlay) {
+			if (visibleRun && $showCallOverlay) {
 				const messageContentParts = getMessageContentParts(
 					removeAllDetails(message.content),
 					$config?.audio?.tts?.split_on ?? 'punctuation'
@@ -2180,7 +2332,7 @@
 			}
 		}
 
-		if (nativeAgentWorkspaceId && (content || choices)) {
+		if (visibleRun && workspaceId && (content || choices)) {
 			scheduleNativeAgentGeneratedFilesRefresh();
 		}
 
@@ -2193,24 +2345,32 @@
 			message.usage = usage;
 		}
 
-		history.messages[message.id] = message;
+		targetHistory.messages[message.id] = message;
+		if (localFirstRun) {
+			localFirstRun.history = targetHistory;
+			syncVisibleLocalFirstRun(localFirstRun);
+		} else {
+			history = targetHistory;
+		}
 
 		if (done) {
 			finalizeReasoningMessage(message);
 			message.done = true;
-			await refreshNativeAgentGeneratedFiles();
+			if (visibleRun) {
+				await refreshNativeAgentGeneratedFiles();
+			}
 
-			if ($settings.responseAutoCopy) {
+			if (visibleRun && $settings.responseAutoCopy) {
 				copyToClipboard(message.content);
 			}
 
-			if ($settings.responseAutoPlayback && !$showCallOverlay) {
+			if (visibleRun && $settings.responseAutoPlayback && !$showCallOverlay) {
 				await tick();
 				document.getElementById(`speak-button-${message.id}`)?.click();
 			}
 
 			// Emit chat event for TTS (only when call overlay is active)
-			if ($showCallOverlay) {
+			if (visibleRun && $showCallOverlay) {
 				let lastMessageContentPart =
 					getMessageContentParts(
 						removeAllDetails(message.content),
@@ -2224,40 +2384,48 @@
 					);
 				}
 			}
-			eventTarget.dispatchEvent(
-				new CustomEvent('chat:finish', {
-					detail: {
-						id: message.id,
-						content: message.content
-					}
-				})
-			);
+			if (visibleRun) {
+				eventTarget.dispatchEvent(
+					new CustomEvent('chat:finish', {
+						detail: {
+							id: message.id,
+							content: message.content
+						}
+					})
+				);
+			}
 
-			history.messages[message.id] = message;
+			targetHistory.messages[message.id] = message;
+			if (localFirstRun) {
+				localFirstRun.history = targetHistory;
+				syncVisibleLocalFirstRun(localFirstRun);
+			} else {
+				history = targetHistory;
+			}
 
 			await tick();
-			if (autoScroll) {
+			if (visibleRun && autoScroll) {
 				scrollToBottom();
 			}
 
-			// Fire-and-forget: run chatCompletedHandler for background work
-			// (outlet filters, chat save, title gen, follow-ups, tags)
-			// without blocking the user from sending new messages.
-			chatCompletedHandler(
+			await chatCompletedHandler(
 				chatId,
 				message.model,
 				message.id,
-				createMessagesList(history, message.id)
+				createMessagesList(targetHistory, message.id),
+				localFirstRun
 			);
 
 			// Process next queued request if any
-			await processNextInQueue(chatId);
+			if (visibleRun) {
+				await processNextInQueue(chatId);
+			}
 		}
 
 		console.log(data);
 		await tick();
 
-		if (autoScroll) {
+		if (visibleRun && autoScroll) {
 			scheduleScrollToBottom();
 		}
 	};
@@ -2857,9 +3025,33 @@
 			};
 
 		if (isLocalFirstClient()) {
-			await runLocalChatCompletion(completionBody, responseMessage, responseMessageId, _chatId);
+			const localFirstRun: LocalFirstRunState = {
+				chatId: _chatId,
+				responseMessageId,
+				history: structuredClone(_history),
+				selectedModels: structuredClone(selectedModels),
+				params: structuredClone({
+					...(params ?? {}),
+					...(nativeAgentWorkspaceId ? { agent_workspace_id: nativeAgentWorkspaceId } : {})
+				}),
+				chatFiles: structuredClone(chatFiles ?? []),
+				nativeAgentWorkspaceId,
+				temporaryChatEnabled: $temporaryChatEnabled,
+				controller: null
+			};
+			localFirstRuns.set(responseMessageId, localFirstRun);
+
+			await runLocalChatCompletion(
+				completionBody,
+				localFirstRun.history.messages[responseMessageId] ?? responseMessage,
+				responseMessageId,
+				_chatId,
+				localFirstRun
+			);
 			await tick();
-			scrollToBottom();
+			if (isLocalFirstRunVisible(localFirstRun)) {
+				scrollToBottom();
+			}
 			return;
 		}
 
@@ -2925,7 +3117,11 @@
 		scrollToBottom();
 	};
 
-	const handleOpenAIError = async (error, responseMessage) => {
+	const handleOpenAIError = async (
+		error,
+		responseMessage,
+		{ showToast = true }: { showToast?: boolean } = {}
+	) => {
 		let errorMessage = '';
 		let innerError;
 
@@ -2936,20 +3132,28 @@
 		console.error(innerError);
 		if ('detail' in innerError) {
 			// FastAPI error
-			toast.error(innerError.detail);
+			if (showToast) {
+				toast.error(innerError.detail);
+			}
 			errorMessage = innerError.detail;
 		} else if ('error' in innerError) {
 			// OpenAI error
 			if ('message' in innerError.error) {
-				toast.error(innerError.error.message);
+				if (showToast) {
+					toast.error(innerError.error.message);
+				}
 				errorMessage = innerError.error.message;
 			} else {
-				toast.error(innerError.error);
+				if (showToast) {
+					toast.error(innerError.error);
+				}
 				errorMessage = innerError.error;
 			}
 		} else if ('message' in innerError) {
 			// OpenAI error
-			toast.error(innerError.message);
+			if (showToast) {
+				toast.error(innerError.message);
+			}
 			errorMessage = innerError.message;
 		}
 

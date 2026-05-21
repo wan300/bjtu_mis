@@ -208,6 +208,14 @@ const baseProviderBody = () => ({
 	stream: false
 });
 
+const reviewDisabledBody = (body: Record<string, any> = {}) => ({
+	...body,
+	params: {
+		...(body.params ?? {}),
+		local_agent_review: false
+	}
+});
+
 beforeEach(() => {
 	vi.clearAllMocks();
 	vi.mocked(supportsNativeAndroidTools).mockReturnValue(false);
@@ -248,7 +256,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		] as [Response, AbortController]);
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: {},
+			body: reviewDisabledBody(),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -272,7 +280,7 @@ describe('requestLocalAgentChatCompletion', () => {
 
 		await expect(
 			requestLocalAgentChatCompletion({
-				body: {},
+				body: reviewDisabledBody(),
 				providerBody: baseProviderBody(),
 				requestProvider
 			})
@@ -291,7 +299,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		]);
 
 		const [res, controller] = await requestLocalAgentChatCompletion({
-			body: {},
+			body: reviewDisabledBody(),
 			providerBody: { ...baseProviderBody(), stream: true },
 			requestProvider
 		});
@@ -315,7 +323,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		] as [Response, AbortController]);
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: {},
+			body: reviewDisabledBody(),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -360,7 +368,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: {},
+			body: reviewDisabledBody(),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -423,7 +431,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: {},
+			body: reviewDisabledBody(),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -469,7 +477,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		await requestLocalAgentChatCompletion({
-			body: { features: { android_device_tools: true } },
+			body: reviewDisabledBody({ features: { android_device_tools: true } }),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -504,7 +512,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		await requestLocalAgentChatCompletion({
-			body: { features: { android_device_tools: true } },
+			body: reviewDisabledBody({ features: { android_device_tools: true } }),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -540,7 +548,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		await requestLocalAgentChatCompletion({
-			body: { features: { web_search: true, android_device_tools: true } },
+			body: reviewDisabledBody({ features: { web_search: true, android_device_tools: true } }),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -585,7 +593,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: {},
+			body: reviewDisabledBody(),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -624,7 +632,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: {},
+			body: reviewDisabledBody(),
 			providerBody: baseProviderBody(),
 			requestProvider,
 			maxRetries: 1
@@ -648,7 +656,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: {},
+			body: reviewDisabledBody(),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -681,7 +689,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		expect(final.choices[0].message.content).toContain('Direct final answer.');
 	});
 
-	it('repairs final answers rejected by the optional local Agent review', async () => {
+	it('repairs final answers rejected by the default local Agent review', async () => {
 		const requests: Record<string, any>[] = [];
 		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
 			requests.push(providerBody);
@@ -726,7 +734,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { params: { local_agent_review: true } },
+			body: {},
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -751,7 +759,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		);
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: {},
+			body: reviewDisabledBody(),
 			providerBody: { ...baseProviderBody(), stream: true },
 			requestProvider
 		});
@@ -833,19 +841,29 @@ describe('requestLocalAgentChatCompletion', () => {
 				] as [Response, AbortController];
 			}
 
-			return [
-				providerStreamResponse([
-					{
-						choices: [
-							{
-								index: 0,
-								delta: {
-									content: 'The result is 9.'
+			if (requests.length === 2) {
+				return [
+					providerStreamResponse([
+						{
+							choices: [
+								{
+									index: 0,
+									delta: {
+										content: 'The result is 9.'
+									}
 								}
-							}
-						]
-					}
-				]),
+							]
+						}
+					]),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: '{"approved":true,"reason":""}'
+				}),
 				new AbortController()
 			] as [Response, AbortController];
 		});
@@ -862,7 +880,7 @@ describe('requestLocalAgentChatCompletion', () => {
 			.map((event) => event.choices?.[0]?.delta?.content ?? '')
 			.join('');
 
-		expect(requestProvider).toHaveBeenCalledTimes(2);
+		expect(requestProvider).toHaveBeenCalledTimes(3);
 		expect(JSON.parse(requests[1].messages.at(-1).content).result).toBe(9);
 		const executingToolIndex = contentEvents.findIndex(
 			(event) =>
@@ -931,7 +949,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { features: { web_search: true } },
+			body: reviewDisabledBody({ features: { web_search: true } }),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -991,7 +1009,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { features: { web_search: true } },
+			body: reviewDisabledBody({ features: { web_search: true } }),
 			providerBody: {
 				...baseProviderBody(),
 				messages: [{ role: 'user', content: '计算 38288274637×37377282828838' }]
@@ -1025,7 +1043,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		await requestLocalAgentChatCompletion({
-			body: { features: { code_interpreter: true } },
+			body: reviewDisabledBody({ features: { code_interpreter: true } }),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -1053,7 +1071,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		await requestLocalAgentChatCompletion({
-			body: { features: { web_search: true, code_interpreter: true } },
+			body: reviewDisabledBody({ features: { web_search: true, code_interpreter: true } }),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -1140,7 +1158,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		await requestLocalAgentChatCompletion({
-			body: { params: { agent_workspace_id: 'workspace-1' } },
+			body: reviewDisabledBody({ params: { agent_workspace_id: 'workspace-1' } }),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -1208,7 +1226,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		await requestLocalAgentChatCompletion({
-			body: { params: { function_calling: 'native' } },
+			body: reviewDisabledBody({ params: { function_calling: 'native' } }),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -1328,7 +1346,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { params: { agent_workspace_id: 'workspace-1' } },
+			body: reviewDisabledBody({ params: { agent_workspace_id: 'workspace-1' } }),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -1400,7 +1418,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { params: { agent_workspace_id: 'workspace-1' } },
+			body: reviewDisabledBody({ params: { agent_workspace_id: 'workspace-1' } }),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -1467,7 +1485,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { params: { function_calling: 'native' } },
+			body: reviewDisabledBody({ params: { function_calling: 'native' } }),
 			providerBody: baseProviderBody(),
 			requestProvider
 		});
@@ -1549,7 +1567,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { params: { agent_workspace_id: 'workspace-1' } },
+			body: reviewDisabledBody({ params: { agent_workspace_id: 'workspace-1' } }),
 			providerBody: { ...baseProviderBody(), stream: true },
 			requestProvider
 		});
@@ -1636,7 +1654,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { params: { agent_workspace_id: 'workspace-1' } },
+			body: reviewDisabledBody({ params: { agent_workspace_id: 'workspace-1' } }),
 			providerBody: { ...baseProviderBody(), stream: true },
 			requestProvider
 		});
@@ -1680,7 +1698,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { features: { web_search: true } },
+			body: reviewDisabledBody({ features: { web_search: true } }),
 			providerBody: {
 				...baseProviderBody(),
 				messages: [{ role: 'user', content: 'What happened today?' }]
@@ -1734,7 +1752,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { features: { web_search: true } },
+			body: reviewDisabledBody({ features: { web_search: true } }),
 			providerBody: {
 				...baseProviderBody(),
 				messages: [{ role: 'user', content: 'Need current info' }]
@@ -1797,7 +1815,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { features: { web_search: true } },
+			body: reviewDisabledBody({ features: { web_search: true } }),
 			providerBody: {
 				...baseProviderBody(),
 				messages: [{ role: 'user', content: 'Need current info' }]
@@ -1899,7 +1917,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { features: { web_search: true } },
+			body: reviewDisabledBody({ features: { web_search: true } }),
 			providerBody: {
 				...baseProviderBody(),
 				stream: true,
@@ -1947,7 +1965,7 @@ describe('requestLocalAgentChatCompletion', () => {
 		});
 
 		const [res] = await requestLocalAgentChatCompletion({
-			body: { features: { web_search: true } },
+			body: reviewDisabledBody({ features: { web_search: true } }),
 			providerBody: {
 				...baseProviderBody(),
 				messages: [{ role: 'user', content: 'Need current info' }]

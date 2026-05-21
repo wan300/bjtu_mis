@@ -775,6 +775,33 @@ data class EmploymentInfoSection(
 )
 
 @Serializable
+data class EmploymentFilterOption(
+    val value: String,
+    val label: String,
+)
+
+@Serializable
+data class EmploymentFilterOptions(
+    val positionTypes: List<EmploymentFilterOption> = emptyList(),
+    val corporationNatures: List<EmploymentFilterOption> = emptyList(),
+    val industries: List<EmploymentFilterOption> = emptyList(),
+)
+
+@Serializable
+data class EmploymentInfoQuery(
+    val type: EmploymentSectionType,
+    val pageNo: Int = 1,
+    val pageSize: Int = 15,
+    val title: String = "",
+    val city: String = "",
+    val cityName: String = "",
+    val corporationNature: String = "",
+    val corporationNatureLabel: String = "",
+    val industry: String = "",
+    val industryLabel: String = "",
+)
+
+@Serializable
 data class EmploymentInfoSummary(
     val id: String,
     val type: EmploymentSectionType,
@@ -791,6 +818,20 @@ data class EmploymentInfoSummary(
     val majorName: String? = null,
     val positionCount: Int? = null,
     val isExternalLink: Boolean = false,
+)
+
+@Serializable
+data class EmploymentInfoPage(
+    val type: EmploymentSectionType,
+    val title: String,
+    val listUrl: String,
+    val query: EmploymentInfoQuery,
+    val items: List<EmploymentInfoSummary> = emptyList(),
+    val pageNo: Int = 1,
+    val pageSize: Int = 15,
+    val totalCount: Int = 0,
+    val totalPage: Int = 1,
+    val hasNext: Boolean = false,
 )
 
 @Serializable
@@ -847,6 +888,7 @@ data class EmploymentConsultationData(
     val articles: List<EmploymentArticleSummary> = emptyList(),
     val consultationGuide: EmploymentArticleDetail? = null,
     val contacts: List<EmploymentContactInfo> = emptyList(),
+    val filters: EmploymentFilterOptions = EmploymentFilterOptions(),
     val appointmentUrl: String,
     val sourceUrl: String,
 )

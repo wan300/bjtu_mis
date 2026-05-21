@@ -4,7 +4,6 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.chaquopy)
 }
 
 val packagedAbis = providers.gradleProperty("targetAbis")
@@ -133,12 +132,6 @@ android {
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
     arg("room.incremental", "true")
-}
-
-chaquopy {
-    defaultConfig {
-        version = "3.13"
-    }
 }
 
 dependencies {

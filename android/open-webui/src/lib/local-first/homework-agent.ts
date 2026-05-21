@@ -1,6 +1,19 @@
-import type { NativeAgentAttachment } from './native-agent-tools';
+import type {
+	NativeAgentAttachment,
+	NativeAgentAttachmentFailure,
+	NativeAgentHomeworkDraft
+} from './native-agent-tools';
 
 export const HOMEWORK_DRAFT_PREPARING_I18N_KEY = 'Preparing homework attachments...';
+export const HOMEWORK_HANDOFF_EVENT = 'bjtu-mis:homework-handoff';
+
+export type NativeHomeworkDraftState = {
+	prompt: string;
+	workspaceId: string | null;
+	attachments: NativeAgentAttachment[];
+	failures: NativeAgentAttachmentFailure[];
+	params: Record<string, string>;
+};
 
 export type NativeAgentAttachmentExtractionStatus =
 	| { kind: 'extracted'; count: number }
@@ -24,3 +37,21 @@ export const getNativeAgentAttachmentExtractionStatus = (
 };
 
 export const shouldBlockHomeworkDraftSubmit = (preparing: boolean) => preparing;
+
+export const createNativeHomeworkDraftState = (
+	handoff: NativeAgentHomeworkDraft | null | undefined
+): NativeHomeworkDraftState | null => {
+	if (!handoff?.hasPending) {
+		return null;
+	}
+
+	const workspaceId = handoff.workspaceId?.trim() || null;
+
+	return {
+		prompt: handoff.draft ?? '',
+		workspaceId,
+		attachments: handoff.attachments ?? [],
+		failures: handoff.failedAttachments ?? [],
+		params: workspaceId ? { agent_workspace_id: workspaceId } : {}
+	};
+};

@@ -1,6 +1,8 @@
 package cn.edu.bjtu.mis.ui.screens
 
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -54,9 +56,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.data.repository.OverviewDashboard
 import cn.edu.bjtu.mis.data.repository.OverviewRepository
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
@@ -107,6 +111,7 @@ private data class DashboardAction(
     val route: String?,
     val icon: ImageVector,
     val tint: Color,
+    @DrawableRes val imageRes: Int? = null,
 )
 
 private data class DashboardTodo(
@@ -122,6 +127,7 @@ data class ServiceEntry(
     val description: String,
     val icon: ImageVector,
     val tint: Color,
+    @DrawableRes val imageRes: Int? = null,
 )
 
 data class ServiceGroup(
@@ -135,39 +141,39 @@ private val ServiceGroups = listOf(
         title = "教学学习",
         subtitle = "课程、作业与学习资源",
         entries = listOf(
-            ServiceEntry(ModuleKeys.Timetable, "课表", "本周课程", Icons.Filled.Schedule, DefaultPrimaryTint),
-            ServiceEntry(ModuleKeys.Homework, "作业", "作业提交", Icons.Filled.Assignment, Color(0xFF2AA876)),
-            ServiceEntry(ModuleKeys.CourseResources, "课程资源", "资料下载", Icons.Filled.LibraryBooks, Color(0xFF7C58C2)),
-            ServiceEntry(ModuleKeys.CourseReplay, "课程回放", "课堂回看", Icons.Filled.PlayCircle, Color(0xFFFF8A00)),
-            ServiceEntry(ModuleKeys.CourseSelection, "抢课", "课程选择", Icons.Filled.AutoStories, Color(0xFF0E9D9D)),
+            ServiceEntry(ModuleKeys.Timetable, "课表", "本周课程", Icons.Filled.Schedule, DefaultPrimaryTint, R.drawable.icon_timetable),
+            ServiceEntry(ModuleKeys.Homework, "作业", "作业提交", Icons.Filled.Assignment, Color(0xFF2AA876), R.drawable.icon_homework),
+            ServiceEntry(ModuleKeys.CourseResources, "课程资源", "资料下载", Icons.Filled.LibraryBooks, Color(0xFF7C58C2), R.drawable.icon_course_resources),
+            ServiceEntry(ModuleKeys.CourseReplay, "课程回放", "课堂回看", Icons.Filled.PlayCircle, Color(0xFFFF8A00), R.drawable.icon_course_replay),
+            ServiceEntry(ModuleKeys.CourseSelection, "抢课", "课程选择", Icons.Filled.AutoStories, Color(0xFF0E9D9D), R.drawable.icon_course_selection),
         ),
     ),
     ServiceGroup(
         title = "成绩考务",
         subtitle = "成绩、考试与培养进度",
         entries = listOf(
-            ServiceEntry(ModuleKeys.AcademicProgress, "学业进度", "培养完成情况", Icons.Filled.TrendingUp, DefaultPrimaryTint),
-            ServiceEntry(ModuleKeys.HistoryScores, "历史成绩", "历年成绩", Icons.Filled.School, Color(0xFF6E62D6)),
-            ServiceEntry(ModuleKeys.Scores, "主修成绩", "本学期成绩", Icons.Filled.Grade, Color(0xFFE46B2D)),
-            ServiceEntry(ModuleKeys.Exams, "考务", "考试安排", Icons.Filled.EventAvailable, Color(0xFFD64B6B)),
+            ServiceEntry(ModuleKeys.AcademicProgress, "学业进度", "培养完成情况", Icons.Filled.TrendingUp, DefaultPrimaryTint, R.drawable.icon_academic_progress),
+            ServiceEntry(ModuleKeys.HistoryScores, "历史成绩", "历年成绩", Icons.Filled.School, Color(0xFF6E62D6), R.drawable.icon_history_scores),
+            ServiceEntry(ModuleKeys.Scores, "主修成绩", "本学期成绩", Icons.Filled.Grade, Color(0xFFE46B2D), R.drawable.icon_scores),
+            ServiceEntry(ModuleKeys.Exams, "考务", "考试安排", Icons.Filled.EventAvailable, Color(0xFFD64B6B), R.drawable.icon_exams),
         ),
     ),
     ServiceGroup(
         title = "信息工具",
         subtitle = "日程、邮箱与空间查询",
         entries = listOf(
-            ServiceEntry(ModuleKeys.Calendar, "学年日历", "校历安排", Icons.Filled.CalendarMonth, DefaultPrimaryTint),
-            ServiceEntry(ModuleKeys.Mail, "邮箱", "校内邮件", Icons.Filled.Email, Color(0xFF2F8DD8)),
-            ServiceEntry(ModuleKeys.Zhixing, "知行", "校园论坛", Icons.Filled.Forum, Color(0xFF4A8B57)),
-            ServiceEntry(ModuleKeys.EmploymentConsultation, "就业咨询", "指导预约", Icons.Filled.Psychology, Color(0xFFE0673D)),
-            ServiceEntry(ModuleKeys.EmptyRooms, "空教室", "教室余量", Icons.Filled.MeetingRoom, Color(0xFF00A6A6)),
+            ServiceEntry(ModuleKeys.Calendar, "学年日历", "校历安排", Icons.Filled.CalendarMonth, DefaultPrimaryTint, R.drawable.icon_calendar),
+            ServiceEntry(ModuleKeys.Mail, "邮箱", "校内邮件", Icons.Filled.Email, Color(0xFF2F8DD8), R.drawable.icon_mail),
+            ServiceEntry(ModuleKeys.Zhixing, "知行", "校园论坛", Icons.Filled.Forum, Color(0xFF4A8B57), R.drawable.icon_zhixing),
+            ServiceEntry(ModuleKeys.EmploymentConsultation, "就业咨询", "指导预约", Icons.Filled.Psychology, Color(0xFFE0673D), R.drawable.icon_employment_consultation),
+            ServiceEntry(ModuleKeys.EmptyRooms, "空教室", "教室余量", Icons.Filled.MeetingRoom, Color(0xFF00A6A6), R.drawable.icon_empty_rooms),
         ),
     ),
     ServiceGroup(
         title = "智能助手",
         subtitle = "OpenWebUI 作业辅助能力",
         entries = listOf(
-            ServiceEntry(ModuleKeys.OpenWebUiAgent, "作业助手", "OpenWebUI Agent", Icons.Filled.Psychology, Color(0xFF5A6FE8)),
+            ServiceEntry(ModuleKeys.OpenWebUiAgent, "作业助手", "OpenWebUI Agent", Icons.Filled.Psychology, Color(0xFF5A6FE8), R.drawable.icon_homework_agent),
         ),
     ),
 )
@@ -315,12 +321,12 @@ fun ServicesScreen(
 }
 
 private fun dashboardActions(): List<DashboardAction> = listOf(
-    DashboardAction("作业", ModuleKeys.Homework, Icons.Filled.Assignment, Color(0xFF2AA876)),
-    DashboardAction("课表", ModuleKeys.Timetable, Icons.Filled.Schedule, DefaultPrimaryTint),
-    DashboardAction("邮箱", ModuleKeys.Mail, Icons.Filled.Email, Color(0xFF2F8DD8)),
-    DashboardAction("成绩", ModuleKeys.Scores, Icons.Filled.Grade, Color(0xFFE46B2D)),
-    DashboardAction("校历", ModuleKeys.Calendar, Icons.Filled.CalendarMonth, Color(0xFF7C58C2)),
-    DashboardAction("更多服务", null, Icons.Filled.GridView, Color(0xFF0E9D9D)),
+    DashboardAction("作业", ModuleKeys.Homework, Icons.Filled.Assignment, Color(0xFF2AA876), R.drawable.icon_homework),
+    DashboardAction("课表", ModuleKeys.Timetable, Icons.Filled.Schedule, DefaultPrimaryTint, R.drawable.icon_timetable),
+    DashboardAction("邮箱", ModuleKeys.Mail, Icons.Filled.Email, Color(0xFF2F8DD8), R.drawable.icon_mail),
+    DashboardAction("成绩", ModuleKeys.Scores, Icons.Filled.Grade, Color(0xFFE46B2D), R.drawable.icon_scores),
+    DashboardAction("校历", ModuleKeys.Calendar, Icons.Filled.CalendarMonth, Color(0xFF7C58C2), R.drawable.icon_calendar),
+    DashboardAction("更多服务", null, Icons.Filled.GridView, Color(0xFF0E9D9D), R.drawable.icon_services),
 )
 
 @Composable
@@ -437,7 +443,15 @@ private fun QuickActionItem(
                 .background(tint.copy(alpha = 0.12f), MaterialTheme.shapes.medium),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(action.icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+            if (action.imageRes != null) {
+                Image(
+                    painter = painterResource(action.imageRes),
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp),
+                )
+            } else {
+                Icon(action.icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+            }
         }
         Spacer(Modifier.height(8.dp))
         Text(
@@ -678,7 +692,15 @@ private fun ServiceTile(entry: ServiceEntry, modifier: Modifier = Modifier, onCl
                 .background(tint.copy(alpha = 0.12f), MaterialTheme.shapes.medium),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(entry.icon, contentDescription = null, tint = tint, modifier = Modifier.size(21.dp))
+            if (entry.imageRes != null) {
+                Image(
+                    painter = painterResource(entry.imageRes),
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp),
+                )
+            } else {
+                Icon(entry.icon, contentDescription = null, tint = tint, modifier = Modifier.size(21.dp))
+            }
         }
         Spacer(Modifier.height(7.dp))
         Text(

@@ -61,7 +61,6 @@ npm run test:frontend -- --run
 - `app/src/main/java/cn/edu/bjtu/mis/openwebui/NativeAgentToolsPlugin.kt`：Open WebUI 到 Android 原生 Agent 工具的桥接。
 - `app/src/main/java/cn/edu/bjtu/mis/openwebui/NativeAgentHomeworkHandoffStore.kt`：作业上下文的一次性 handoff。
 - `app/src/main/java/cn/edu/bjtu/mis/data/agent/tools/`：工作区、文件、归档、文档、代码、邮件和结果打包工具。
-- `app/src/main/python/agent_runner.py`：Chaquopy 本地 Python runner。
 - `app/src/main/assets/bjtu_captcha_crnn.pt`：验证码识别模型。
 - `open-webui/`：嵌入到 Android WebView 的 Open WebUI 前端源码。
 - `open-webui/src/lib/local-first/`：local-first provider、Agent loop、Android 原生工具注册和 homework handoff 逻辑。

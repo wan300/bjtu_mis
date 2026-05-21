@@ -1,7 +1,9 @@
 package cn.edu.bjtu.mis.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,9 +43,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.data.provider.SessionValidationPolicy
 import cn.edu.bjtu.mis.data.sync.SessionKeepAliveForegroundService
 import cn.edu.bjtu.mis.di.AppContainer
@@ -93,6 +99,7 @@ private data class BottomTab(
     val route: String,
     val label: String,
     val icon: ShellIcon,
+    @DrawableRes val imageRes: Int? = null,
 )
 
 private enum class ShellIcon {
@@ -104,10 +111,10 @@ private enum class ShellIcon {
 }
 
 private val BottomTabs = listOf(
-    BottomTab(RouteHome, "首页", ShellIcon.Home),
-    BottomTab(RouteServices, "服务", ShellIcon.Grid),
-    BottomTab(ModuleKeys.OpenWebUiAgent, "Agent", ShellIcon.Agent),
-    BottomTab(ModuleKeys.Profile, "我的", ShellIcon.Person),
+    BottomTab(RouteHome, "首页", ShellIcon.Home, R.drawable.icon_home),
+    BottomTab(RouteServices, "服务", ShellIcon.Grid, R.drawable.icon_services),
+    BottomTab(ModuleKeys.OpenWebUiAgent, "Agent", ShellIcon.Agent, R.drawable.icon_agent),
+    BottomTab(ModuleKeys.Profile, "我的", ShellIcon.Person, R.drawable.icon_profile),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -130,6 +137,7 @@ fun BjtuMisApp(
     var autoLoginFailedMessage by remember { mutableStateOf("") }
     var autoLoginRetrying by remember { mutableStateOf(false) }
     var openWebUiBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
+    var hasOpenedOpenWebUiAgent by remember { mutableStateOf(false) }
 
     fun startBackgroundQuickSync() {
         scope.launch {
@@ -210,6 +218,11 @@ fun BjtuMisApp(
     }
 
     LaunchedEffect(Unit) { refreshSession() }
+    LaunchedEffect(current) {
+        if (current == ModuleKeys.OpenWebUiAgent) {
+            hasOpenedOpenWebUiAgent = true
+        }
+    }
     LaunchedEffect(requestedRoute, ready) {
         val route = requestedRoute
         if (ready == true && !route.isNullOrBlank()) {
@@ -303,9 +316,9 @@ fun BjtuMisApp(
                 )
             }
 
-            val extendHomeIntoStatusBar = themeOption == AppThemeOption.MascotGold && current == RouteHome
+            val extendHomeIntoStatusBar = themeOption.isDark && current == RouteHome
             val isOpenWebUiAgent = current == ModuleKeys.OpenWebUiAgent
-            val isLightAgentTheme = isOpenWebUiAgent && themeOption == AppThemeOption.Default
+            val isLightAgentTheme = isOpenWebUiAgent && !themeOption.isDark
             BjtuMisSystemBars(
                 statusBarColor = when {
                     extendHomeIntoStatusBar -> Color.Transparent
@@ -317,9 +330,9 @@ fun BjtuMisApp(
                 useDarkStatusBarIcons = if (isOpenWebUiAgent) {
                     isLightAgentTheme
                 } else {
-                    themeOption != AppThemeOption.MascotGold
+                    !themeOption.isDark
                 },
-                useDarkNavigationBarIcons = themeOption != AppThemeOption.MascotGold,
+                useDarkNavigationBarIcons = !themeOption.isDark,
                 decorFitsSystemWindows = !extendHomeIntoStatusBar,
             )
 
@@ -358,6 +371,8 @@ fun BjtuMisApp(
                         .fillMaxSize()
                         .padding(padding),
                 ) {
+                    val showOpenWebUiAgent = current == ModuleKeys.OpenWebUiAgent
+                    val keepOpenWebUiAgent = hasOpenedOpenWebUiAgent || showOpenWebUiAgent
                     when (current) {
                         RouteHome -> OverviewScreen(
                             overviewRepository = container.overviewRepository,
@@ -371,11 +386,7 @@ fun BjtuMisApp(
                             moduleRepository = container.moduleRepository,
                             onNavigate = ::navigateModule,
                         )
-                        ModuleKeys.OpenWebUiAgent -> OpenWebUiAgentScreen(
-                            repository = container.moduleRepository,
-                            themeOption = themeOption,
-                            onBackHandlerChanged = { openWebUiBackHandler = it },
-                        )
+                        ModuleKeys.OpenWebUiAgent -> Unit
                         ModuleKeys.Profile -> MainScreenPadding {
                             ProfileScreen(
                                 repository = container.moduleRepository,
@@ -383,6 +394,7 @@ fun BjtuMisApp(
                                 onLogout = {
                                     container.sessionRepository.logout()
                                     SessionKeepAliveForegroundService.stop(context)
+                                    hasOpenedOpenWebUiAgent = false
                                     ready = false
                                 },
                                 onOpenPersonalInfo = { navigateProfileDetail(RouteProfilePersonalInfo) },
@@ -412,6 +424,17 @@ fun BjtuMisApp(
                                 onNavigate = ::navigateModule,
                             )
                         }
+                    }
+                    if (keepOpenWebUiAgent) {
+                        OpenWebUiAgentScreen(
+                            repository = container.moduleRepository,
+                            themeOption = themeOption,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zIndex(if (showOpenWebUiAgent) 1f else -1f),
+                            visible = showOpenWebUiAgent,
+                            onBackHandlerChanged = { openWebUiBackHandler = it },
+                        )
                     }
                 }
             }
@@ -531,10 +554,20 @@ private fun AppBottomBar(
                     unselectedTextColor = colorScheme.onSurfaceVariant,
                 ),
                 icon = {
-                    ShellLineIcon(
-                        icon = tab.icon,
-                        color = if (selected) colorScheme.primary else colorScheme.onSurfaceVariant,
-                    )
+                    if (tab.imageRes != null) {
+                        Image(
+                            painter = painterResource(tab.imageRes),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .alpha(if (selected) 1f else 0.48f),
+                        )
+                    } else {
+                        ShellLineIcon(
+                            icon = tab.icon,
+                            color = if (selected) colorScheme.primary else colorScheme.onSurfaceVariant,
+                        )
+                    }
                 },
                 label = {
                     Text(

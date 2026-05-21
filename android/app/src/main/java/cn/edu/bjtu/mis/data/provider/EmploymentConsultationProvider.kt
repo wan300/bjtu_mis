@@ -6,12 +6,19 @@ import cn.edu.bjtu.mis.data.parser.defaultEmploymentContacts
 import cn.edu.bjtu.mis.data.parser.extractEmploymentAppointmentUrl
 import cn.edu.bjtu.mis.data.parser.parseEmploymentArticleDetail
 import cn.edu.bjtu.mis.data.parser.parseEmploymentArticleList
+import cn.edu.bjtu.mis.data.parser.parseEmploymentCityOptions
+import cn.edu.bjtu.mis.data.parser.parseEmploymentFilterOptions
 import cn.edu.bjtu.mis.data.parser.parseEmploymentInfoDetail
 import cn.edu.bjtu.mis.data.parser.parseEmploymentInfoList
+import cn.edu.bjtu.mis.data.parser.parseEmploymentInfoPage
 import cn.edu.bjtu.mis.model.CoverageLevel
 import cn.edu.bjtu.mis.model.EmploymentArticleDetail
 import cn.edu.bjtu.mis.model.EmploymentConsultationData
+import cn.edu.bjtu.mis.model.EmploymentFilterOption
+import cn.edu.bjtu.mis.model.EmploymentFilterOptions
 import cn.edu.bjtu.mis.model.EmploymentInfoDetail
+import cn.edu.bjtu.mis.model.EmploymentInfoPage
+import cn.edu.bjtu.mis.model.EmploymentInfoQuery
 import cn.edu.bjtu.mis.model.EmploymentInfoSection
 import cn.edu.bjtu.mis.model.EmploymentSectionType
 import cn.edu.bjtu.mis.model.ModuleEnvelope
@@ -30,34 +37,35 @@ class EmploymentConsultationProvider(
     suspend fun fetchConsultationHome(pageSize: Int = 10): ModuleEnvelope<EmploymentConsultationData> {
         val token = fetchToken()
         val normalizedPageSize = pageSize.coerceAtLeast(1)
-        val homePageUrl = "${baseUrl}/frontpage/bjtu/html/index.html"
 
         val sections = listOf(
             EmploymentInfoSection(
                 type = EmploymentSectionType.CareerTalk,
                 title = "宣讲会",
                 listUrl = url("/frontpage/bjtu/html/recruitmentFairList.html?type=3"),
-                items = fetchInfoList(token, EmploymentSectionType.CareerTalk, normalizedPageSize, homePageUrl),
+                items = fetchInfoPage(token, EmploymentInfoQuery(type = EmploymentSectionType.CareerTalk, pageSize = normalizedPageSize)).items,
             ),
             EmploymentInfoSection(
                 type = EmploymentSectionType.JobFair,
                 title = "双选会",
                 listUrl = url("/frontpage/bjtu/html/bilateralchosefairList.html?type=4"),
-                items = fetchInfoList(token, EmploymentSectionType.JobFair, normalizedPageSize, homePageUrl),
+                items = fetchInfoPage(token, EmploymentInfoQuery(type = EmploymentSectionType.JobFair, pageSize = normalizedPageSize)).items,
             ),
             EmploymentInfoSection(
                 type = EmploymentSectionType.Recruitment,
                 title = "招聘信息",
                 listUrl = url("/frontpage/bjtu/html/recruitmentinfoList.html?type=1"),
-                items = fetchInfoList(token, EmploymentSectionType.Recruitment, normalizedPageSize, homePageUrl),
+                items = fetchInfoPage(token, EmploymentInfoQuery(type = EmploymentSectionType.Recruitment, pageSize = normalizedPageSize)).items,
             ),
             EmploymentInfoSection(
                 type = EmploymentSectionType.Internship,
                 title = "实习信息",
                 listUrl = url("/frontpage/bjtu/html/recruitmentinfoList.html?type=2"),
-                items = fetchInfoList(token, EmploymentSectionType.Internship, normalizedPageSize, homePageUrl),
+                items = fetchInfoPage(token, EmploymentInfoQuery(type = EmploymentSectionType.Internship, pageSize = normalizedPageSize)).items,
             ),
         )
+        val filters = runCatching { fetchFilterOptions(token, EmploymentSectionType.Recruitment) }
+            .getOrElse { EmploymentFilterOptions() }
 
         val listResponse = client.postForm(
             url("/f/newsCenter/ajax_list"),
@@ -89,6 +97,7 @@ class EmploymentConsultationProvider(
                 articles = articles,
                 consultationGuide = guide,
                 contacts = defaultEmploymentContacts(),
+                filters = filters,
                 appointmentUrl = appointmentUrl,
                 sourceUrl = ProviderConstants.JOB_HOME_URL,
             ),
@@ -146,6 +155,58 @@ class EmploymentConsultationProvider(
         )
     }
 
+    suspend fun fetchInfoPage(query: EmploymentInfoQuery): ModuleEnvelope<EmploymentInfoPage> {
+        val token = fetchToken()
+        val normalizedQuery = query.copy(
+            pageNo = query.pageNo.coerceAtLeast(1),
+            pageSize = query.pageSize.coerceAtLeast(1),
+        )
+        return ModuleEnvelope(
+            module = "employment_info_page",
+            sourceSystem = "job",
+            coverage = CoverageLevel.Verified,
+            sourceParams = buildJsonObject {
+                put("type", normalizedQuery.type.name)
+                put("page_no", normalizedQuery.pageNo)
+                put("page_size", normalizedQuery.pageSize)
+                put("title", normalizedQuery.title)
+                put("city", normalizedQuery.city)
+                put("corporation_nature", normalizedQuery.corporationNature)
+                put("industry", normalizedQuery.industry)
+            },
+            data = fetchInfoPage(token, normalizedQuery),
+        )
+    }
+
+    suspend fun fetchFilterOptions(type: EmploymentSectionType = EmploymentSectionType.Recruitment): ModuleEnvelope<EmploymentFilterOptions> {
+        val token = fetchToken()
+        return ModuleEnvelope(
+            module = "employment_filter_options",
+            sourceSystem = "job",
+            coverage = CoverageLevel.Verified,
+            sourceParams = buildJsonObject { put("type", type.name) },
+            data = fetchFilterOptions(token, type),
+        )
+    }
+
+    suspend fun fetchCityOptions(parentId: String): ModuleEnvelope<List<EmploymentFilterOption>> {
+        val token = fetchToken()
+        val normalizedParentId = parentId.trim()
+        val response = client.postForm(
+            url("/f/treeData/ajax_getCity"),
+            form = mapOf("parentid" to normalizedParentId),
+            headers = jobHeaders(token, referer = url("/frontpage/bjtu/html/recruitmentinfoList.html?type=1")),
+        )
+        ensureJobSuccess(response.body)
+        return ModuleEnvelope(
+            module = "employment_city_options",
+            sourceSystem = "job",
+            coverage = CoverageLevel.Verified,
+            sourceParams = buildJsonObject { put("parent_id", normalizedParentId) },
+            data = parseEmploymentCityOptions(response.body),
+        )
+    }
+
     private suspend fun fetchArticleDetail(articleId: String, token: String): EmploymentArticleDetail {
         val normalizedId = articleId.trim()
         if (normalizedId.isBlank()) throw IllegalArgumentException("articleId is blank")
@@ -156,6 +217,60 @@ class EmploymentConsultationProvider(
         )
         ensureJobSuccess(response.body)
         return parseEmploymentArticleDetail(response.body)
+    }
+
+    private suspend fun fetchInfoPage(
+        token: String,
+        query: EmploymentInfoQuery,
+    ): EmploymentInfoPage {
+        val response = when (query.type) {
+            EmploymentSectionType.CareerTalk -> client.postForm(
+                url("/f/recruitmentFair/ajax_frontRecruitfair"),
+                form = mapOf(
+                    "pageNo" to query.pageNo.toString(),
+                    "pageSize" to query.pageSize.toString(),
+                    "title" to query.title.trim(),
+                ),
+                headers = jobHeaders(token, referer = listReferer(query.type)),
+            )
+            EmploymentSectionType.JobFair -> client.postForm(
+                url("/f/bilateralchosefair/ajax_frontBilateralchosefair"),
+                form = mapOf(
+                    "pageNo" to query.pageNo.toString(),
+                    "pageSize" to query.pageSize.toString(),
+                ),
+                headers = jobHeaders(token, referer = listReferer(query.type)),
+            )
+            EmploymentSectionType.Recruitment,
+            EmploymentSectionType.Internship -> client.postForm(
+                url("/f/recruitmentinfo/ajax_frontRecruitinfo"),
+                form = mapOf(
+                    "pageNo" to query.pageNo.toString(),
+                    "pageSize" to query.pageSize.toString(),
+                    "positionType" to positionTypeValue(query.type),
+                    "city" to query.city.trim(),
+                    "title" to query.title.trim(),
+                    "corporationNature" to query.corporationNature.trim(),
+                    "corporationinfo.industry" to query.industry.trim(),
+                ),
+                headers = jobHeaders(token, referer = listReferer(query.type)),
+            )
+        }
+        ensureJobSuccess(response.body)
+        return parseEmploymentInfoPage(response.body, query, listReferer(query.type))
+    }
+
+    private suspend fun fetchFilterOptions(
+        token: String,
+        type: EmploymentSectionType,
+    ): EmploymentFilterOptions {
+        val response = client.postForm(
+            url("/f/recruitmentinfo/ajax_search"),
+            form = mapOf("positionType" to positionTypeValue(type).ifBlank { "1" }),
+            headers = jobHeaders(token, referer = listReferer(type)),
+        )
+        ensureJobSuccess(response.body)
+        return parseEmploymentFilterOptions(response.body)
     }
 
     private suspend fun fetchInfoList(
@@ -232,6 +347,21 @@ class EmploymentConsultationProvider(
             EmploymentSectionType.JobFair -> url("/f/bilateralchosefair/show?bilateralchosefairId=$itemId")
             EmploymentSectionType.Recruitment,
             EmploymentSectionType.Internship -> url("/f/recruitmentinfo/show?recruitmentId=$itemId")
+        }
+
+    private fun listReferer(type: EmploymentSectionType): String =
+        when (type) {
+            EmploymentSectionType.CareerTalk -> url("/frontpage/bjtu/html/recruitmentFairList.html?type=3")
+            EmploymentSectionType.JobFair -> url("/frontpage/bjtu/html/bilateralchosefairList.html?type=4")
+            EmploymentSectionType.Recruitment -> url("/frontpage/bjtu/html/recruitmentinfoList.html?type=1")
+            EmploymentSectionType.Internship -> url("/frontpage/bjtu/html/recruitmentinfoList.html?type=2")
+        }
+
+    private fun positionTypeValue(type: EmploymentSectionType): String =
+        when (type) {
+            EmploymentSectionType.Recruitment -> "1"
+            EmploymentSectionType.Internship -> "2"
+            else -> ""
         }
 
     private fun url(path: String): String =

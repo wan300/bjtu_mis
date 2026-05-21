@@ -22,7 +22,6 @@ junit = "4.13.2"
 mockwebserver = "4.12.0"
 pytorchAndroid = "2.1.0"
 javascriptengine = "1.1.0"
-chaquopy = "17.0.0"
 pdfboxAndroid = "2.0.27.0"
 media3 = "1.5.1"
 commonsCompress = "1.28.0"
@@ -74,4 +73,3 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
-chaquopy = { id = "com.chaquo.python", version.ref = "chaquopy" }

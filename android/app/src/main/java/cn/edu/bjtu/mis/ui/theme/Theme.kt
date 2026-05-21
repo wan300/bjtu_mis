@@ -20,9 +20,11 @@ import androidx.core.view.WindowCompat
 
 enum class AppThemeOption(
     val storageValue: String,
+    val isDark: Boolean = false,
 ) {
     Default("default"),
-    MascotGold("mascot_gold");
+    MascotGold("mascot_gold", isDark = true),
+    IllustrationRose("illustration_rose");
 
     companion object {
         fun fromStorageValue(value: String?): AppThemeOption =
@@ -82,6 +84,33 @@ private val MascotGoldScheme: ColorScheme = darkColorScheme(
     onErrorContainer = Color(0xFFFFDAD6),
 )
 
+private val IllustrationRoseScheme: ColorScheme = lightColorScheme(
+    primary = Color(0xFFB86B63),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFF4D8D0),
+    onPrimaryContainer = Color(0xFF3A1814),
+    secondary = Color(0xFF91524B),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFF3D7D1),
+    onSecondaryContainer = Color(0xFF351614),
+    tertiary = Color(0xFF576484),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFDDE4FF),
+    onTertiaryContainer = Color(0xFF121D3B),
+    background = Color(0xFFFFF8F3),
+    onBackground = Color(0xFF2A2429),
+    surface = Color.White,
+    onSurface = Color(0xFF2A2429),
+    surfaceVariant = Color(0xFFF4E4D4),
+    onSurfaceVariant = Color(0xFF674C48),
+    outline = Color(0xFFD2B4A3),
+    outlineVariant = Color(0xFFEAD2C5),
+    error = Color(0xFFBA1A1A),
+    onError = Color.White,
+    errorContainer = Color(0xFFFFDAD6),
+    onErrorContainer = Color(0xFF410002),
+)
+
 private val AppShapes = Shapes(
     extraSmall = RoundedCornerShape(6.dp),
     small = RoundedCornerShape(8.dp),
@@ -98,8 +127,9 @@ fun BjtuMisTheme(
     val colorScheme = when (themeOption) {
         AppThemeOption.Default -> LightScheme
         AppThemeOption.MascotGold -> MascotGoldScheme
+        AppThemeOption.IllustrationRose -> IllustrationRoseScheme
     }
-    val isDark = themeOption == AppThemeOption.MascotGold
+    val isDark = themeOption.isDark
 
     MaterialTheme(
         colorScheme = colorScheme,

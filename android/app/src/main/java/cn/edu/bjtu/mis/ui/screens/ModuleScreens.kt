@@ -329,6 +329,15 @@ fun ProfileThemeScreen(
                         showChevron = false,
                         onClick = { onThemeSelected(AppThemeOption.MascotGold) },
                     ),
+                    ProfileSettingsItem(
+                        title = "奶油粉",
+                        subtitle = "奶油背景与玫瑰茶棕主色",
+                        iconLabel = "粉",
+                        iconColor = Color(0xFFB86B63),
+                        trailingText = if (selectedTheme == AppThemeOption.IllustrationRose) "当前" else null,
+                        showChevron = false,
+                        onClick = { onThemeSelected(AppThemeOption.IllustrationRose) },
+                    ),
                 ),
             )
         }
@@ -601,6 +610,7 @@ private fun themeOptionLabel(option: AppThemeOption): String =
     when (option) {
         AppThemeOption.Default -> "蓝白色"
         AppThemeOption.MascotGold -> "暖金黑"
+        AppThemeOption.IllustrationRose -> "奶油粉"
     }
 
 @Composable

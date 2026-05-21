@@ -7,7 +7,11 @@ import cn.edu.bjtu.mis.model.EmploymentArticleDetail
 import cn.edu.bjtu.mis.model.EmploymentArticleSummary
 import cn.edu.bjtu.mis.model.EmploymentCompanyInfo
 import cn.edu.bjtu.mis.model.EmploymentContactInfo
+import cn.edu.bjtu.mis.model.EmploymentFilterOption
+import cn.edu.bjtu.mis.model.EmploymentFilterOptions
 import cn.edu.bjtu.mis.model.EmploymentInfoDetail
+import cn.edu.bjtu.mis.model.EmploymentInfoPage
+import cn.edu.bjtu.mis.model.EmploymentInfoQuery
 import cn.edu.bjtu.mis.model.EmploymentInfoSummary
 import cn.edu.bjtu.mis.model.EmploymentPositionInfo
 import cn.edu.bjtu.mis.model.EmploymentSectionType
@@ -88,16 +92,72 @@ fun parseEmploymentInfoList(
     type: EmploymentSectionType,
     pageUrl: String = ProviderConstants.JOB_HOME_URL,
 ): List<EmploymentInfoSummary> {
-    val list = AppJson.parseToJsonElement(body)
-        .asObject()
-        ?.array("object")
-        ?: return emptyList()
-    return list.mapNotNull { item ->
+    val query = EmploymentInfoQuery(type = type)
+    return parseEmploymentInfoPage(body, query, pageUrl).items
+}
+
+fun parseEmploymentInfoPage(
+    body: String,
+    query: EmploymentInfoQuery,
+    pageUrl: String = ProviderConstants.JOB_HOME_URL,
+): EmploymentInfoPage {
+    val root = AppJson.parseToJsonElement(body).asObject()
+    val objectElement = root?.get("object")
+    val objectBody = objectElement?.asObject()
+    val list = when (objectElement) {
+        is JsonArray -> objectElement
+        else -> objectBody?.array("list")
+    }.orEmpty()
+    val items = parseEmploymentInfoRows(list, query.type, pageUrl)
+    val pageNo = objectBody?.employmentInt("pageNo") ?: query.pageNo.coerceAtLeast(1)
+    val pageSize = objectBody?.employmentInt("pageSize") ?: query.pageSize.coerceAtLeast(1)
+    val totalCount = objectBody?.employmentInt("count")
+        ?: objectBody?.employmentInt("total")
+        ?: if (objectElement is JsonArray) items.size else 0
+    val totalPage = objectBody?.employmentInt("totalPage")
+        ?: if (pageSize > 0 && totalCount > 0) ((totalCount + pageSize - 1) / pageSize) else 1
+    return EmploymentInfoPage(
+        type = query.type,
+        title = employmentSectionTitle(query.type),
+        listUrl = employmentListUrl(query.type),
+        query = query.copy(pageNo = pageNo, pageSize = pageSize),
+        items = items,
+        pageNo = pageNo,
+        pageSize = pageSize,
+        totalCount = totalCount,
+        totalPage = totalPage.coerceAtLeast(1),
+        hasNext = pageNo < totalPage,
+    )
+}
+
+fun parseEmploymentFilterOptions(body: String): EmploymentFilterOptions {
+    val data = AppJson.parseToJsonElement(body).asObject()?.obj("object")
+    return EmploymentFilterOptions(
+        positionTypes = parseEmploymentOptions(data?.array("positionType")),
+        corporationNatures = parseEmploymentOptions(data?.array("corporationNature")),
+        industries = parseEmploymentOptions(data?.array("industry")),
+    )
+}
+
+fun parseEmploymentCityOptions(body: String): List<EmploymentFilterOption> {
+    val list = AppJson.parseToJsonElement(body).asObject()?.array("object").orEmpty()
+    return parseEmploymentOptions(list)
+}
+
+private fun parseEmploymentInfoRows(
+    list: List<JsonElement>,
+    type: EmploymentSectionType,
+    pageUrl: String,
+): List<EmploymentInfoSummary> =
+    list.mapNotNull { item ->
         val row = item.asObject() ?: return@mapNotNull null
         val id = row.string("id") ?: return@mapNotNull null
         val title = row.string("title") ?: return@mapNotNull null
         val company = row.obj("corporationinfo")
-        val rawUrl = row.string("url") ?: defaultEmploymentDetailPath(type, id)
+        val rawUrl = when {
+            type == EmploymentSectionType.CareerTalk && row.string("fairType") == "5" -> row.string("otherlink")
+            else -> row.string("url")
+        } ?: defaultEmploymentDetailPath(type, id)
         EmploymentInfoSummary(
             id = id,
             type = type,
@@ -112,14 +172,22 @@ fun parseEmploymentInfoList(
             location = employmentLocation(row),
             browseNumber = row.string("browseNumber"),
             logoUrl = company?.string("logoUrl")?.let { absoluteEmploymentUrl(it, pageUrl) },
-            statusLabel = row.string("holdStatus"),
-            education = row.string("education"),
+            statusLabel = row.string("holdStatus") ?: row.string("positionTypeValue"),
+            education = row.string("education") ?: row.string("studentType"),
             majorName = row.string("majorName"),
             positionCount = row.employmentInt("positionNum"),
             isExternalLink = isExternalEmploymentUrl(rawUrl),
         )
     }
-}
+
+private fun parseEmploymentOptions(list: List<JsonElement>?): List<EmploymentFilterOption> =
+    list.orEmpty().mapNotNull { item ->
+        val row = item.asObject() ?: return@mapNotNull null
+        val label = row.string("label") ?: row.string("name") ?: row.string("text")
+        val value = row.string("value") ?: row.string("id") ?: label
+        if (value.isNullOrBlank() || label.isNullOrBlank()) return@mapNotNull null
+        EmploymentFilterOption(value = value, label = label)
+    }.distinctBy { it.value }
 
 fun parseEmploymentInfoDetail(
     body: String,
@@ -341,6 +409,23 @@ private fun employmentLocation(row: JsonObject): String? =
         ?: row.string("realPlace")
         ?: row.string("place")
         ?: row.string("fieldExport")
+        ?: row.string("cityName")
+
+private fun employmentSectionTitle(type: EmploymentSectionType): String =
+    when (type) {
+        EmploymentSectionType.CareerTalk -> "宣讲会"
+        EmploymentSectionType.JobFair -> "双选会"
+        EmploymentSectionType.Recruitment -> "招聘信息"
+        EmploymentSectionType.Internship -> "实习信息"
+    }
+
+private fun employmentListUrl(type: EmploymentSectionType): String =
+    ProviderConstants.JOB_BASE_URL + when (type) {
+        EmploymentSectionType.CareerTalk -> "/frontpage/bjtu/html/recruitmentFairList.html?type=3"
+        EmploymentSectionType.JobFair -> "/frontpage/bjtu/html/bilateralchosefairList.html?type=4"
+        EmploymentSectionType.Recruitment -> "/frontpage/bjtu/html/recruitmentinfoList.html?type=1"
+        EmploymentSectionType.Internship -> "/frontpage/bjtu/html/recruitmentinfoList.html?type=2"
+    }
 
 private fun defaultEmploymentDetailPath(type: EmploymentSectionType, id: String): String =
     when (type) {
