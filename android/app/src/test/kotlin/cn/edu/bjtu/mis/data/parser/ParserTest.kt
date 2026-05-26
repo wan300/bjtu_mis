@@ -75,6 +75,12 @@ class ParserTest {
         assertEquals(2, data.rooms.size)
         assertEquals(listOf(true, false, true, true), data.rooms[1].availability)
         assertEquals(listOf("free", "busy", "free", "free"), data.rooms[1].cellStates)
+        assertEquals("2024-2025-2-1", data.query["term"])
+        assertEquals("8", data.query["week"])
+        assertEquals("SX", data.query["building"])
+        assertEquals(listOf("2024-2025-1-1", "2024-2025-2-1"), data.availableTerms.map { it.value })
+        assertEquals(listOf("7", "8"), data.availableWeeks.map { it.value })
+        assertEquals(listOf("", "SX"), data.availableBuildings.map { it.value })
     }
 
     @Test

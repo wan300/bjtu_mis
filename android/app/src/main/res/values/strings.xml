@@ -24,5 +24,5 @@
     <string name="calendar">学年日历</string>
     <string name="homework">作业</string>
     <string name="empty_rooms">空教室</string>
-    <string name="timetable_widget_description">今天和明天的课表</string>
+    <string name="timetable_widget_description">学年日历和今日课表</string>
 </resources>

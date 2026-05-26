@@ -1,5 +1,8 @@
 package cn.edu.bjtu.mis.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Canvas
@@ -52,6 +55,7 @@ import androidx.compose.ui.zIndex
 import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.data.provider.SessionValidationPolicy
 import cn.edu.bjtu.mis.data.sync.SessionKeepAliveForegroundService
+import cn.edu.bjtu.mis.data.update.AppUpdateInfo
 import cn.edu.bjtu.mis.di.AppContainer
 import cn.edu.bjtu.mis.model.AutoLoginStatus
 import cn.edu.bjtu.mis.model.ModuleKeys
@@ -80,6 +84,7 @@ import cn.edu.bjtu.mis.ui.screens.ZhixingScreen
 import cn.edu.bjtu.mis.ui.screens.navigationTargets
 import cn.edu.bjtu.mis.ui.theme.AppThemeOption
 import cn.edu.bjtu.mis.ui.theme.BjtuMisSystemBars
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private const val RouteHome = "overview"
@@ -138,6 +143,8 @@ fun BjtuMisApp(
     var autoLoginRetrying by remember { mutableStateOf(false) }
     var openWebUiBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
     var hasOpenedOpenWebUiAgent by remember { mutableStateOf(false) }
+    var updateCheckStarted by remember { mutableStateOf(false) }
+    var pendingUpdate by remember { mutableStateOf<AppUpdateInfo?>(null) }
 
     fun startBackgroundQuickSync() {
         scope.launch {
@@ -218,6 +225,18 @@ fun BjtuMisApp(
     }
 
     LaunchedEffect(Unit) { refreshSession() }
+    LaunchedEffect(ready) {
+        if (!updateCheckStarted && ready != null) {
+            updateCheckStarted = true
+            pendingUpdate = try {
+                container.appUpdateChecker.checkForUpdate()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
     LaunchedEffect(current) {
         if (current == ModuleKeys.OpenWebUiAgent) {
             hasOpenedOpenWebUiAgent = true
@@ -236,6 +255,31 @@ fun BjtuMisApp(
             showExitDialog = false
             onRouteHandled()
         }
+    }
+
+    pendingUpdate?.takeIf { !showAutoLoginFailedDialog }?.let { update ->
+        AlertDialog(
+            onDismissRequest = { pendingUpdate = null },
+            title = { Text("发现新版本") },
+            text = {
+                Text("当前版本：${update.currentVersion}\n最新版本：${update.latestVersion}")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingUpdate = null
+                        openExternalUrl(context, update.releaseUrl)
+                    },
+                ) {
+                    Text("查看更新")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingUpdate = null }) {
+                    Text("稍后")
+                }
+            },
+        )
     }
 
     if (showAutoLoginFailedDialog) {
@@ -475,16 +519,24 @@ private fun ModuleRoute(
             onNavigate = onNavigate,
         )
         ModuleKeys.Scores -> ScoresScreen(container.moduleRepository)
-        ModuleKeys.Calendar -> CalendarScreen(container.moduleRepository)
+        ModuleKeys.Calendar -> CalendarScreen(
+            repository = container.moduleRepository,
+            employmentRepository = container.employmentConsultationRepository,
+            employmentCalendarSyncStore = container.employmentCalendarSyncStore,
+        )
         ModuleKeys.Homework -> HomeworkScreen(
             repository = container.moduleRepository,
             attachmentRepository = container.homeworkAttachmentRepository,
+            offsetStore = container.homeworkTimeOffsetStore,
             onNavigate = onNavigate,
             onOpenAgent = { onNavigate(ModuleKeys.OpenWebUiAgent) },
         )
         ModuleKeys.Mail -> MailScreen(container.mailRepository)
         ModuleKeys.Zhixing -> ZhixingScreen(container.zhixingRepository)
-        ModuleKeys.EmploymentConsultation -> EmploymentConsultationScreen(container.employmentConsultationRepository)
+        ModuleKeys.EmploymentConsultation -> EmploymentConsultationScreen(
+            repository = container.employmentConsultationRepository,
+            employmentCalendarSyncStore = container.employmentCalendarSyncStore,
+        )
         ModuleKeys.CourseResources -> CourseResourcesScreen(container.courseResourceRepository)
         ModuleKeys.CourseReplay -> CourseReplayScreen(container.courseReplayRepository, container.httpClient.client)
         ModuleKeys.EmptyRooms -> EmptyRoomsScreen(container.moduleRepository)
@@ -653,6 +705,12 @@ private fun ShellLineIcon(icon: ShellIcon, color: Color, modifier: Modifier = Mo
             }
         }
     }
+}
+
+private fun openExternalUrl(context: Context, url: String) {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
 }
 
 @Composable

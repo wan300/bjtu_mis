@@ -1,6 +1,8 @@
 package cn.edu.bjtu.mis.widget
 
 import cn.edu.bjtu.mis.model.CourseEntry
+import cn.edu.bjtu.mis.model.CalendarData
+import cn.edu.bjtu.mis.model.CalendarItem
 import cn.edu.bjtu.mis.model.TimetableData
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
@@ -92,7 +94,7 @@ class TimetableWidgetMapperTest {
     }
 
     @Test
-    fun sortsByPeriodAndLimitsEachDayToThreeCourses() {
+    fun sortsByPeriodAndKeepsAllCoursesForScrollableList() {
         val model = TimetableWidgetMapper.map(
             data = TimetableData(
                 entries = listOf(
@@ -107,7 +109,31 @@ class TimetableWidgetMapperTest {
         )
 
         assertEquals(4, model.today.totalCount)
-        assertEquals(listOf("第一节", "第二节", "第三节"), model.today.courses.map { it.title })
+        assertEquals(listOf("第一节", "第二节", "第三节", "第四节"), model.today.courses.map { it.title })
+    }
+
+    @Test
+    fun mapsTodayAndTomorrowCalendarEvents() {
+        val model = TimetableWidgetMapper.map(
+            data = TimetableData(),
+            currentWeek = 12,
+            today = monday,
+            calendar = CalendarData(
+                month = "2026-05",
+                items = listOf(
+                    CalendarItem(date = "2026-05-18", week = "12", note = "补课安排"),
+                    CalendarItem(date = "2026-05-18", week = "12", note = "考试周提醒"),
+                    CalendarItem(date = "2026-05-19", week = "12", note = "校历安排"),
+                    CalendarItem(date = "2026-05-20", week = "12", note = "不应显示"),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf("补课安排", "考试周提醒", "校历安排"),
+            model.calendarEvents.map { it.title },
+        )
+        assertEquals(listOf("今天", "今天", "明天"), model.calendarEvents.map { it.dayLabel })
     }
 
     private fun course(

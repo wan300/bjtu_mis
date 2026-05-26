@@ -50,6 +50,11 @@
         </receiver>
 
         <service
+            android:name=".widget.TimetableWidgetRemoteViewsService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
+        <service
             android:name=".data.course.CourseSelectionForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />

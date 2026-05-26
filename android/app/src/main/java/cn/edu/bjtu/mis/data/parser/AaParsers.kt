@@ -26,12 +26,16 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import java.net.URI
 
-fun parseSelectOptions(document: Element, fieldName: String): Pair<List<TermOption>, String?> {
+fun parseSelectOptions(
+    document: Element,
+    fieldName: String,
+    includeBlank: Boolean = false,
+): Pair<List<TermOption>, String?> {
     val select = document.selectFirst("select[name=$fieldName], select#$fieldName")
         ?: return emptyList<TermOption>() to null
     val options = select.select("option").mapNotNull { option ->
         val value = normalizeSpace(option.attr("value"))
-        if (value.isBlank()) return@mapNotNull null
+        if (value.isBlank() && !includeBlank) return@mapNotNull null
         TermOption(value = value, label = normalizeSpace(option.text()).ifBlank { value }, selected = option.hasAttr("selected"))
     }
     return options to (options.firstOrNull { it.selected }?.value ?: options.firstOrNull()?.value)
@@ -678,9 +682,35 @@ fun parseAcademicProgress(html: String): AcademicProgressData {
 
 fun parseEmptyRooms(html: String, requestedQuery: Map<String, String?> = emptyMap()): EmptyRoomData {
     val document = Jsoup.parse(html)
-    val table = document.selectFirst("table.table, table") ?: return EmptyRoomData(query = requestedQuery)
+    val (termOptions, selectedTerm) = parseSelectOptions(document, "zxjxjhh")
+    val (weekOptions, selectedWeek) = parseSelectOptions(document, "zc")
+    val (buildingOptions, selectedBuilding) = parseSelectOptions(document, "jxlh", includeBlank = true)
+    val formQuery = mapOf(
+        "term" to (selectedTerm ?: parseInputValue(document, "zxjxjhh")),
+        "week" to (selectedWeek ?: parseInputValue(document, "zc")),
+        "building" to (selectedBuilding ?: parseInputValue(document, "jxlh")),
+        "room" to parseInputValue(document, "jash"),
+    ).filterValues { !it.isNullOrBlank() }
+    val query = formQuery + requestedQuery.filterValues { !it.isNullOrBlank() }
+    fun emptyData(
+        days: List<String> = emptyList(),
+        periods: List<Int> = emptyList(),
+        slots: List<EmptyRoomSlotHeader> = emptyList(),
+        rooms: List<EmptyRoomRow> = emptyList(),
+    ) = EmptyRoomData(
+        query = query,
+        availableTerms = termOptions,
+        availableWeeks = weekOptions,
+        availableBuildings = buildingOptions,
+        days = days,
+        periods = periods,
+        slots = slots,
+        rooms = rooms,
+    )
+
+    val table = document.selectFirst("table.table, table") ?: return emptyData()
     val rows = table.select("> tbody > tr, > tr")
-    if (rows.size < 2) return EmptyRoomData(query = requestedQuery)
+    if (rows.size < 2) return emptyData()
 
     val slotDays = mutableListOf<Pair<String, String?>>()
     rows[0].select("> th").drop(1).forEach { cell ->
@@ -703,7 +733,7 @@ fun parseEmptyRooms(html: String, requestedQuery: Map<String, String?> = emptyMa
     val rooms = rows.drop(2).mapNotNull { row ->
         val cells = row.select("> th, > td")
         if (cells.size < 2) return@mapNotNull null
-        val roomText = normalizeSpace(cells.first().text())
+        val roomText = normalizeSpace(cells.firstOrNull()?.text().orEmpty())
         if (roomText.isBlank()) return@mapNotNull null
         val seat = Regex("""\(([^)]+)\)""").find(roomText)?.groupValues?.get(1)
         val cellStates = cells.drop(1).map { cell ->
@@ -719,18 +749,10 @@ fun parseEmptyRooms(html: String, requestedQuery: Map<String, String?> = emptyMa
         )
     }
 
-    val query = requestedQuery.ifEmpty {
-        mapOf(
-            "term" to parseInputValue(document, "zxjxjhh"),
-            "week" to parseInputValue(document, "zc"),
-            "building" to parseInputValue(document, "jxlh"),
-            "room" to parseInputValue(document, "jash"),
-        )
-    }
     val days = slots.map { normalizeSpace(listOfNotNull(it.day, it.date).joinToString(" ")) }
         .filter { it.isNotBlank() }
         .distinct()
-    return EmptyRoomData(query = query, days = days, periods = periods.toList(), slots = slots, rooms = rooms)
+    return emptyData(days = days, periods = periods.toList(), slots = slots, rooms = rooms)
 }
 
 private const val EmptyRoomCellFree = "free"

@@ -39,314 +39,103 @@
             android:textSize="13sp" />
     </LinearLayout>
 
-    <LinearLayout
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="学年日历"
+        android:textColor="#52606D"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+    <ListView
+        android:id="@+id/timetable_widget_calendar_list"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="5dp"
         android:layout_weight="1"
-        android:baselineAligned="false"
+        android:cacheColorHint="@android:color/transparent"
+        android:clipToPadding="false"
+        android:divider="@android:color/transparent"
+        android:dividerHeight="6dp"
+        android:fadeScrollbars="false"
+        android:fadingEdge="none"
+        android:overScrollMode="never"
+        android:scrollbarStyle="outsideOverlay"
+        android:scrollbars="vertical" />
+
+    <TextView
+        android:id="@+id/timetable_widget_calendar_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:gravity="center"
+        android:text="今明两天暂无校历事项"
+        android:textColor="#8795A1"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
+        android:background="#C9D2DC"
+        android:text="" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:paddingEnd="8dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:id="@+id/timetable_widget_today_label"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="今天"
-                    android:textColor="#52606D"
-                    android:textSize="12sp" />
-
-                <TextView
-                    android:id="@+id/timetable_widget_today_date"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:layout_weight="1"
-                    android:ellipsize="end"
-                    android:gravity="end"
-                    android:maxLines="1"
-                    android:text="5.18 周一"
-                    android:textColor="#6B7280"
-                    android:textSize="12sp" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/timetable_widget_today_empty"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:gravity="center"
-                android:text="暂无课程"
-                android:textColor="#8795A1"
-                android:textSize="13sp" />
-
-            <LinearLayout
-                android:id="@+id/timetable_widget_today_course_1"
-                style="@style/TimetableWidgetCourseRow">
-
-                <TextView
-                    android:id="@+id/timetable_widget_today_course_1_bar"
-                    android:text=""
-                    style="@style/TimetableWidgetCourseBar" />
-
-                <LinearLayout style="@style/TimetableWidgetCourseTextColumn">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:id="@+id/timetable_widget_today_course_1_title"
-                            style="@style/TimetableWidgetCourseTitle"
-                            android:layout_width="0dp"
-                            android:layout_weight="1" />
-
-                        <TextView
-                            android:id="@+id/timetable_widget_today_course_1_time"
-                            style="@style/TimetableWidgetCourseTime" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/timetable_widget_today_course_1_detail"
-                        style="@style/TimetableWidgetCourseDetail" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/timetable_widget_today_course_2"
-                style="@style/TimetableWidgetCourseRow">
-
-                <TextView
-                    android:id="@+id/timetable_widget_today_course_2_bar"
-                    android:text=""
-                    style="@style/TimetableWidgetCourseBar" />
-
-                <LinearLayout style="@style/TimetableWidgetCourseTextColumn">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:id="@+id/timetable_widget_today_course_2_title"
-                            style="@style/TimetableWidgetCourseTitle"
-                            android:layout_width="0dp"
-                            android:layout_weight="1" />
-
-                        <TextView
-                            android:id="@+id/timetable_widget_today_course_2_time"
-                            style="@style/TimetableWidgetCourseTime" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/timetable_widget_today_course_2_detail"
-                        style="@style/TimetableWidgetCourseDetail" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/timetable_widget_today_course_3"
-                style="@style/TimetableWidgetCourseRow">
-
-                <TextView
-                    android:id="@+id/timetable_widget_today_course_3_bar"
-                    android:text=""
-                    style="@style/TimetableWidgetCourseBar" />
-
-                <LinearLayout style="@style/TimetableWidgetCourseTextColumn">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:id="@+id/timetable_widget_today_course_3_title"
-                            style="@style/TimetableWidgetCourseTitle"
-                            android:layout_width="0dp"
-                            android:layout_weight="1" />
-
-                        <TextView
-                            android:id="@+id/timetable_widget_today_course_3_time"
-                            style="@style/TimetableWidgetCourseTime" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/timetable_widget_today_course_3_detail"
-                        style="@style/TimetableWidgetCourseDetail" />
-                </LinearLayout>
-            </LinearLayout>
-        </LinearLayout>
+        <TextView
+            android:id="@+id/timetable_widget_today_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="今天"
+            android:textColor="#52606D"
+            android:textSize="12sp"
+            android:textStyle="bold" />
 
         <TextView
-            android:layout_width="1dp"
-            android:layout_height="match_parent"
-            android:background="#C9D2DC"
-            android:text="" />
-
-        <LinearLayout
+            android:id="@+id/timetable_widget_today_date"
             android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:orientation="vertical"
-            android:paddingStart="8dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:id="@+id/timetable_widget_tomorrow_label"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="明天"
-                    android:textColor="#52606D"
-                    android:textSize="12sp" />
-
-                <TextView
-                    android:id="@+id/timetable_widget_tomorrow_date"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:layout_weight="1"
-                    android:ellipsize="end"
-                    android:gravity="end"
-                    android:maxLines="1"
-                    android:text="5.19 周二"
-                    android:textColor="#6B7280"
-                    android:textSize="12sp" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/timetable_widget_tomorrow_empty"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:gravity="center"
-                android:text="暂无课程"
-                android:textColor="#8795A1"
-                android:textSize="13sp" />
-
-            <LinearLayout
-                android:id="@+id/timetable_widget_tomorrow_course_1"
-                style="@style/TimetableWidgetCourseRow">
-
-                <TextView
-                    android:id="@+id/timetable_widget_tomorrow_course_1_bar"
-                    android:text=""
-                    style="@style/TimetableWidgetCourseBar" />
-
-                <LinearLayout style="@style/TimetableWidgetCourseTextColumn">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:id="@+id/timetable_widget_tomorrow_course_1_title"
-                            style="@style/TimetableWidgetCourseTitle"
-                            android:layout_width="0dp"
-                            android:layout_weight="1" />
-
-                        <TextView
-                            android:id="@+id/timetable_widget_tomorrow_course_1_time"
-                            style="@style/TimetableWidgetCourseTime" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/timetable_widget_tomorrow_course_1_detail"
-                        style="@style/TimetableWidgetCourseDetail" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/timetable_widget_tomorrow_course_2"
-                style="@style/TimetableWidgetCourseRow">
-
-                <TextView
-                    android:id="@+id/timetable_widget_tomorrow_course_2_bar"
-                    android:text=""
-                    style="@style/TimetableWidgetCourseBar" />
-
-                <LinearLayout style="@style/TimetableWidgetCourseTextColumn">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:id="@+id/timetable_widget_tomorrow_course_2_title"
-                            style="@style/TimetableWidgetCourseTitle"
-                            android:layout_width="0dp"
-                            android:layout_weight="1" />
-
-                        <TextView
-                            android:id="@+id/timetable_widget_tomorrow_course_2_time"
-                            style="@style/TimetableWidgetCourseTime" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/timetable_widget_tomorrow_course_2_detail"
-                        style="@style/TimetableWidgetCourseDetail" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/timetable_widget_tomorrow_course_3"
-                style="@style/TimetableWidgetCourseRow">
-
-                <TextView
-                    android:id="@+id/timetable_widget_tomorrow_course_3_bar"
-                    android:text=""
-                    style="@style/TimetableWidgetCourseBar" />
-
-                <LinearLayout style="@style/TimetableWidgetCourseTextColumn">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:id="@+id/timetable_widget_tomorrow_course_3_title"
-                            style="@style/TimetableWidgetCourseTitle"
-                            android:layout_width="0dp"
-                            android:layout_weight="1" />
-
-                        <TextView
-                            android:id="@+id/timetable_widget_tomorrow_course_3_time"
-                            style="@style/TimetableWidgetCourseTime" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/timetable_widget_tomorrow_course_3_detail"
-                        style="@style/TimetableWidgetCourseDetail" />
-                </LinearLayout>
-            </LinearLayout>
-        </LinearLayout>
+            android:ellipsize="end"
+            android:gravity="end"
+            android:maxLines="1"
+            android:text="5.18 周一"
+            android:textColor="#6B7280"
+            android:textSize="12sp" />
     </LinearLayout>
+
+    <ListView
+        android:id="@+id/timetable_widget_today_course_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="5dp"
+        android:layout_weight="1.12"
+        android:cacheColorHint="@android:color/transparent"
+        android:clipToPadding="false"
+        android:divider="@android:color/transparent"
+        android:dividerHeight="6dp"
+        android:fadeScrollbars="false"
+        android:fadingEdge="none"
+        android:overScrollMode="never"
+        android:scrollbarStyle="outsideOverlay"
+        android:scrollbars="vertical" />
+
+    <TextView
+        android:id="@+id/timetable_widget_today_course_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:gravity="center"
+        android:text="暂无今日课程"
+        android:textColor="#8795A1"
+        android:textSize="13sp"
+        android:visibility="gone" />
 </LinearLayout>

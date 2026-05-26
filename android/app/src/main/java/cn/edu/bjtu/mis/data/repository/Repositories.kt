@@ -11,6 +11,8 @@ import cn.edu.bjtu.mis.data.db.encodeSummary
 import cn.edu.bjtu.mis.data.db.toEntity
 import cn.edu.bjtu.mis.data.db.toModel
 import cn.edu.bjtu.mis.data.db.toCourseEntry
+import cn.edu.bjtu.mis.data.employment.EmploymentCalendarEvent
+import cn.edu.bjtu.mis.data.employment.employmentCalendarEvents
 import cn.edu.bjtu.mis.data.homework.homeworkMatchesStatusFilter
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.data.perf.PerfTrace
@@ -904,6 +906,27 @@ class EmploymentConsultationRepository(
 
     suspend fun cityOptions(parentId: String): ModuleEnvelope<List<EmploymentFilterOption>> =
         EmploymentConsultationProvider(client).fetchCityOptions(parentId).copy(syncedAt = nowIso())
+
+    suspend fun calendarEvents(
+        pageSize: Int = 50,
+        forceRefresh: Boolean = false,
+    ): List<EmploymentCalendarEvent> {
+        val normalizedPageSize = pageSize.coerceAtLeast(1)
+        val items = listOf(
+            EmploymentSectionType.CareerTalk,
+            EmploymentSectionType.JobFair,
+        ).flatMap { type ->
+            infoPage(
+                query = EmploymentInfoQuery(
+                    type = type,
+                    pageNo = 1,
+                    pageSize = normalizedPageSize,
+                ),
+                forceRefresh = forceRefresh,
+            ).data.items
+        }
+        return employmentCalendarEvents(items)
+    }
 
     suspend fun infoDetail(
         type: EmploymentSectionType,

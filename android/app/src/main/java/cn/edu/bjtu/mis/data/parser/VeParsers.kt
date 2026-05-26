@@ -54,7 +54,11 @@ fun parseCalendar(
     val items = payload.list("maps").mapNotNull { item ->
         val obj = item as? JsonObject ?: return@mapNotNull null
         val date = obj.text("dayTime") ?: return@mapNotNull null
-        CalendarItem(date = date, week = week)
+        CalendarItem(
+            date = date,
+            week = week,
+            note = obj.firstText("title", "name", "note", "content", "remark", "remarks", "text", "calendarName", "eventName", "mc", "bz"),
+        )
     }
     return CalendarData(
         month = month,

@@ -6,8 +6,8 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
-import android.view.View
 import android.widget.RemoteViews
 import cn.edu.bjtu.mis.BjtuMisApplication
 import cn.edu.bjtu.mis.MainActivity
@@ -36,15 +36,6 @@ class TimetableWidgetProvider : AppWidgetProvider() {
     }
 
     companion object {
-        private val stripeColors = intArrayOf(
-            0xFF8B5CF6.toInt(),
-            0xFF2563EB.toInt(),
-            0xFFEF4444.toInt(),
-            0xFF0F766E.toInt(),
-            0xFFF97316.toInt(),
-            0xFF16A34A.toInt(),
-        )
-
         fun refreshAll(context: Context) {
             CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
                 runCatching { updateAllNow(context.applicationContext) }
@@ -79,8 +70,10 @@ class TimetableWidgetProvider : AppWidgetProvider() {
             if (appWidgetIds.isEmpty()) return
             val model = loadModel(context)
             appWidgetIds.forEach { appWidgetId ->
-                appWidgetManager.updateAppWidget(appWidgetId, buildRemoteViews(context, model))
+                appWidgetManager.updateAppWidget(appWidgetId, buildRemoteViews(context, model, appWidgetId))
             }
+            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.timetable_widget_calendar_list)
+            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.timetable_widget_today_course_list)
         }
 
         private suspend fun loadModel(context: Context): TimetableWidgetModel =
@@ -90,61 +83,40 @@ class TimetableWidgetProvider : AppWidgetProvider() {
                 TimetableWidgetDataSource(app.container.database.dao()).load()
             }
 
-        private fun buildRemoteViews(context: Context, model: TimetableWidgetModel): RemoteViews =
+        private fun buildRemoteViews(
+            context: Context,
+            model: TimetableWidgetModel,
+            appWidgetId: Int,
+        ): RemoteViews =
             RemoteViews(context.packageName, R.layout.timetable_widget).apply {
                 setTextViewText(R.id.timetable_widget_title, model.title)
                 setTextViewText(R.id.timetable_widget_meta, model.meta)
                 setTextViewText(R.id.timetable_widget_today_label, model.today.label)
                 setTextViewText(R.id.timetable_widget_today_date, "${model.today.dateLabel} ${model.today.weekdayLabel}")
-                setTextViewText(R.id.timetable_widget_tomorrow_label, model.tomorrow.label)
-                setTextViewText(R.id.timetable_widget_tomorrow_date, "${model.tomorrow.dateLabel} ${model.tomorrow.weekdayLabel}")
 
-                bindDay(
-                    views = this,
-                    day = model.today,
-                    emptyId = R.id.timetable_widget_today_empty,
-                    rows = listOf(
-                        CourseRowIds(R.id.timetable_widget_today_course_1, R.id.timetable_widget_today_course_1_bar, R.id.timetable_widget_today_course_1_title, R.id.timetable_widget_today_course_1_time, R.id.timetable_widget_today_course_1_detail),
-                        CourseRowIds(R.id.timetable_widget_today_course_2, R.id.timetable_widget_today_course_2_bar, R.id.timetable_widget_today_course_2_title, R.id.timetable_widget_today_course_2_time, R.id.timetable_widget_today_course_2_detail),
-                        CourseRowIds(R.id.timetable_widget_today_course_3, R.id.timetable_widget_today_course_3_bar, R.id.timetable_widget_today_course_3_title, R.id.timetable_widget_today_course_3_time, R.id.timetable_widget_today_course_3_detail),
-                    ),
+                setRemoteAdapter(
+                    R.id.timetable_widget_calendar_list,
+                    serviceIntent(context, appWidgetId, TimetableWidgetRemoteViewsService.KIND_CALENDAR),
                 )
-                bindDay(
-                    views = this,
-                    day = model.tomorrow,
-                    emptyId = R.id.timetable_widget_tomorrow_empty,
-                    rows = listOf(
-                        CourseRowIds(R.id.timetable_widget_tomorrow_course_1, R.id.timetable_widget_tomorrow_course_1_bar, R.id.timetable_widget_tomorrow_course_1_title, R.id.timetable_widget_tomorrow_course_1_time, R.id.timetable_widget_tomorrow_course_1_detail),
-                        CourseRowIds(R.id.timetable_widget_tomorrow_course_2, R.id.timetable_widget_tomorrow_course_2_bar, R.id.timetable_widget_tomorrow_course_2_title, R.id.timetable_widget_tomorrow_course_2_time, R.id.timetable_widget_tomorrow_course_2_detail),
-                        CourseRowIds(R.id.timetable_widget_tomorrow_course_3, R.id.timetable_widget_tomorrow_course_3_bar, R.id.timetable_widget_tomorrow_course_3_title, R.id.timetable_widget_tomorrow_course_3_time, R.id.timetable_widget_tomorrow_course_3_detail),
-                    ),
+                setEmptyView(R.id.timetable_widget_calendar_list, R.id.timetable_widget_calendar_empty)
+                setRemoteAdapter(
+                    R.id.timetable_widget_today_course_list,
+                    serviceIntent(context, appWidgetId, TimetableWidgetRemoteViewsService.KIND_TODAY_COURSES),
                 )
+                setEmptyView(R.id.timetable_widget_today_course_list, R.id.timetable_widget_today_course_empty)
                 setOnClickPendingIntent(R.id.timetable_widget_root, openHomeworkPendingIntent(context))
             }
 
-        private fun bindDay(
-            views: RemoteViews,
-            day: TimetableWidgetDay,
-            emptyId: Int,
-            rows: List<CourseRowIds>,
-        ) {
-            views.setViewVisibility(emptyId, if (day.courses.isEmpty()) View.VISIBLE else View.GONE)
-            rows.forEachIndexed { index, ids ->
-                val course = day.courses.getOrNull(index)
-                views.setViewVisibility(ids.container, if (course == null) View.GONE else View.VISIBLE)
-                if (course != null) {
-                    views.setInt(ids.bar, "setBackgroundColor", stripeColor(course.title))
-                    views.setTextViewText(ids.title, course.title)
-                    views.setTextViewText(ids.time, course.timeLabel)
-                    views.setTextViewText(ids.detail, course.detail)
-                }
+        private fun serviceIntent(
+            context: Context,
+            appWidgetId: Int,
+            kind: String,
+        ): Intent =
+            Intent(context, TimetableWidgetRemoteViewsService::class.java).apply {
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                putExtra(TimetableWidgetRemoteViewsService.EXTRA_KIND, kind)
+                data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
             }
-        }
-
-        private fun stripeColor(key: String): Int {
-            val index = (key.hashCode() and Int.MAX_VALUE) % stripeColors.size
-            return stripeColors[index]
-        }
 
         private fun openHomeworkPendingIntent(context: Context): PendingIntent {
             val intent = Intent(context, MainActivity::class.java).apply {
@@ -158,13 +130,5 @@ class TimetableWidgetProvider : AppWidgetProvider() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         }
-
-        private data class CourseRowIds(
-            val container: Int,
-            val bar: Int,
-            val title: Int,
-            val time: Int,
-            val detail: Int,
-        )
     }
 }

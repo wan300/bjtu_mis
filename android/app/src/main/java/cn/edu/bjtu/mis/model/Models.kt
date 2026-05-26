@@ -1021,6 +1021,9 @@ data class EmptyRoomRow(
 @Serializable
 data class EmptyRoomData(
     val query: Map<String, String?> = emptyMap(),
+    val availableTerms: List<TermOption> = emptyList(),
+    val availableWeeks: List<TermOption> = emptyList(),
+    val availableBuildings: List<TermOption> = emptyList(),
     val days: List<String> = emptyList(),
     val periods: List<Int> = emptyList(),
     val slots: List<EmptyRoomSlotHeader> = emptyList(),

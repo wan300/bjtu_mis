@@ -20,10 +20,12 @@ import cn.edu.bjtu.mis.data.db.MIGRATION_3_4
 import cn.edu.bjtu.mis.data.db.MIGRATION_4_5
 import cn.edu.bjtu.mis.data.db.MIGRATION_5_6
 import cn.edu.bjtu.mis.data.db.MIGRATION_6_7
+import cn.edu.bjtu.mis.data.employment.EmploymentCalendarSyncStore
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderCoordinator
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderNotifier
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderRunner
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderStateStore
+import cn.edu.bjtu.mis.data.homework.HomeworkTimeOffsetStore
 import cn.edu.bjtu.mis.data.network.AppCookieJar
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.data.perf.PerfTrace
@@ -41,6 +43,8 @@ import cn.edu.bjtu.mis.data.repository.SyncRepository
 import cn.edu.bjtu.mis.data.repository.ZhixingRepository
 import cn.edu.bjtu.mis.data.security.SecureCookieStore
 import cn.edu.bjtu.mis.data.security.SecureCredentialStore
+import cn.edu.bjtu.mis.data.update.AppUpdateChecker
+import cn.edu.bjtu.mis.data.update.installedVersionName
 import cn.edu.bjtu.mis.ui.theme.AppThemeStore
 
 class AppContainer(context: Context) {
@@ -58,6 +62,10 @@ class AppContainer(context: Context) {
     private val credentialStore = SecureCredentialStore(appContext)
     private val captchaSolver = TorchScriptCaptchaSolver(appContext)
     val httpClient = BjtuHttpClient(cookieJar)
+    val appUpdateChecker = AppUpdateChecker(
+        client = httpClient,
+        currentVersionProvider = { appContext.installedVersionName() },
+    )
     val sessionManager = SessionManager(cookieStore, credentialStore, cookieJar, httpClient, captchaSolver)
     val sessionRepository = SessionRepository(sessionManager)
     val syncRepository = SyncRepository(database.dao(), sessionManager)
@@ -127,6 +135,12 @@ class AppContainer(context: Context) {
                 },
                 submitCaptchaAnswer = { challengeId, captcha -> courseSelectionRepository.submitCaptcha(challengeId, captcha) },
             )
+        }
+    }
+    val homeworkTimeOffsetStore = HomeworkTimeOffsetStore(appContext)
+    val employmentCalendarSyncStore: EmploymentCalendarSyncStore by lazy {
+        PerfTrace.measure("AppContainer.employmentCalendarSyncStore") {
+            EmploymentCalendarSyncStore(appContext)
         }
     }
     val themeStore: AppThemeStore by lazy {

@@ -21,28 +21,31 @@ class TimetableWidgetDataSource(
                 AppJson.decodeFromString<ModuleEnvelope<TimetableData>>(it.payloadJson)
             }.getOrNull()
         }
+        val calendar = loadCalendar()
 
-        if (envelope == null && userCourses.isEmpty()) return TimetableWidgetMapper.empty(today)
+        if (envelope == null && userCourses.isEmpty() && calendar == null) {
+            return TimetableWidgetMapper.empty(today)
+        }
 
         val merged = (envelope?.data ?: TimetableData()).copy(
             entries = envelope?.data?.entries.orEmpty() + userCourses,
         )
         return TimetableWidgetMapper.map(
             data = merged,
-            currentWeek = loadCurrentWeek(),
+            currentWeek = calendar?.currentWeek?.let(::parseWeekNumber),
             today = today,
+            calendar = calendar,
+            hasTimetableCache = envelope != null || userCourses.isNotEmpty(),
         )
     }
 
-    private suspend fun loadCurrentWeek(): Int? =
+    private suspend fun loadCalendar(): CalendarData? =
         dao.getSnapshot(ModuleKeys.Calendar)
             ?.payloadJson
             ?.let { payload ->
                 runCatching {
                     AppJson.decodeFromString<ModuleEnvelope<CalendarData>>(payload)
                         .data
-                        .currentWeek
-                        ?.let(::parseWeekNumber)
                 }.getOrNull()
             }
 

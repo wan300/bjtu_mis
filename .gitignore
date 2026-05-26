@@ -93,3 +93,5 @@ coverage.xml
 htmlcov/
 # Local browser automation scripts
 test/
+!android/app/src/test/
+!android/app/src/test/**

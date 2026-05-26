@@ -22,10 +22,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +38,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import cn.edu.bjtu.mis.data.employment.EmploymentCalendarSyncStore
 import cn.edu.bjtu.mis.data.provider.ProviderConstants
 import cn.edu.bjtu.mis.data.repository.EmploymentConsultationRepository
 import cn.edu.bjtu.mis.model.EmploymentArticleDetail
@@ -62,11 +65,16 @@ import kotlinx.coroutines.launch
 private const val EmploymentPageSize = 15
 
 @Composable
-fun EmploymentConsultationScreen(repository: EmploymentConsultationRepository) {
+fun EmploymentConsultationScreen(
+    repository: EmploymentConsultationRepository,
+    employmentCalendarSyncStore: EmploymentCalendarSyncStore,
+) {
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
+    val calendarSyncEnabled by employmentCalendarSyncStore.enabled.collectAsState(initial = false)
     var homeState by remember { mutableStateOf<LoadState<ModuleEnvelope<EmploymentConsultationData>>>(LoadState.Loading) }
     var filterState by remember { mutableStateOf<LoadState<ModuleEnvelope<EmploymentFilterOptions>>>(LoadState.Loading) }
+    var calendarSyncState by remember { mutableStateOf<LoadState<Int>?>(null) }
     var selectedType by remember { mutableStateOf(EmploymentSectionType.CareerTalk) }
     var pageStates by remember { mutableStateOf<Map<EmploymentSectionType, EmploymentPageUiState>>(emptyMap()) }
     var selectedProvinceByType by remember { mutableStateOf<Map<EmploymentSectionType, EmploymentFilterOption?>>(emptyMap()) }
@@ -78,6 +86,15 @@ fun EmploymentConsultationScreen(repository: EmploymentConsultationRepository) {
 
     fun openUri(url: String) {
         runCatching { uriHandler.openUri(url) }
+    }
+
+    fun setCalendarSyncEnabled(enabled: Boolean) {
+        scope.launch {
+            employmentCalendarSyncStore.save(enabled)
+            if (!enabled) {
+                calendarSyncState = null
+            }
+        }
     }
 
     fun updatePageState(type: EmploymentSectionType, transform: (EmploymentPageUiState) -> EmploymentPageUiState) {
@@ -188,6 +205,19 @@ fun EmploymentConsultationScreen(repository: EmploymentConsultationRepository) {
         loadPage(EmploymentSectionType.CareerTalk, reset = true)
     }
 
+    LaunchedEffect(calendarSyncEnabled) {
+        if (calendarSyncEnabled) {
+            calendarSyncState = LoadState.Loading
+            runCatching { repository.calendarEvents().size }
+                .onSuccess { calendarSyncState = LoadState.Data(it) }
+                .onFailure {
+                    calendarSyncState = LoadState.Error(it.message ?: "就业活动同步预热失败")
+                }
+        } else {
+            calendarSyncState = null
+        }
+    }
+
     LaunchedEffect(selectedType) {
         val state = pageStates[selectedType]
         if (state == null || (state.page == null && !state.loading)) {
@@ -248,6 +278,13 @@ fun EmploymentConsultationScreen(repository: EmploymentConsultationRepository) {
                         Text("刷新")
                     }
                 },
+            )
+        }
+        item {
+            EmploymentCalendarSyncSettingCard(
+                enabled = calendarSyncEnabled,
+                state = calendarSyncState,
+                onEnabledChange = ::setCalendarSyncEnabled,
             )
         }
         item {
@@ -313,6 +350,40 @@ fun EmploymentConsultationScreen(repository: EmploymentConsultationRepository) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun EmploymentCalendarSyncSettingCard(
+    enabled: Boolean,
+    state: LoadState<Int>?,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    InfoCard(
+        title = "同步到学年日历",
+        subtitle = if (enabled) "宣讲会、双选会会显示在学年日历中" else "开启后自动把宣讲会、双选会展示到学年日历",
+        trailing = {
+            Switch(
+                checked = enabled,
+                onCheckedChange = onEnabledChange,
+            )
+        },
+    ) {
+        val statusText = when (state) {
+            LoadState.Loading -> "正在准备就业活动缓存"
+            is LoadState.Data -> "已准备 ${state.value} 项就业活动"
+            is LoadState.Error -> state.message
+            null -> "当前未开启同步"
+        }
+        Text(
+            statusText,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (state is LoadState.Error) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
     }
 }
 
