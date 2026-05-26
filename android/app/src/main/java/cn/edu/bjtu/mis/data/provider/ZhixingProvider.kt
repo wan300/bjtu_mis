@@ -209,10 +209,7 @@ class ZhixingProvider(
             ),
         )
         if (!check.body.contains("succeed", ignoreCase = true)) {
-            return ZhixingLoginOutcome(
-                status = ZhixingLoginStatus.Failure,
-                message = "验证码错误，请重新输入。",
-            )
+            return refreshCaptchaOutcome(challenge, "验证码错误，请重新输入。")
         }
         val response = client.postForm(
             url("/member.php"),
@@ -240,6 +237,8 @@ class ZhixingProvider(
         val result = parseZhixingLoginResponse(response.body)
         return if (result.success) {
             validateLogin(fallbackMessage = result.message)
+        } else if (result.captchaRequired && !result.redirectUrl.isNullOrBlank()) {
+            buildCaptchaOutcome(result.redirectUrl, result.message)
         } else {
             ZhixingLoginOutcome(
                 status = ZhixingLoginStatus.Failure,
@@ -266,13 +265,7 @@ class ZhixingProvider(
             ),
         )
         val seccode = parseZhixingSeccodeUpdate(update.body, update.url)
-        val image = client.getBytes(
-            seccode.imageUrl,
-            headers = mapOf("Referer" to challengePage.url),
-        )
-        val mimeType = image.headers["Content-Type"]?.substringBefore(";")?.trim().orEmpty()
-            .ifBlank { "image/png" }
-        val imageDataUrl = "data:$mimeType;base64,${Base64.getEncoder().encodeToString(image.body)}"
+        val imageDataUrl = fetchSeccodeImageDataUrl(seccode.imageUrl, challengePage.url)
         return ZhixingLoginOutcome(
             status = ZhixingLoginStatus.CaptchaRequired,
             message = message,
@@ -288,6 +281,44 @@ class ZhixingProvider(
                 message = message,
             ),
         )
+    }
+
+    private suspend fun refreshCaptchaOutcome(challenge: ZhixingLoginChallenge, message: String): ZhixingLoginOutcome {
+        val update = getText(
+            "/misc.php",
+            params = mapOf(
+                "mod" to "seccode",
+                "action" to "update",
+                "idhash" to challenge.seccodeHash,
+                "modid" to challenge.seccodeModId,
+            ),
+        )
+        val seccode = parseZhixingSeccodeUpdate(update.body, update.url)
+        val imageDataUrl = fetchSeccodeImageDataUrl(
+            seccode.imageUrl,
+            challenge.referer.ifBlank { "$baseUrl/" },
+        )
+        return ZhixingLoginOutcome(
+            status = ZhixingLoginStatus.CaptchaRequired,
+            message = message,
+            challenge = challenge.copy(
+                challengeId = "${seccode.seccodeHash}-${System.currentTimeMillis()}",
+                seccodeHash = seccode.seccodeHash,
+                seccodeModId = seccode.seccodeModId,
+                imageDataUrl = imageDataUrl,
+                message = message,
+            ),
+        )
+    }
+
+    private suspend fun fetchSeccodeImageDataUrl(imageUrl: String, referer: String): String {
+        val image = client.getBytes(
+            imageUrl,
+            headers = mapOf("Referer" to referer.ifBlank { "$baseUrl/" }),
+        )
+        val mimeType = image.headers["Content-Type"]?.substringBefore(";")?.trim().orEmpty()
+            .ifBlank { "image/png" }
+        return "data:$mimeType;base64,${Base64.getEncoder().encodeToString(image.body)}"
     }
 
     private suspend fun validateLogin(username: String? = null, fallbackMessage: String): ZhixingLoginOutcome {

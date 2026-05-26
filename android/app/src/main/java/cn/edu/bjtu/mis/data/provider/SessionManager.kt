@@ -193,6 +193,23 @@ class SessionManager(
             } catch (error: CaptchaSolveException) {
                 lastMessage = error.message.orEmpty()
                 inlineLoginState = null
+                if (!error.retryable) {
+                    val attempts = index + 1
+                    if (explicitCredentials) {
+                        val captcha = runCatching { fetchInlineLoginCaptcha() }.getOrNull()
+                        return AutoLoginResult(
+                            status = AutoLoginStatus.ManualRequired,
+                            message = "自动识别验证码不可用，请手动输入验证码。$lastMessage",
+                            attempts = attempts,
+                            captcha = captcha,
+                        )
+                    }
+                    return AutoLoginResult(
+                        status = AutoLoginStatus.AutoFailed,
+                        message = "自动识别验证码不可用：${lastMessage.ifBlank { "未知错误" }}",
+                        attempts = attempts,
+                    )
+                }
             } catch (error: SessionExpiredException) {
                 lastMessage = error.message.orEmpty()
             }

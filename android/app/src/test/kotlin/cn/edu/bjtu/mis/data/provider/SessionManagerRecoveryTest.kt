@@ -13,6 +13,7 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -135,6 +136,60 @@ class SessionManagerRecoveryTest {
             assertEquals(3, result.attempts)
             assertEquals(3, solver.calls)
             assertTrue(result.message.orEmpty().contains("bad captcha"))
+        }
+    }
+
+    @Test
+    fun recoverSessionStopsImmediatelyForNonRetryableCaptchaRuntimeFailure() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            enqueueExpiredHome(server)
+            enqueueExpiredHome(server)
+            server.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody("png"))
+            val solver = FakeCaptchaSolver {
+                throw CaptchaSolveException("runtime unavailable", retryable = false)
+            }
+            val manager = manager(
+                server = server,
+                cookieStore = MemoryCookieStore(payload = "[]"),
+                credentialStore = MemoryCredentialStore(LoginCredentials("student", "secret")),
+                captchaSolver = solver,
+            )
+
+            val result = manager.recoverSession()
+
+            assertEquals(AutoLoginStatus.AutoFailed, result.status)
+            assertEquals(1, result.attempts)
+            assertEquals(1, solver.calls)
+            assertTrue(result.message.orEmpty().contains("runtime unavailable"))
+        }
+    }
+
+    @Test
+    fun explicitAutoLoginFallsBackToManualCaptchaForNonRetryableRuntimeFailure() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            enqueueExpiredHome(server)
+            server.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody("png"))
+            enqueueExpiredHome(server)
+            server.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody("manual-png"))
+            val solver = FakeCaptchaSolver {
+                throw CaptchaSolveException("runtime unavailable", retryable = false)
+            }
+            val manager = manager(
+                server = server,
+                cookieStore = MemoryCookieStore(payload = null),
+                credentialStore = MemoryCredentialStore(credentials = null),
+                captchaSolver = solver,
+            )
+
+            val result = manager.loginAuto("student", "secret")
+
+            assertEquals(AutoLoginStatus.ManualRequired, result.status)
+            assertEquals(1, result.attempts)
+            assertEquals(1, solver.calls)
+            assertNotNull(result.captcha)
+            assertTrue(result.message.orEmpty().contains("runtime unavailable"))
         }
     }
 

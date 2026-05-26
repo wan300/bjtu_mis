@@ -156,12 +156,32 @@ class ZhixingProviderTest {
     }
 
     @Test
-    fun captchaCheckFailureDoesNotSubmitSecondStep() = runBlocking {
+    fun captchaCheckFailureRefreshesChallengeAndDoesNotSubmitSecondStep() = runBlocking {
         MockWebServer().use { server ->
+            var loginPostCount = 0
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
-                    if (request.requestUrl?.encodedPath == "/misc.php") {
+                    val path = request.requestUrl?.encodedPath.orEmpty()
+                    if (path == "/misc.php" && request.requestUrl?.queryParameter("action") == "check") {
                         return html("""<?xml version="1.0" encoding="utf-8"?><root><![CDATA[invalid]]></root>""")
+                    }
+                    if (path == "/misc.php" && request.requestUrl?.queryParameter("action") == "update") {
+                        return html(
+                            """
+                            var string = '<input name="seccodehash" type="hidden" value="newhash" />' +
+                              '<input name="seccodemodid" type="hidden" value="member::logging" />' +
+                              '<img src="misc.php?mod=seccode&update=99&idhash=newhash" />';
+                            """.trimIndent()
+                        )
+                    }
+                    if (path == "/misc.php" && request.requestUrl?.queryParameter("update") == "99") {
+                        return MockResponse()
+                            .setHeader("Content-Type", "image/png")
+                            .setBody("newpng")
+                    }
+                    if (path == "/member.php" && request.method == "POST") {
+                        loginPostCount += 1
+                        return MockResponse().setResponseCode(500)
                     }
                     return MockResponse().setResponseCode(500)
                 }
@@ -182,8 +202,10 @@ class ZhixingProviderTest {
                 "BAD",
             )
 
-            assertEquals(ZhixingLoginStatus.Failure, outcome.status)
-            assertTrue(outcome.message.orEmpty().contains("验证码"))
+            assertEquals(ZhixingLoginStatus.CaptchaRequired, outcome.status)
+            assertEquals("newhash", outcome.challenge?.seccodeHash)
+            assertTrue(outcome.challenge?.imageDataUrl.orEmpty().startsWith("data:image/png;base64,"))
+            assertEquals(0, loginPostCount)
         }
     }
 

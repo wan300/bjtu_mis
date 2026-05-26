@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BJTU MIS Android - 校园学习服务 App</title>
+    <meta
+      name="description"
+      content="BJTU MIS Android 是面向北京交通大学学生的校园学习服务 App，整合课表、成绩、考务、作业、课程资源、邮箱和内置 Open WebUI Agent。"
+    >
+    <link rel="icon" type="image/png" href="assets/icons/icon_home.png">
+    <link rel="stylesheet" href="assets/css/styles.css">
+  </head>
+  <body data-page="home">
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="index.html" aria-label="BJTU MIS Android 主页">
+          <img src="assets/icons/icon_home.png" alt="" width="40" height="40">
+          <span>BJTU MIS Android</span>
+        </a>
+        <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false" data-nav-toggle>
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+        <nav class="site-nav" aria-label="主导航">
+          <a href="#features">特色</a>
+          <a href="#modules">模块</a>
+          <a href="#download">下载</a>
+          <a data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases/latest" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero__inner">
+          <div class="hero__copy reveal">
+            <p class="eyebrow">Campus rail service</p>
+            <h1 id="hero-title">BJTU MIS Android</h1>
+            <p class="hero__lead">
+              面向北京交通大学学生的校园学习服务 App。把 MIS、教学服务、课程资料、校园邮箱与作业辅助能力整合到手机端，支持本地同步、离线查看和嵌入式 Open WebUI Agent。
+            </p>
+            <div class="hero__actions">
+              <a class="btn btn--signal" data-download-button href="https://github.com/wan300/bjtu_mis_Android/releases/latest/download/app-release.apk">
+                <span class="btn__icon">↓</span>
+                <span class="btn__text">
+                  <span>下载最新 APK</span>
+                  <small class="btn__subtext">最新版本 <span data-release-version>v1.1.0</span></small>
+                </span>
+              </a>
+              <a class="btn btn--ghost" href="#modules">查看功能模块</a>
+            </div>
+          </div>
+        </div>
+        <img class="hero__rail" src="assets/img/rail-characters.png" alt="" width="764" height="316">
+        <div class="rail-bed" aria-hidden="true"></div>
+      </section>
+
+      <section class="content-section" id="features">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Why this app</p>
+          <h2>聚合校园服务</h2>
+          <p>
+            应用直接访问 BJTU CAS、MIS、AA、VE、Coremail 等校园服务，在设备本地保存加密凭据、Cookie 与 Room 数据快照，让常用信息更快抵达手机端。
+          </p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card reveal" style="--accent:#bb2f2f">
+            <span>01</span>
+            <h3>学习信息聚合</h3>
+            <p>课表、成绩、考务、校历、作业、选课、空教室、课程资源与回放按使用场景归并。</p>
+          </article>
+          <article class="feature-card reveal" style="--accent:#128b90">
+            <span>02</span>
+            <h3>本地同步快照</h3>
+            <p>已同步数据保留在本地，网络波动或校园服务临时不可用时仍可查看关键内容。</p>
+          </article>
+          <article class="feature-card reveal" style="--accent:#c4913b">
+            <span>03</span>
+            <h3>作业辅助工作区</h3>
+            <p>作业要求与附件可交给内置 Open WebUI Agent，用于整理资料、生成步骤或输出草稿。</p>
+          </article>
+          <article class="feature-card reveal" style="--accent:#5a6fe8">
+            <span>04</span>
+            <h3>校园邮箱衔接</h3>
+            <p>Coremail 文件夹、近期邮件、联系人、草稿与发送确认流程接入移动端和 Agent 工具。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="content-section" id="modules">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Stations</p>
+          <h2>功能模块</h2>
+          <p>每个模块都是一站独立页面，按教学学习、成绩考务、信息工具、智能助手与账户资料组织。</p>
+        </div>
+        <div class="module-grid" data-module-grid></div>
+      </section>
+
+      <section class="content-section">
+        <div class="category-rails" data-category-rails></div>
+      </section>
+
+      <section class="content-section download-section" id="download">
+        <div class="download-panel reveal">
+          <div>
+            <p class="eyebrow">Release ticket</p>
+            <h2>下载最新 Android APK</h2>
+            <p>
+              按钮会默认指向 GitHub 最新 release 中的 APK 文件。若 GitHub API 暂时不可用，仍会使用 latest/download 兜底链接。
+            </p>
+            <div class="download-panel__actions">
+              <a class="btn btn--signal" data-download-button href="https://github.com/wan300/bjtu_mis_Android/releases/latest/download/app-release.apk">
+                <span class="btn__icon">↓</span>
+                下载 APK
+              </a>
+              <a class="btn btn--ghost" data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases/latest" target="_blank" rel="noreferrer">查看发布页</a>
+            </div>
+            <p class="release-note">当前正在使用兜底下载链接。</p>
+          </div>
+          <div class="download-panel__status" aria-label="发布信息">
+            <div class="ticket-row">
+              <span>最新版本</span>
+              <strong data-release-version>v1.1.0</strong>
+            </div>
+            <div class="ticket-row">
+              <span>文件类型</span>
+              <strong>Android APK</strong>
+            </div>
+            <div class="ticket-row">
+              <span>文件大小</span>
+              <strong data-release-size>202.4 MB</strong>
+            </div>
+            <div class="ticket-row">
+              <span>源代码</span>
+              <strong><a data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases/latest" target="_blank" rel="noreferrer">GitHub Releases</a></strong>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer__inner">
+        <span>© <span data-current-year></span> BJTU MIS Android</span>
+        <a data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases/latest" target="_blank" rel="noreferrer">GitHub Releases</a>
+      </div>
+    </footer>
+
+    <script src="assets/js/modules.js"></script>
+    <script src="assets/js/site.js"></script>
+  </body>
+</html>

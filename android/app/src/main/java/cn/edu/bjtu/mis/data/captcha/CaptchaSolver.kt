@@ -3,12 +3,17 @@ package cn.edu.bjtu.mis.data.captcha
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Build
 import org.pytorch.IValue
 import org.pytorch.Module
 import org.pytorch.Tensor
 import java.io.File
 
-class CaptchaSolveException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+class CaptchaSolveException(
+    message: String,
+    cause: Throwable? = null,
+    val retryable: Boolean = true,
+) : RuntimeException(message, cause)
 
 data class CaptchaSolveResult(
     val expression: String,
@@ -43,7 +48,11 @@ class TorchScriptCaptchaSolver(
             val value = loadModule().forward(IValue.from(input))
             if (value.isTensor) value.toTensor() else value.toTuple().first().toTensor()
         }.getOrElse {
-            throw CaptchaSolveException("验证码模型推理失败：${it.message}", it)
+            throw CaptchaSolveException(
+                message = "验证码模型推理失败：${formatTorchRuntimeError(it)}",
+                cause = it,
+                retryable = !isTorchRuntimeConfigurationError(it),
+            )
         }
 
         val indices = argmax(output)
@@ -136,6 +145,48 @@ class TorchScriptCaptchaSolver(
         private const val MODEL_HEIGHT = 42
     }
 }
+
+internal fun formatTorchRuntimeError(error: Throwable): String {
+    val chain = error.causeChain()
+    val detail = chain.joinToString(" / ") { it.describeForMessage() }
+    return when {
+        isMissingTorchRuntimeClass(chain) ->
+            "PyTorch Android 运行时类未加载，通常是 release 混淆/压缩移除了 JNI 入口（$detail）"
+
+        chain.any { it is UnsatisfiedLinkError } ->
+            "PyTorch 原生库加载失败，当前设备 ABI=${supportedAbis()}（$detail）"
+
+        else -> detail.ifBlank { error::class.java.name }
+    }
+}
+
+internal fun isTorchRuntimeConfigurationError(error: Throwable): Boolean {
+    val chain = error.causeChain()
+    return isMissingTorchRuntimeClass(chain) || chain.any { it is UnsatisfiedLinkError }
+}
+
+private fun Throwable.causeChain(): List<Throwable> =
+    generateSequence(this) { it.cause }.toList()
+
+private fun Throwable.describeForMessage(): String {
+    val type = this::class.java.simpleName.ifBlank { this::class.java.name }
+    val message = message?.takeIf { it.isNotBlank() } ?: return type
+    return "$type: $message"
+}
+
+private fun isMissingTorchRuntimeClass(chain: List<Throwable>): Boolean =
+    chain.any { it is NoClassDefFoundError || it is ClassNotFoundException } &&
+        chain.any {
+            val message = it.message.orEmpty()
+            message.contains("org.pytorch.NativePeer") ||
+                message.contains("org/pytorch/NativePeer") ||
+                message.contains("org.pytorch") ||
+                message.contains("org/pytorch")
+        }
+
+private fun supportedAbis(): String =
+    runCatching { Build.SUPPORTED_ABIS.joinToString(", ") }
+        .getOrDefault("unknown")
 
 object CaptchaExpression {
     private val expressionPattern = Regex("""^(\d+)([+\-*])(\d+)=$""")

@@ -2,6 +2,7 @@ package cn.edu.bjtu.mis.data.captcha
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CaptchaExpressionTest {
@@ -40,5 +41,13 @@ class CaptchaExpressionTest {
     @Test
     fun calculateOrNullReturnsNullForInvalidFormat() {
         assertNull(CaptchaExpression.calculateOrNull("12/3="))
+    }
+
+    @Test
+    fun torchRuntimeErrorExplainsMissingNativePeer() {
+        val error = NoClassDefFoundError("org.pytorch.NativePeer")
+
+        assertTrue(isTorchRuntimeConfigurationError(error))
+        assertTrue(formatTorchRuntimeError(error).contains("PyTorch Android"))
     }
 }

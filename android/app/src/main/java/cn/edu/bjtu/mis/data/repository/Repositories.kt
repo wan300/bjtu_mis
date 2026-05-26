@@ -1050,12 +1050,19 @@ class ZhixingRepository(
                 )
             }
             val outcome = ZhixingProvider(client).submitLoginCaptcha(pending.challenge, answer)
-            if (outcome.status == ZhixingLoginStatus.Success) {
-                pendingLogin = null
-                credentialStore.save(LoginCredentials(pending.username, pending.password))
-                outcome.copy(authState = outcome.authState?.copy(username = pending.username))
-            } else {
-                outcome
+            when (outcome.status) {
+                ZhixingLoginStatus.Success -> {
+                    pendingLogin = null
+                    credentialStore.save(LoginCredentials(pending.username, pending.password))
+                    outcome.copy(authState = outcome.authState?.copy(username = pending.username))
+                }
+                ZhixingLoginStatus.CaptchaRequired -> {
+                    outcome.challenge?.let { challenge ->
+                        pendingLogin = pending.copy(challenge = challenge)
+                    }
+                    outcome
+                }
+                ZhixingLoginStatus.Failure -> outcome
             }
         }
 
