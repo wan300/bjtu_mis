@@ -25,7 +25,6 @@ import cn.edu.bjtu.mis.data.homework.HomeworkReminderCoordinator
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderNotifier
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderRunner
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderStateStore
-import cn.edu.bjtu.mis.data.homework.HomeworkTimeOffsetStore
 import cn.edu.bjtu.mis.data.network.AppCookieJar
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.data.perf.PerfTrace
@@ -137,7 +136,6 @@ class AppContainer(context: Context) {
             )
         }
     }
-    val homeworkTimeOffsetStore = HomeworkTimeOffsetStore(appContext)
     val employmentCalendarSyncStore: EmploymentCalendarSyncStore by lazy {
         PerfTrace.measure("AppContainer.employmentCalendarSyncStore") {
             EmploymentCalendarSyncStore(appContext)

@@ -93,6 +93,18 @@ fun parseHomeworkList(payload: JsonObject, course: CourseSummary, subType: Int):
         val title = obj.text("title") ?: homeworkId?.let { "作业#$it" }.orEmpty()
         if (title.isBlank()) return@mapNotNull null
         val submittedAt = obj.text("subTime")
+        val explicitCanSubmit = obj.firstBool(
+            "can_submit",
+            "canSubmit",
+            "allow_submit",
+            "allowSubmit",
+            "is_can_submit",
+            "isCanSubmit",
+            "submittable",
+            "submitable",
+        )
+        val statusCanSubmit = homeworkSubmitAvailabilityFromText(obj.text("subStatus"))
+        val canSubmit = explicitCanSubmit ?: statusCanSubmit ?: true
         HomeworkItem(
             homeworkId = homeworkId,
             course = obj.text("course_name") ?: course.courseName,
@@ -107,21 +119,24 @@ fun parseHomeworkList(payload: JsonObject, course: CourseSummary, subType: Int):
             status = if (submittedAt.isNullOrBlank()) "open" else "done",
             subType = subType,
             submissionStatus = obj.text("subStatus"),
-            canSubmit = obj.firstBool(
-                "can_submit",
-                "canSubmit",
-                "allow_submit",
-                "allowSubmit",
-                "is_can_submit",
-                "isCanSubmit",
-                "submittable",
-                "submitable",
-            ) ?: true,
+            canSubmit = canSubmit,
+            canSubmitExplicit = explicitCanSubmit != null || statusCanSubmit != null,
             contentType = obj.int("content_type") ?: 0,
             isGroup = obj.text("is_fz") == "1",
             returnNum = obj.int("return_num") ?: 0,
         )
     }
+
+private fun homeworkSubmitAvailabilityFromText(value: String?): Boolean? {
+    val normalized = value?.trim().orEmpty()
+    if (normalized.isBlank()) return null
+    return when {
+        listOf("不可补交", "不能补交", "不允许补交", "不可提交", "不能提交", "不允许提交", "禁止补交", "禁止提交").any { normalized.contains(it) } -> false
+        listOf("可补交", "可提交", "允许补交", "允许提交").any { normalized.contains(it) } -> true
+        listOf("已截止", "已过期", "已结束").any { normalized.contains(it) } -> false
+        else -> null
+    }
+}
 
 fun parseHomeworkAttachments(payload: JsonObject): List<HomeworkAttachment> {
     val sources = listOfNotNull(

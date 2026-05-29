@@ -89,6 +89,7 @@ class TimetableWidgetMapperTest {
 
         assertFalse(model.hasTimetableCache)
         assertEquals("暂无课表缓存", model.meta)
+        assertTrue(model.calendarEvents.isEmpty())
         assertTrue(model.today.courses.isEmpty())
         assertTrue(model.tomorrow.courses.isEmpty())
     }
@@ -122,8 +123,10 @@ class TimetableWidgetMapperTest {
                 month = "2026-05",
                 items = listOf(
                     CalendarItem(date = "2026-05-18", week = "12", note = "补课安排"),
+                    CalendarItem(date = "2026-05-18", week = "12", note = " "),
                     CalendarItem(date = "2026-05-18", week = "12", note = "考试周提醒"),
                     CalendarItem(date = "2026-05-19", week = "12", note = "校历安排"),
+                    CalendarItem(date = "2026-05-19", week = "12", note = null),
                     CalendarItem(date = "2026-05-20", week = "12", note = "不应显示"),
                 ),
             ),
@@ -134,6 +137,26 @@ class TimetableWidgetMapperTest {
             model.calendarEvents.map { it.title },
         )
         assertEquals(listOf("今天", "今天", "明天"), model.calendarEvents.map { it.dayLabel })
+    }
+
+    @Test
+    fun leavesCalendarAreaEmptyWhenThereAreNoRealEvents() {
+        val model = TimetableWidgetMapper.map(
+            data = TimetableData(),
+            currentWeek = 12,
+            today = monday,
+            calendar = CalendarData(
+                month = "2026-05",
+                items = listOf(
+                    CalendarItem(date = "2026-05-18", week = "12", note = null),
+                    CalendarItem(date = "2026-05-19", week = "12", note = ""),
+                    CalendarItem(date = "2026-05-19", week = "12", note = "   "),
+                    CalendarItem(date = "not-a-date", week = "12", note = "无效日期"),
+                ),
+            ),
+        )
+
+        assertTrue(model.calendarEvents.isEmpty())
     }
 
     private fun course(

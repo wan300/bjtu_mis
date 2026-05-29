@@ -31,7 +31,6 @@ data class TimetableWidgetCalendarEvent(
     val weekdayLabel: String,
     val title: String,
     val detail: String,
-    val placeholder: Boolean = false,
 )
 
 data class TimetableWidgetModel(
@@ -133,23 +132,13 @@ object TimetableWidgetMapper {
     ): List<TimetableWidgetCalendarEvent> {
         val itemsByDate = calendar?.items
             .orEmpty()
-            .groupBy { parseCalendarDate(it.date) }
-        return listOf("今天" to today, "明天" to today.plusDays(1)).flatMap { (label, date) ->
-            val items = itemsByDate[date].orEmpty()
-            if (items.isEmpty()) {
-                listOf(
-                    TimetableWidgetCalendarEvent(
-                        dayLabel = label,
-                        dateLabel = formatDate(date),
-                        weekdayLabel = weekdayLabel(date),
-                        title = "暂无校历事项",
-                        detail = "",
-                        placeholder = true,
-                    )
-                )
-            } else {
-                items.map { item -> calendarEventModel(label, date, item) }
+            .mapNotNull { item ->
+                val date = parseCalendarDate(item.date) ?: return@mapNotNull null
+                date to item
             }
+            .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+        return listOf("今天" to today, "明天" to today.plusDays(1)).flatMap { (label, date) ->
+            itemsByDate[date].orEmpty().mapNotNull { item -> calendarEventModel(label, date, item) }
         }
     }
 
@@ -157,14 +146,16 @@ object TimetableWidgetMapper {
         dayLabel: String,
         date: LocalDate,
         item: CalendarItem,
-    ): TimetableWidgetCalendarEvent =
-        TimetableWidgetCalendarEvent(
+    ): TimetableWidgetCalendarEvent? {
+        val title = item.note?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return TimetableWidgetCalendarEvent(
             dayLabel = dayLabel,
             dateLabel = formatDate(date),
             weekdayLabel = weekdayLabel(date),
-            title = item.note?.takeIf { it.isNotBlank() } ?: "校历安排",
+            title = title,
             detail = item.week?.takeIf { it.isNotBlank() }?.let { "第${it}周" }.orEmpty(),
         )
+    }
 
     private fun courseModel(entry: CourseEntry): TimetableWidgetCourse {
         val timeLabel = entry.timeRange

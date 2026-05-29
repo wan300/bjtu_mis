@@ -20,7 +20,10 @@ class TimetableWidgetRemoteViewsService : RemoteViewsService() {
     companion object {
         const val EXTRA_KIND = "cn.edu.bjtu.mis.widget.EXTRA_KIND"
         const val KIND_CALENDAR = "calendar"
+        const val KIND_TODAY_CALENDAR = "today_calendar"
+        const val KIND_TOMORROW_CALENDAR = "tomorrow_calendar"
         const val KIND_TODAY_COURSES = "today_courses"
+        const val KIND_TOMORROW_COURSES = "tomorrow_courses"
 
         private val stripeColors = intArrayOf(
             0xFF8B5CF6.toInt(),
@@ -42,7 +45,10 @@ class TimetableWidgetRemoteViewsService : RemoteViewsService() {
         private val kind: String,
     ) : RemoteViewsService.RemoteViewsFactory {
         private var calendarEvents: List<TimetableWidgetCalendarEvent> = emptyList()
+        private var todayCalendarEvents: List<TimetableWidgetCalendarEvent> = emptyList()
+        private var tomorrowCalendarEvents: List<TimetableWidgetCalendarEvent> = emptyList()
         private var todayCourses: List<TimetableWidgetCourse> = emptyList()
+        private var tomorrowCourses: List<TimetableWidgetCourse> = emptyList()
 
         override fun onCreate() = Unit
 
@@ -56,22 +62,36 @@ class TimetableWidgetRemoteViewsService : RemoteViewsService() {
                 }
             }
             calendarEvents = model.calendarEvents
+            todayCalendarEvents = model.calendarEvents.filter { it.dayLabel == model.today.label }
+            tomorrowCalendarEvents = model.calendarEvents.filter { it.dayLabel == model.tomorrow.label }
             todayCourses = model.today.courses
+            tomorrowCourses = model.tomorrow.courses
         }
 
         override fun onDestroy() {
             calendarEvents = emptyList()
+            todayCalendarEvents = emptyList()
+            tomorrowCalendarEvents = emptyList()
             todayCourses = emptyList()
+            tomorrowCourses = emptyList()
         }
 
         override fun getCount(): Int =
-            if (kind == KIND_CALENDAR) calendarEvents.size else todayCourses.size
+            when (kind) {
+                KIND_CALENDAR -> calendarEvents.size
+                KIND_TODAY_CALENDAR -> todayCalendarEvents.size
+                KIND_TOMORROW_CALENDAR -> tomorrowCalendarEvents.size
+                KIND_TOMORROW_COURSES -> tomorrowCourses.size
+                else -> todayCourses.size
+            }
 
         override fun getViewAt(position: Int): RemoteViews? =
-            if (kind == KIND_CALENDAR) {
-                calendarEvents.getOrNull(position)?.let(::calendarEventView)
-            } else {
-                todayCourses.getOrNull(position)?.let(::courseView)
+            when (kind) {
+                KIND_CALENDAR -> calendarEvents.getOrNull(position)?.let(::calendarEventView)
+                KIND_TODAY_CALENDAR -> todayCalendarEvents.getOrNull(position)?.let(::calendarEventView)
+                KIND_TOMORROW_CALENDAR -> tomorrowCalendarEvents.getOrNull(position)?.let(::calendarEventView)
+                KIND_TOMORROW_COURSES -> tomorrowCourses.getOrNull(position)?.let(::courseView)
+                else -> todayCourses.getOrNull(position)?.let(::courseView)
             }
 
         override fun getLoadingView(): RemoteViews? = null
@@ -84,12 +104,9 @@ class TimetableWidgetRemoteViewsService : RemoteViewsService() {
 
         private fun calendarEventView(event: TimetableWidgetCalendarEvent): RemoteViews =
             RemoteViews(context.packageName, R.layout.timetable_widget_calendar_item).apply {
-                val mutedColor = 0xFF6B7280.toInt()
-                val titleColor = if (event.placeholder) mutedColor else 0xFF111827.toInt()
-                val stripeColor = if (event.placeholder) 0xFF94A3B8.toInt() else 0xFF2563EB.toInt()
-                setInt(R.id.timetable_widget_calendar_item_bar, "setBackgroundColor", stripeColor)
+                setInt(R.id.timetable_widget_calendar_item_bar, "setBackgroundColor", 0xFF2563EB.toInt())
                 setTextViewText(R.id.timetable_widget_calendar_item_title, event.title)
-                setTextColor(R.id.timetable_widget_calendar_item_title, titleColor)
+                setTextColor(R.id.timetable_widget_calendar_item_title, 0xFF111827.toInt())
                 setTextViewText(
                     R.id.timetable_widget_calendar_item_date,
                     "${event.dayLabel} ${event.dateLabel} ${event.weekdayLabel}",
@@ -99,6 +116,7 @@ class TimetableWidgetRemoteViewsService : RemoteViewsService() {
                     R.id.timetable_widget_calendar_item_detail,
                     if (event.detail.isBlank()) View.GONE else View.VISIBLE,
                 )
+                setOnClickFillInIntent(R.id.timetable_widget_calendar_item_root, Intent())
             }
 
         private fun courseView(course: TimetableWidgetCourse): RemoteViews =
@@ -107,6 +125,7 @@ class TimetableWidgetRemoteViewsService : RemoteViewsService() {
                 setTextViewText(R.id.timetable_widget_course_item_title, course.title)
                 setTextViewText(R.id.timetable_widget_course_item_time, course.timeLabel)
                 setTextViewText(R.id.timetable_widget_course_item_detail, course.detail)
+                setOnClickFillInIntent(R.id.timetable_widget_course_item_root, Intent())
             }
     }
 }

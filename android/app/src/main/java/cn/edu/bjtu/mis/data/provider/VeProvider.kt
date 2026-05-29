@@ -1,5 +1,6 @@
 package cn.edu.bjtu.mis.data.provider
 
+import android.util.Log
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.data.network.FileResponse
 import cn.edu.bjtu.mis.data.network.MultipartFilePart
@@ -347,7 +348,7 @@ class VeProvider(private val client: BjtuHttpClient) {
             ?: throw IllegalStateException("未找到课程 $courseId")
 
         openHomeworkContext(course)
-        val homeworkEntry = listOf(0, 2).firstNotNullOfOrNull { subType ->
+        val homeworkLookup = listOf(0, 2).firstNotNullOfOrNull { subType ->
             val payload = getJsonObject(
                 "/ve/back/coursePlatform/homeWork.shtml",
                 mapOf(
@@ -358,8 +359,12 @@ class VeProvider(private val client: BjtuHttpClient) {
                     "pagesize" to "100",
                 ),
             )
-            payload.objectList("courseNoteList").firstOrNull { it.text("id") == homeworkId.toString() }
+            payload.objectList("courseNoteList")
+                .firstOrNull { it.text("id") == homeworkId.toString() }
+                ?.let { subType to it }
         } ?: throw IllegalStateException("未找到作业 $homeworkId")
+        val homeworkSubType = homeworkLookup.first
+        val homeworkEntry = homeworkLookup.second
 
         val uploadParams = mapOf(
             "method" to "uploadDiv3",
@@ -372,6 +377,7 @@ class VeProvider(private val client: BjtuHttpClient) {
             "endTime" to homeworkEntry.text("end_time").orEmpty(),
             "return_num" to homeworkEntry.int("return_num", 0).toString(),
         )
+        Log.i(TAG, "Opening VE homework submit page: ${homeworkDebugSummary(homeworkId, courseId, homeworkSubType, homeworkEntry)}")
         val uploadPage = client.getText(
             "${ProviderConstants.VE_BASE_URL}/ve/back/course/courseWorkInfo.shtml",
             params = uploadParams,
@@ -383,10 +389,17 @@ class VeProvider(private val client: BjtuHttpClient) {
         rememberSession(uploadPage)
 
         val uploadUrl = extractHomeworkUploadUrl(uploadPage.body, uploadPage.url)
+        Log.d(
+            TAG,
+            "VE homework submit page loaded: code=${uploadPage.code}, url=${uploadPage.url}, " +
+                "uploadUrlPresent=${uploadUrl != null}, hidden=${homeworkHiddenFieldSummary(uploadPage.body)}"
+        )
         val uploadedFiles = if (files.isEmpty()) {
             emptyList()
         } else {
-            val targetUrl = uploadUrl ?: throw IllegalStateException("作业提交页缺少附件上传地址。")
+            val targetUrl = uploadUrl ?: throw IllegalStateException(
+                "作业提交页缺少附件上传地址。\n诊断信息：${homeworkPageDiagnostic(uploadPage)}"
+            )
             files.map { file ->
                 uploadHomeworkFile(targetUrl, uploadPage.url, file)
             }
@@ -399,22 +412,23 @@ class VeProvider(private val client: BjtuHttpClient) {
                 })
             }
         }.toString()
+        val submitForm = mapOf(
+            "content" to content,
+            "groupName" to extractInputValue(uploadPage.body, "groupName").orEmpty(),
+            "groupId" to extractInputValue(uploadPage.body, "groupId").orEmpty(),
+            "courseId" to (extractInputValue(uploadPage.body, "courseId") ?: courseId.toString()),
+            "contentType" to (extractInputValue(uploadPage.body, "contentType") ?: uploadParams.getValue("contentType")),
+            "fz" to (extractInputValue(uploadPage.body, "fz") ?: uploadParams.getValue("fz")),
+            "jxrl_id" to extractInputValue(uploadPage.body, "jxrl_id").orEmpty(),
+            "fileList" to submitPayload,
+            "upId" to (extractInputValue(uploadPage.body, "upId") ?: homeworkId.toString()),
+            "return_num" to (extractInputValue(uploadPage.body, "return_num") ?: uploadParams.getValue("return_num")),
+            "isTeacher" to "0",
+        )
         val submitResponse = client.postForm(
             "${ProviderConstants.VE_BASE_URL}/ve/back/course/courseWorkInfo.shtml",
             params = mapOf("method" to "sendStuHomeWorks"),
-            form = mapOf(
-                "content" to urlQuote(content),
-                "groupName" to urlQuote(extractInputValue(uploadPage.body, "groupName").orEmpty()),
-                "groupId" to extractInputValue(uploadPage.body, "groupId").orEmpty(),
-                "courseId" to (extractInputValue(uploadPage.body, "courseId") ?: courseId.toString()),
-                "contentType" to (extractInputValue(uploadPage.body, "contentType") ?: uploadParams.getValue("contentType")),
-                "fz" to (extractInputValue(uploadPage.body, "fz") ?: uploadParams.getValue("fz")),
-                "jxrl_id" to extractInputValue(uploadPage.body, "jxrl_id").orEmpty(),
-                "fileList" to submitPayload,
-                "upId" to (extractInputValue(uploadPage.body, "upId") ?: homeworkId.toString()),
-                "return_num" to (extractInputValue(uploadPage.body, "return_num") ?: uploadParams.getValue("return_num")),
-                "isTeacher" to "0",
-            ),
+            form = submitForm,
             headers = mapOf(
                 "Accept" to "*/*",
                 "X-Requested-With" to "XMLHttpRequest",
@@ -423,10 +437,24 @@ class VeProvider(private val client: BjtuHttpClient) {
         )
         rememberSession(submitResponse)
         val payload = parseJsonObjectResponse(submitResponse, "homework submit")
-        val flag = (payload.text("flag") ?: payload.text("status")).orEmpty().lowercase()
-        if (flag != "success") {
-            throw IOException(payload.text("message") ?: payload.text("msg") ?: "VE 作业提交失败")
+        val flag = (payload.text("flag") ?: payload.text("status")).orEmpty()
+        if (!isVeSuccessFlag(flag)) {
+            val message = payload.text("message") ?: payload.text("msg") ?: payload.text("error") ?: "VE 作业提交失败"
+            val diagnostic = homeworkSubmitDiagnostic(
+                homeworkId = homeworkId,
+                courseId = courseId,
+                subType = homeworkSubType,
+                homeworkEntry = homeworkEntry,
+                uploadPage = uploadPage,
+                submitResponse = submitResponse,
+                submitPayload = payload,
+                submitForm = submitForm,
+            )
+            Log.w(TAG, "VE homework submit rejected: $message; $diagnostic")
+            throw IOException("$message\n诊断信息：$diagnostic")
         }
+
+        Log.i(TAG, "VE homework submit accepted: flag=$flag, homeworkId=$homeworkId, courseId=$courseId")
 
         return HomeworkSubmitResponse(
             status = "success",
@@ -1649,6 +1677,63 @@ class VeProvider(private val client: BjtuHttpClient) {
     private fun urlDecode(value: String): String =
         runCatching { URLDecoder.decode(value, StandardCharsets.UTF_8.name()) }.getOrDefault(value)
 
+    private fun isVeSuccessFlag(value: String): Boolean =
+        value.trim().equals("success", ignoreCase = true)
+
+    private fun homeworkDebugSummary(
+        homeworkId: Int,
+        courseId: Int,
+        subType: Int,
+        entry: JsonObject,
+    ): String =
+        listOf(
+            "homeworkId=$homeworkId",
+            "courseId=$courseId",
+            "subType=$subType",
+            "subStatus=${entry.text("subStatus").orEmpty()}",
+            "can_submit=${entry.text("can_submit") ?: entry.text("canSubmit").orEmpty()}",
+            "end_time=${entry.text("end_time").orEmpty()}",
+            "return_num=${entry.text("return_num").orEmpty()}",
+            "calendar_id=${entry.text("calendar_id").orEmpty()}",
+        ).joinToString(", ")
+
+    private fun homeworkHiddenFieldSummary(html: String): String =
+        listOf("groupName", "groupId", "courseId", "contentType", "fz", "jxrl_id", "upId", "return_num")
+            .joinToString(", ") { name ->
+                val value = extractInputValue(html, name)
+                val state = if (value.isNullOrBlank()) "<missing>" else "<present:${value.length}>"
+                "$name=$state"
+            }
+
+    private fun homeworkPageDiagnostic(response: TextResponse): String =
+        "pageCode=${response.code}, pageUrl=${response.url}, title=${extractHtmlTitle(response.body).orEmpty()}, " +
+            "hidden=${homeworkHiddenFieldSummary(response.body)}, bodyLength=${response.body.length}"
+
+    private fun homeworkSubmitDiagnostic(
+        homeworkId: Int,
+        courseId: Int,
+        subType: Int,
+        homeworkEntry: JsonObject,
+        uploadPage: TextResponse,
+        submitResponse: TextResponse,
+        submitPayload: JsonObject,
+        submitForm: Map<String, String>,
+    ): String =
+        listOf(
+            homeworkDebugSummary(homeworkId, courseId, subType, homeworkEntry),
+            "uploadPage=${homeworkPageDiagnostic(uploadPage)}",
+            "submitCode=${submitResponse.code}",
+            "submitUrl=${submitResponse.url}",
+            "submitForm=${homeworkSubmitFormSummary(submitForm)}",
+            "submitJsonKeys=${submitPayload.keys.sorted().joinToString(",")}",
+            "submitBodyLength=${submitResponse.body.length}",
+        ).joinToString("; ")
+
+    private fun homeworkSubmitFormSummary(form: Map<String, String>): String =
+        listOf("courseId", "contentType", "fz", "jxrl_id", "upId", "return_num", "isTeacher")
+            .joinToString(", ") { name -> "$name=${form[name].orEmpty().ifBlank { "<blank>" }}" } +
+            ", contentLength=${form["content"].orEmpty().length}, fileListLength=${form["fileList"].orEmpty().length}"
+
     private fun JsonObject.objectList(key: String): List<JsonObject> =
         runCatching { this[key]?.jsonArray?.mapNotNull { it as? JsonObject }.orEmpty() }.getOrDefault(emptyList())
 
@@ -1660,6 +1745,10 @@ class VeProvider(private val client: BjtuHttpClient) {
 
     private fun JsonElement.primitiveText(): String? =
         runCatching { jsonPrimitive.contentOrNull }.getOrNull()?.trim()
+
+    private companion object {
+        const val TAG = "VeProvider"
+    }
 
 }
 

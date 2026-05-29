@@ -44,8 +44,6 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -65,8 +63,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -94,7 +90,6 @@ import cn.edu.bjtu.mis.data.employment.EmploymentCalendarEvent
 import cn.edu.bjtu.mis.data.employment.EmploymentCalendarSyncStore
 import cn.edu.bjtu.mis.data.employment.employmentCalendarEventTypeLabel
 import cn.edu.bjtu.mis.data.homework.HomeworkStatusKind
-import cn.edu.bjtu.mis.data.homework.HomeworkTimeOffsetStore
 import cn.edu.bjtu.mis.data.homework.homeworkCalendarStatusLabel
 import cn.edu.bjtu.mis.data.homework.homeworkDueDate
 import cn.edu.bjtu.mis.data.homework.homeworkMatchesStatusFilter
@@ -163,13 +158,9 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
-import java.time.Duration
-import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.LocalTime
 import java.time.YearMonth
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 import java.util.Locale
@@ -2509,7 +2500,6 @@ private fun academicCalendarDateLabel(week: AcademicCalendarWeek, date: LocalDat
 fun HomeworkScreen(
     repository: ModuleRepository,
     attachmentRepository: HomeworkAttachmentRepository,
-    offsetStore: HomeworkTimeOffsetStore,
     onNavigate: (String) -> Unit,
     onOpenAgent: () -> Unit,
 ) {
@@ -2525,10 +2515,7 @@ fun HomeworkScreen(
     var attachmentBusyKey by remember { mutableStateOf<String?>(null) }
     var attachmentError by remember { mutableStateOf<String?>(null) }
     var previewTarget by remember { mutableStateOf<HomeworkAttachmentPreviewTarget?>(null) }
-    var timeOffset by remember { mutableStateOf(offsetStore.offset) }
-    var showOffsetDialogTarget by remember { mutableStateOf<HomeworkItem?>(null) }
     val realNow = LocalDateTime.now()
-    val effectiveNow = realNow.minus(timeOffset)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -2651,28 +2638,12 @@ fun HomeworkScreen(
                         submitTarget = null
                         pickedFiles = emptyList()
                         submitContent = ""
-                        offsetStore.clear()
-                        timeOffset = Duration.ZERO
                         refreshNonce += 1
                     }.onFailure { error ->
                         submitting = false
-                        submitError = error.message ?: "提交失败"
+                        submitError = homeworkSubmitErrorMessage(error)
                     }
                 }
-            },
-        )
-    }
-
-    showOffsetDialogTarget?.let { target ->
-        TimeOffsetDialog(
-            realNow = realNow,
-            currentOffset = timeOffset,
-            onDismiss = { showOffsetDialogTarget = null },
-            onConfirm = { newOffset ->
-                offsetStore.offset = newOffset
-                timeOffset = newOffset
-                status = "all"
-                showOffsetDialogTarget = null
             },
         )
     }
@@ -2686,35 +2657,11 @@ fun HomeworkScreen(
         val currentTerm = data.currentTerm
         val activeFilter = if (status == "expired") expiredStatus else status
         val displayItems = if (activeFilter != "all") {
-            data.items.filter { homeworkMatchesStatusFilter(it, activeFilter, effectiveNow) }
+            data.items.filter { homeworkMatchesStatusFilter(it, activeFilter, realNow) }
         } else {
             data.items
         }
-        val groups = groupHomeworkItems(displayItems, effectiveNow)
-        if (timeOffset > Duration.ZERO) {
-            item(key = "offset-banner") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            MaterialTheme.colorScheme.primaryContainer,
-                            shape = MaterialTheme.shapes.small,
-                        )
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "时钟偏移: ${timeOffset.toDays()} 天${timeOffset.toHours() % 24} 小时${timeOffset.toMinutes() % 60} 分钟前",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                    TextButton(onClick = { offsetStore.clear(); timeOffset = Duration.ZERO }) {
-                        Text("清除", color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    }
-                }
-            }
-        }
+        val groups = groupHomeworkItems(displayItems, realNow)
         item {
             SecondaryModuleLinks(
                 title = "作业相关",
@@ -2780,19 +2727,14 @@ fun HomeworkScreen(
                     )
                 }
                 items(group.items, key = { it.homeworkId ?: (it.title + it.courseId).hashCode() }) { item ->
-                    val realStatus = homeworkStatusKind(item, realNow)
-                    val itemStatus = homeworkStatusKind(item, effectiveNow)
-                    val offsetBypassesDeadline =
-                        timeOffset > Duration.ZERO &&
-                            realStatus == HomeworkStatusKind.ExpiredClosed &&
-                            itemStatus == HomeworkStatusKind.Open
+                    val itemStatus = homeworkStatusKind(item, realNow)
                     InfoCard(item.title, subtitle = item.course) {
                         Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
                             KeyValue("开始", item.openedAt, Modifier.weight(1f))
                             KeyValue("截止", item.dueAt, Modifier.weight(1f))
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
-                            KeyValue("状态", homeworkStatusLabel(item, effectiveNow), Modifier.weight(1f))
+                            KeyValue("状态", homeworkStatusLabel(item, realNow), Modifier.weight(1f))
                             KeyValue("提交时间", item.submittedAt ?: "未提交", Modifier.weight(1f))
                         }
                         KeyValue("内容", item.contentExcerpt)
@@ -2802,15 +2744,11 @@ fun HomeworkScreen(
                             onPreview = { previewAttachment(item, it) },
                             onDownload = { downloadAttachment(item, it) },
                         )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            if (realStatus == HomeworkStatusKind.ExpiredClosed) {
-                                OutlinedButton(
-                                    onClick = { showOffsetDialogTarget = item },
-                                ) {
-                                    Text("绕过时限")
-                                }
-                                Spacer(Modifier.width(8.dp))
-                            }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             OutlinedButton(
                                 enabled = item.homeworkId != null,
                                 onClick = {
@@ -2820,10 +2758,9 @@ fun HomeworkScreen(
                             ) {
                                 Text("Agent 协助")
                             }
-                            Spacer(Modifier.width(8.dp))
                             OutlinedButton(
                                 enabled = item.homeworkId != null &&
-                                    (item.canSubmit || offsetBypassesDeadline) &&
+                                    item.canSubmit &&
                                     itemStatus != HomeworkStatusKind.ExpiredClosed &&
                                     !submitting,
                                 onClick = {
@@ -2916,6 +2853,16 @@ private fun HomeworkAttachmentsSection(
 private fun homeworkAttachmentActionKey(action: String, attachment: HomeworkAttachment): String =
     "$action:${attachment.attachmentId}:${attachment.filename}"
 
+private fun homeworkSubmitErrorMessage(error: Throwable): String {
+    val message = error.message?.takeIf { it.isNotBlank() } ?: return "提交失败"
+    val maxLength = 1200
+    return if (message.length <= maxLength) {
+        message
+    } else {
+        message.take(maxLength) + "\n…更多诊断信息请查看 Logcat：adb logcat -s VeProvider"
+    }
+}
+
 private data class HomeworkAttachmentPreviewTarget(
     val homework: HomeworkItem,
     val attachment: HomeworkAttachment,
@@ -2958,7 +2905,7 @@ private data class HomeworkPickedFile(
     val size: Long?,
 )
 
-private fun groupHomeworkItems(items: List<HomeworkItem>, effectiveNow: LocalDateTime): List<HomeworkCourseGroup> =
+private fun groupHomeworkItems(items: List<HomeworkItem>, now: LocalDateTime): List<HomeworkCourseGroup> =
     items
         .groupBy { item ->
             val courseId = item.courseId.toString()
@@ -2975,9 +2922,9 @@ private fun groupHomeworkItems(items: List<HomeworkItem>, effectiveNow: LocalDat
                 courseName = key.second,
                 items = sortedItems,
                 total = sortedItems.size,
-                openCount = sortedItems.count { homeworkStatusKind(it, effectiveNow) == HomeworkStatusKind.Open },
+                openCount = sortedItems.count { homeworkStatusKind(it, now) == HomeworkStatusKind.Open },
                 expiredCount = sortedItems.count {
-                    val status = homeworkStatusKind(it, effectiveNow)
+                    val status = homeworkStatusKind(it, now)
                     status == HomeworkStatusKind.ExpiredCanSubmit || status == HomeworkStatusKind.ExpiredClosed
                 },
             )
@@ -2991,8 +2938,8 @@ private fun buildHomeworkGroupSubtitle(group: HomeworkCourseGroup): String =
         if (group.expiredCount > 0) add("已过期 ${group.expiredCount} 条")
     }.joinToString(" · ")
 
-private fun homeworkStatusLabel(item: HomeworkItem, effectiveNow: LocalDateTime): String =
-    homeworkStatusKind(item, effectiveNow).label
+private fun homeworkStatusLabel(item: HomeworkItem, now: LocalDateTime): String =
+    homeworkStatusKind(item, now).label
 
 private fun homeworkSubmitButtonLabel(status: HomeworkStatusKind): String =
     when (status) {
@@ -4917,207 +4864,6 @@ private fun timetableWeeksContain(weeks: String?, currentWeek: Int): Boolean {
 
 private fun CourseEntry.locationLabel(): String? =
     locationText ?: listOfNotNull(campus, building, room).joinToString(" ").takeIf { it.isNotBlank() }
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun TimeOffsetDialog(
-    realNow: LocalDateTime,
-    currentOffset: Duration,
-    onDismiss: () -> Unit,
-    onConfirm: (Duration) -> Unit,
-) {
-    var daysOffset by remember { mutableStateOf(currentOffset.toDays().coerceIn(1, 14).toInt()) }
-    var usePreciseDate by remember { mutableStateOf(false) }
-    var preciseDate by remember { mutableStateOf<LocalDate?>(null) }
-    var preciseHour by remember { mutableStateOf<Int?>(null) }
-    var preciseMinute by remember { mutableStateOf<Int?>(null) }
-    var showDatePicker by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    if (showDatePicker) {
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = realNow.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli())
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { millis ->
-                        preciseDate = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
-                    }
-                    showDatePicker = false
-                    errorMessage = null
-                }) {
-                    Text("确定")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) {
-                    Text("取消")
-                }
-            },
-        ) {
-            DatePicker(state = datePickerState)
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("调整时限检查") },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("设置本地时钟往前偏移的天数，使截止日看起来尚未到来。", style = MaterialTheme.typography.bodySmall)
-                Text("偏移天数: ${daysOffset} 天", style = MaterialTheme.typography.labelMedium)
-                Slider(
-                    value = daysOffset.toFloat(),
-                    onValueChange = { daysOffset = it.toInt(); errorMessage = null },
-                    valueRange = 1f..14f,
-                    steps = 12,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("1 天", style = MaterialTheme.typography.labelSmall)
-                    Text("14 天", style = MaterialTheme.typography.labelSmall)
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            usePreciseDate = !usePreciseDate
-                            if (usePreciseDate && preciseDate == null) {
-                                preciseDate = realNow.toLocalDate()
-                                preciseHour = realNow.hour
-                                preciseMinute = realNow.minute
-                            }
-                        },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "精确设置目标时间",
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        if (usePreciseDate) "▲" else "▼",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-
-                if (usePreciseDate) {
-                    OutlinedButton(
-                        onClick = { showDatePicker = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(preciseDate?.toString() ?: "选择目标日期")
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        val hourOptions = (0..23).toList()
-                        var hourExpanded by remember { mutableStateOf(false) }
-                        Box(modifier = Modifier.weight(1f)) {
-                            OutlinedButton(
-                                onClick = { hourExpanded = true },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text(if (preciseHour != null) "${preciseHour} 时" else "时")
-                            }
-                            DropdownMenu(expanded = hourExpanded, onDismissRequest = { hourExpanded = false }) {
-                                hourOptions.forEach { h ->
-                                    DropdownMenuItem(
-                                        text = { Text("$h 时") },
-                                        onClick = { preciseHour = h; hourExpanded = false; errorMessage = null },
-                                    )
-                                }
-                            }
-                        }
-                        val minuteOptions = (0..59).toList()
-                        var minExpanded by remember { mutableStateOf(false) }
-                        Box(modifier = Modifier.weight(1f)) {
-                            OutlinedButton(
-                                onClick = { minExpanded = true },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text(if (preciseMinute != null) "${preciseMinute} 分" else "分")
-                            }
-                            DropdownMenu(expanded = minExpanded, onDismissRequest = { minExpanded = false }) {
-                                minuteOptions.forEach { m ->
-                                    DropdownMenuItem(
-                                        text = { Text("$m 分") },
-                                        onClick = { preciseMinute = m; minExpanded = false; errorMessage = null },
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    if (preciseDate != null) {
-                        Text(
-                            "模拟时间: ${preciseDate} ${(preciseHour ?: 0).toString().padStart(2, '0')}:${(preciseMinute ?: 0).toString().padStart(2, '0')}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
-                    val simulated = realNow.minusDays(daysOffset.toLong())
-                    Text(
-                        "模拟时间: ${simulated.toLocalDate()} ${simulated.hour.toString().padStart(2, '0')}:${simulated.minute.toString().padStart(2, '0')}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                errorMessage?.let { msg ->
-                    Text(msg, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val offset = if (usePreciseDate) {
-                        val date = preciseDate
-                        if (date == null) {
-                            errorMessage = "请先选择目标日期"
-                            return@TextButton
-                        } else {
-                            val hour = preciseHour ?: 0
-                            val minute = preciseMinute ?: 0
-                            try {
-                                val target = LocalDateTime.of(date, LocalTime.of(hour, minute))
-                                val d = Duration.between(target, realNow)
-                                if (d.isNegative || d.isZero) {
-                                    errorMessage = "目标时间必须早于当前时间"
-                                    return@TextButton
-                                }
-                                d
-                            } catch (_: Exception) {
-                                errorMessage = "无效的日期时间"
-                                return@TextButton
-                            }
-                        }
-                    } else {
-                        Duration.ofDays(daysOffset.toLong())
-                    }
-                    onConfirm(offset)
-                },
-            ) {
-                Text("确定")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        },
-    )
-}
 
 private fun String?.normalizedCourseText(): String =
     this?.trim()?.lowercase()?.replace(Regex("""\s+"""), "").orEmpty()

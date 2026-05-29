@@ -135,7 +135,9 @@ class ParserTest {
               "courseNoteList": [
                 {"id": 1, "title": "Open homework"},
                 {"id": 2, "title": "Submitted homework", "subTime": "2026-04-10 23:05:56", "subStatus": "submitted"},
-                {"id": 3, "title": "Closed homework", "can_submit": "0"}
+                {"id": 3, "title": "Closed homework", "can_submit": "0"},
+                {"id": 4, "title": "Makeup homework", "subStatus": "可补交"},
+                {"id": 5, "title": "Closed by status", "subStatus": "不可补交"}
               ],
               "STATUS": "0"
             }
@@ -144,10 +146,15 @@ class ParserTest {
 
         val homework = parseHomeworkList(payload, course, 0)
 
-        assertEquals(listOf("open", "done", "open"), homework.map { it.status })
+        assertEquals(listOf("open", "done", "open", "open", "open"), homework.map { it.status })
         assertEquals(null, homework[0].submittedAt)
         assertEquals("2026-04-10 23:05:56", homework[1].submittedAt)
         assertEquals(false, homework[2].canSubmit)
+        assertEquals(true, homework[2].canSubmitExplicit)
+        assertEquals(true, homework[3].canSubmit)
+        assertEquals(true, homework[3].canSubmitExplicit)
+        assertEquals(false, homework[4].canSubmit)
+        assertEquals(true, homework[4].canSubmitExplicit)
     }
 
     @Test

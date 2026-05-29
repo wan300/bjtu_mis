@@ -527,7 +527,6 @@ private fun ModuleRoute(
         ModuleKeys.Homework -> HomeworkScreen(
             repository = container.moduleRepository,
             attachmentRepository = container.homeworkAttachmentRepository,
-            offsetStore = container.homeworkTimeOffsetStore,
             onNavigate = onNavigate,
             onOpenAgent = { onNavigate(ModuleKeys.OpenWebUiAgent) },
         )

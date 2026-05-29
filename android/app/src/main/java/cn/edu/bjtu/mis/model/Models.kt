@@ -314,6 +314,7 @@ data class HomeworkItem(
     val subType: Int,
     val submissionStatus: String? = null,
     val canSubmit: Boolean = true,
+    val canSubmitExplicit: Boolean = false,
     val contentType: Int = 0,
     val isGroup: Boolean = false,
     val returnNum: Int = 0,

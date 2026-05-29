@@ -48,7 +48,11 @@ fun homeworkStatusKind(
 
     val dueAt = parseHomeworkDueAt(item.dueAt)
     if (dueAt != null && !dueAt.isAfter(now)) {
-        return if (item.canSubmit) HomeworkStatusKind.ExpiredCanSubmit else HomeworkStatusKind.ExpiredClosed
+        return if (item.canSubmit && item.canSubmitExplicit) {
+            HomeworkStatusKind.ExpiredCanSubmit
+        } else {
+            HomeworkStatusKind.ExpiredClosed
+        }
     }
 
     return HomeworkStatusKind.Open

@@ -72,8 +72,10 @@ class TimetableWidgetProvider : AppWidgetProvider() {
             appWidgetIds.forEach { appWidgetId ->
                 appWidgetManager.updateAppWidget(appWidgetId, buildRemoteViews(context, model, appWidgetId))
             }
-            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.timetable_widget_calendar_list)
+            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.timetable_widget_today_calendar_list)
+            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.timetable_widget_tomorrow_calendar_list)
             appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.timetable_widget_today_course_list)
+            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.timetable_widget_tomorrow_course_list)
         }
 
         private suspend fun loadModel(context: Context): TimetableWidgetModel =
@@ -89,22 +91,69 @@ class TimetableWidgetProvider : AppWidgetProvider() {
             appWidgetId: Int,
         ): RemoteViews =
             RemoteViews(context.packageName, R.layout.timetable_widget).apply {
+                val calendarPendingIntent = openRoutePendingIntent(
+                    context = context,
+                    route = ModuleKeys.Calendar,
+                    requestCode = REQUEST_OPEN_CALENDAR,
+                )
+                val timetablePendingIntent = openRoutePendingIntent(
+                    context = context,
+                    route = ModuleKeys.Timetable,
+                    requestCode = REQUEST_OPEN_TIMETABLE,
+                )
+                val calendarItemPendingIntent = openRoutePendingIntent(
+                    context = context,
+                    route = ModuleKeys.Calendar,
+                    requestCode = REQUEST_OPEN_CALENDAR_ITEM,
+                    mutable = true,
+                )
+                val timetableItemPendingIntent = openRoutePendingIntent(
+                    context = context,
+                    route = ModuleKeys.Timetable,
+                    requestCode = REQUEST_OPEN_TIMETABLE_ITEM,
+                    mutable = true,
+                )
+
                 setTextViewText(R.id.timetable_widget_title, model.title)
                 setTextViewText(R.id.timetable_widget_meta, model.meta)
+                setTextViewText(R.id.timetable_widget_today_calendar_label, model.today.label)
+                setTextViewText(R.id.timetable_widget_today_calendar_date, "${model.today.dateLabel} ${model.today.weekdayLabel}")
+                setTextViewText(R.id.timetable_widget_tomorrow_calendar_label, model.tomorrow.label)
+                setTextViewText(R.id.timetable_widget_tomorrow_calendar_date, "${model.tomorrow.dateLabel} ${model.tomorrow.weekdayLabel}")
                 setTextViewText(R.id.timetable_widget_today_label, model.today.label)
                 setTextViewText(R.id.timetable_widget_today_date, "${model.today.dateLabel} ${model.today.weekdayLabel}")
+                setTextViewText(R.id.timetable_widget_tomorrow_label, model.tomorrow.label)
+                setTextViewText(R.id.timetable_widget_tomorrow_date, "${model.tomorrow.dateLabel} ${model.tomorrow.weekdayLabel}")
 
                 setRemoteAdapter(
-                    R.id.timetable_widget_calendar_list,
-                    serviceIntent(context, appWidgetId, TimetableWidgetRemoteViewsService.KIND_CALENDAR),
+                    R.id.timetable_widget_today_calendar_list,
+                    serviceIntent(context, appWidgetId, TimetableWidgetRemoteViewsService.KIND_TODAY_CALENDAR),
                 )
-                setEmptyView(R.id.timetable_widget_calendar_list, R.id.timetable_widget_calendar_empty)
+                setPendingIntentTemplate(R.id.timetable_widget_today_calendar_list, calendarItemPendingIntent)
+                setRemoteAdapter(
+                    R.id.timetable_widget_tomorrow_calendar_list,
+                    serviceIntent(context, appWidgetId, TimetableWidgetRemoteViewsService.KIND_TOMORROW_CALENDAR),
+                )
+                setPendingIntentTemplate(R.id.timetable_widget_tomorrow_calendar_list, calendarItemPendingIntent)
                 setRemoteAdapter(
                     R.id.timetable_widget_today_course_list,
                     serviceIntent(context, appWidgetId, TimetableWidgetRemoteViewsService.KIND_TODAY_COURSES),
                 )
+                setPendingIntentTemplate(R.id.timetable_widget_today_course_list, timetableItemPendingIntent)
                 setEmptyView(R.id.timetable_widget_today_course_list, R.id.timetable_widget_today_course_empty)
-                setOnClickPendingIntent(R.id.timetable_widget_root, openHomeworkPendingIntent(context))
+                setRemoteAdapter(
+                    R.id.timetable_widget_tomorrow_course_list,
+                    serviceIntent(context, appWidgetId, TimetableWidgetRemoteViewsService.KIND_TOMORROW_COURSES),
+                )
+                setPendingIntentTemplate(R.id.timetable_widget_tomorrow_course_list, timetableItemPendingIntent)
+                setEmptyView(R.id.timetable_widget_tomorrow_course_list, R.id.timetable_widget_tomorrow_course_empty)
+
+                setOnClickPendingIntent(R.id.timetable_widget_root, calendarPendingIntent)
+                setOnClickPendingIntent(R.id.timetable_widget_calendar_title, calendarPendingIntent)
+                setOnClickPendingIntent(R.id.timetable_widget_calendar_section, calendarPendingIntent)
+                setOnClickPendingIntent(R.id.timetable_widget_course_section, timetablePendingIntent)
+                setOnClickPendingIntent(R.id.timetable_widget_today_course_empty, timetablePendingIntent)
+                setOnClickPendingIntent(R.id.timetable_widget_tomorrow_course_empty, timetablePendingIntent)
             }
 
         private fun serviceIntent(
@@ -118,17 +167,28 @@ class TimetableWidgetProvider : AppWidgetProvider() {
                 data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
             }
 
-        private fun openHomeworkPendingIntent(context: Context): PendingIntent {
+        private fun openRoutePendingIntent(
+            context: Context,
+            route: String,
+            requestCode: Int,
+            mutable: Boolean = false,
+        ): PendingIntent {
             val intent = Intent(context, MainActivity::class.java).apply {
-                putExtra(MainActivity.EXTRA_OPEN_ROUTE, ModuleKeys.Timetable)
+                putExtra(MainActivity.EXTRA_OPEN_ROUTE, route)
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
+            val mutabilityFlag = if (mutable) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE
             return PendingIntent.getActivity(
                 context,
-                31001,
+                requestCode,
                 intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                PendingIntent.FLAG_UPDATE_CURRENT or mutabilityFlag,
             )
         }
+
+        private const val REQUEST_OPEN_CALENDAR = 31001
+        private const val REQUEST_OPEN_TIMETABLE = 31002
+        private const val REQUEST_OPEN_CALENDAR_ITEM = 31003
+        private const val REQUEST_OPEN_TIMETABLE_ITEM = 31004
     }
 }

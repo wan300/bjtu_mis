@@ -15,11 +15,19 @@ class HomeworkStatusTest {
     fun classifiesExpiredHomeworkByMakeupAvailability() {
         assertEquals(
             HomeworkStatusKind.ExpiredCanSubmit,
-            homeworkStatusKind(homework(dueAt = "2026-05-10 07:59", canSubmit = true), now),
+            homeworkStatusKind(homework(dueAt = "2026-05-10 07:59", canSubmit = true, canSubmitExplicit = true), now),
         )
         assertEquals(
             HomeworkStatusKind.ExpiredClosed,
-            homeworkStatusKind(homework(dueAt = "2026-05-10 07:59", canSubmit = false), now),
+            homeworkStatusKind(homework(dueAt = "2026-05-10 07:59", canSubmit = false, canSubmitExplicit = true), now),
+        )
+    }
+
+    @Test
+    fun expiredHomeworkWithoutExplicitMakeupAvailabilityIsClosed() {
+        assertEquals(
+            HomeworkStatusKind.ExpiredClosed,
+            homeworkStatusKind(homework(dueAt = "2026-05-10 07:59", canSubmit = true, canSubmitExplicit = false), now),
         )
     }
 
@@ -46,8 +54,8 @@ class HomeworkStatusTest {
 
     @Test
     fun filtersExpiredSubclasses() {
-        val canSubmit = homework(title = "补交", dueAt = "2026-05-10 07:59", canSubmit = true)
-        val closed = homework(title = "关闭", dueAt = "2026-05-10 07:59", canSubmit = false)
+        val canSubmit = homework(title = "补交", dueAt = "2026-05-10 07:59", canSubmit = true, canSubmitExplicit = true)
+        val closed = homework(title = "关闭", dueAt = "2026-05-10 07:59", canSubmit = false, canSubmitExplicit = true)
         val open = homework(title = "待完成", dueAt = "2026-05-11 08:00")
 
         assertTrue(homeworkMatchesStatusFilter(canSubmit, "expired", now))
@@ -61,6 +69,7 @@ class HomeworkStatusTest {
         title: String = "作业",
         dueAt: String,
         canSubmit: Boolean = true,
+        canSubmitExplicit: Boolean = false,
         submittedAt: String? = null,
     ): HomeworkItem =
         HomeworkItem(
@@ -73,5 +82,6 @@ class HomeworkStatusTest {
             status = if (submittedAt == null) "open" else "done",
             subType = 0,
             canSubmit = canSubmit,
+            canSubmitExplicit = canSubmitExplicit,
         )
 }
