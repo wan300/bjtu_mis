@@ -46,6 +46,17 @@ data class AppUpdateInfo(
     val releaseNotes: String? = null,
 )
 
+sealed interface AppUpdateCheckResult {
+    data class UpdateAvailable(val update: AppUpdateInfo) : AppUpdateCheckResult
+    data class UpToDate(
+        val currentVersion: String,
+        val latestVersion: String,
+    ) : AppUpdateCheckResult
+    data class Unavailable(
+        val currentVersion: String? = null,
+    ) : AppUpdateCheckResult
+}
+
 class AppUpdateChecker(
     private val client: BjtuHttpClient,
     private val currentVersionProvider: () -> String?,
@@ -55,30 +66,47 @@ class AppUpdateChecker(
 ) {
     private val normalizedApiBaseUrl = apiBaseUrl.trimEnd('/')
 
-    suspend fun checkForUpdate(): AppUpdateInfo? {
+    suspend fun checkForUpdate(): AppUpdateInfo? =
+        when (val result = checkForUpdateResult()) {
+            is AppUpdateCheckResult.UpdateAvailable -> result.update
+            is AppUpdateCheckResult.Unavailable,
+            is AppUpdateCheckResult.UpToDate -> null
+        }
+
+    suspend fun checkForUpdateResult(): AppUpdateCheckResult {
         val currentVersionName = try {
             currentVersionProvider()
         } catch (error: Exception) {
             if (error is CancellationException) throw error
-            return null
+            return AppUpdateCheckResult.Unavailable()
         }
-        val currentVersion = SemanticVersion.parse(currentVersionName) ?: return null
+        val currentVersion = SemanticVersion.parse(currentVersionName) ?: return AppUpdateCheckResult.Unavailable()
         val release = try {
             fetchLatestRelease()
         } catch (error: Exception) {
             if (error is CancellationException) throw error
-            return null
+            return AppUpdateCheckResult.Unavailable(currentVersion = currentVersion.toString())
         }
-        val latestVersion = SemanticVersion.parse(release.tagName) ?: return null
-        val releaseUrl = release.htmlUrl.takeIf { it.isNotBlank() } ?: return null
+        val latestVersion = SemanticVersion.parse(release.tagName)
+            ?: return AppUpdateCheckResult.Unavailable(currentVersion = currentVersion.toString())
 
-        if (latestVersion <= currentVersion) return null
+        if (latestVersion <= currentVersion) {
+            return AppUpdateCheckResult.UpToDate(
+                currentVersion = currentVersion.toString(),
+                latestVersion = latestVersion.toString(),
+            )
+        }
 
-        return AppUpdateInfo(
-            currentVersion = currentVersion.toString(),
-            latestVersion = latestVersion.toString(),
-            releaseUrl = releaseUrl,
-            releaseNotes = release.body?.takeIf { it.isNotBlank() },
+        val releaseUrl = release.htmlUrl.takeIf { it.isNotBlank() }
+            ?: return AppUpdateCheckResult.Unavailable(currentVersion = currentVersion.toString())
+
+        return AppUpdateCheckResult.UpdateAvailable(
+            AppUpdateInfo(
+                currentVersion = currentVersion.toString(),
+                latestVersion = latestVersion.toString(),
+                releaseUrl = releaseUrl,
+                releaseNotes = release.body?.takeIf { it.isNotBlank() },
+            ),
         )
     }
 

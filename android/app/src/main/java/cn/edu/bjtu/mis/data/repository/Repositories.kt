@@ -69,6 +69,9 @@ import cn.edu.bjtu.mis.model.SessionStatus
 import cn.edu.bjtu.mis.model.StudentProfileData
 import cn.edu.bjtu.mis.model.SyncModuleSummary
 import cn.edu.bjtu.mis.model.SyncRun
+import cn.edu.bjtu.mis.model.TeachingAssessmentData
+import cn.edu.bjtu.mis.model.TeachingAssessmentForm
+import cn.edu.bjtu.mis.model.TeachingAssessmentSubmitResult
 import cn.edu.bjtu.mis.model.TimetableData
 import cn.edu.bjtu.mis.model.UserCourseDraft
 import cn.edu.bjtu.mis.model.UserTodoDraft
@@ -456,6 +459,20 @@ class ModuleRepository(
         room: String? = null,
     ): ModuleEnvelope<EmptyRoomData> =
         fetchLiveOrSnapshot(ModuleKeys.EmptyRooms) { AaProvider(it).fetchEmptyRooms(term, week, building, room) }
+
+    suspend fun teachingAssessments(): ModuleEnvelope<TeachingAssessmentData> =
+        sessionManager.withAuthenticatedClient { AaProvider(it).fetchTeachingAssessmentList() }
+            .copy(syncedAt = nowIso())
+
+    suspend fun teachingAssessmentForm(courseId: String): TeachingAssessmentForm =
+        sessionManager.withAuthenticatedClient { AaProvider(it).fetchTeachingAssessmentForm(courseId) }
+
+    suspend fun submitTeachingAssessment(
+        form: TeachingAssessmentForm,
+        answerValues: Map<String, String>,
+        commentValues: Map<String, String>,
+    ): TeachingAssessmentSubmitResult =
+        sessionManager.withAuthenticatedClient { AaProvider(it).submitTeachingAssessment(form, answerValues, commentValues) }
 
     suspend fun courseResources(
         term: String? = null,

@@ -99,6 +99,12 @@ import cn.edu.bjtu.mis.data.repository.EmploymentConsultationRepository
 import cn.edu.bjtu.mis.data.repository.HomeworkAttachmentPreview
 import cn.edu.bjtu.mis.data.repository.HomeworkAttachmentRepository
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
+import cn.edu.bjtu.mis.data.update.AppUpdateCheckResult
+import cn.edu.bjtu.mis.data.update.AppUpdateChecker
+import cn.edu.bjtu.mis.data.update.AppUpdateInfo
+import cn.edu.bjtu.mis.data.update.AppUpdatePreferenceStore
+import cn.edu.bjtu.mis.data.update.AppUpdatePromptPreference
+import cn.edu.bjtu.mis.data.update.installedVersionName
 import cn.edu.bjtu.mis.model.AcademicCalendarTerm
 import cn.edu.bjtu.mis.model.AcademicCalendarWeek
 import cn.edu.bjtu.mis.model.AcademicMonthCalendar
@@ -150,9 +156,12 @@ import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
 import cn.edu.bjtu.mis.ui.components.ProgressiveStatus
 import cn.edu.bjtu.mis.ui.components.SectionTitle
+import cn.edu.bjtu.mis.ui.components.AppUpdateAvailableDialog
+import cn.edu.bjtu.mis.ui.components.AppUpdateDialogPreference
 import cn.edu.bjtu.mis.ui.theme.AppThemeOption
 import cn.edu.bjtu.mis.widget.TimetableWidgetProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -206,6 +215,8 @@ private fun SecondaryModuleLinks(
 @Composable
 fun ProfileScreen(
     repository: ModuleRepository,
+    appUpdateChecker: AppUpdateChecker,
+    appUpdatePreferenceStore: AppUpdatePreferenceStore,
     selectedTheme: AppThemeOption = AppThemeOption.Default,
     onLogout: () -> Unit,
     onOpenPersonalInfo: () -> Unit,
@@ -213,7 +224,46 @@ fun ProfileScreen(
     onOpenTheme: () -> Unit,
     onNavigate: (String) -> Unit,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
+    val updatePreference by appUpdatePreferenceStore.preference.collectAsState(initial = AppUpdatePromptPreference())
+    val installedVersion = remember(context) { context.installedVersionName()?.takeIf { it.isNotBlank() } ?: "未知" }
     var showLogoutConfirm by remember { mutableStateOf(false) }
+    var updateCheckDialog by remember { mutableStateOf<ProfileUpdateCheckDialog?>(null) }
+
+    fun applyUpdateDialogPreference(
+        update: AppUpdateInfo,
+        preference: AppUpdateDialogPreference,
+        afterApply: () -> Unit = {},
+    ) {
+        scope.launch {
+            runCatching {
+                when {
+                    preference.disableAutoPrompts -> appUpdatePreferenceStore.disableAutoPrompts()
+                    preference.ignoreThisVersion -> appUpdatePreferenceStore.ignoreVersion(update.latestVersion)
+                }
+            }
+            afterApply()
+        }
+    }
+
+    fun restoreAutoPrompts() {
+        scope.launch { appUpdatePreferenceStore.enableAutoPrompts() }
+    }
+
+    fun startUpdateCheck() {
+        updateCheckDialog = ProfileUpdateCheckDialog.Checking
+        scope.launch {
+            updateCheckDialog = try {
+                ProfileUpdateCheckDialog.Result(appUpdateChecker.checkForUpdateResult())
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                ProfileUpdateCheckDialog.Result(AppUpdateCheckResult.Unavailable())
+            }
+        }
+    }
 
     if (showLogoutConfirm) {
         AlertDialog(
@@ -235,6 +285,29 @@ fun ProfileScreen(
                     Text("取消")
                 }
             },
+        )
+    }
+
+    when (val dialog = updateCheckDialog) {
+        null -> Unit
+        ProfileUpdateCheckDialog.Checking -> AlertDialog(
+            onDismissRequest = {},
+            title = { Text("检测更新") },
+            text = { Text("正在检测最新版本...") },
+            confirmButton = {},
+        )
+        is ProfileUpdateCheckDialog.Result -> ProfileUpdateResultDialog(
+            result = dialog.result,
+            autoPromptDisabled = updatePreference.autoPromptDisabled,
+            onDismiss = { updateCheckDialog = null },
+            onRestoreAutoPrompts = {
+                restoreAutoPrompts()
+            },
+            onApplyUpdatePreference = { update, preference, afterApply ->
+                updateCheckDialog = null
+                applyUpdateDialogPreference(update, preference, afterApply)
+            },
+            onOpenUrl = { url -> runCatching { uriHandler.openUri(url) } },
         )
     }
 
@@ -268,6 +341,18 @@ fun ProfileScreen(
                         iconColor = Color(0xFFE4B96A),
                         trailingText = themeOptionLabel(selectedTheme),
                         onClick = onOpenTheme,
+                    ),
+                    ProfileSettingsItem(
+                        title = "检测更新",
+                        subtitle = if (updatePreference.autoPromptDisabled) {
+                            "自动提示已关闭，仍可手动检测"
+                        } else {
+                            "当前版本：$installedVersion"
+                        },
+                        iconLabel = "更",
+                        iconColor = Color(0xFF39A86B),
+                        trailingText = if (updateCheckDialog == ProfileUpdateCheckDialog.Checking) "检测中" else null,
+                        onClick = { startUpdateCheck() },
                     ),
                 ),
             )
@@ -315,6 +400,83 @@ fun ProfileScreen(
             )
         }
     }
+}
+
+private sealed interface ProfileUpdateCheckDialog {
+    data object Checking : ProfileUpdateCheckDialog
+    data class Result(val result: AppUpdateCheckResult) : ProfileUpdateCheckDialog
+}
+
+@Composable
+private fun ProfileUpdateResultDialog(
+    result: AppUpdateCheckResult,
+    autoPromptDisabled: Boolean,
+    onDismiss: () -> Unit,
+    onRestoreAutoPrompts: () -> Unit,
+    onApplyUpdatePreference: (AppUpdateInfo, AppUpdateDialogPreference, () -> Unit) -> Unit,
+    onOpenUrl: (String) -> Unit,
+) {
+    when (result) {
+        is AppUpdateCheckResult.UpdateAvailable -> AppUpdateAvailableDialog(
+            update = result.update,
+            showAutoPromptRestore = autoPromptDisabled,
+            onRestoreAutoPrompts = onRestoreAutoPrompts,
+            onDismiss = { preference ->
+                onApplyUpdatePreference(result.update, preference) {}
+            },
+            onOpenUpdate = { preference ->
+                onApplyUpdatePreference(result.update, preference) {
+                    onOpenUrl(result.update.releaseUrl)
+                }
+            },
+        )
+        is AppUpdateCheckResult.UpToDate -> AppUpdateStatusDialog(
+            title = "已是最新版本",
+            message = "当前版本：${result.currentVersion}",
+            autoPromptDisabled = autoPromptDisabled,
+            onDismiss = onDismiss,
+            onRestoreAutoPrompts = onRestoreAutoPrompts,
+        )
+        is AppUpdateCheckResult.Unavailable -> AppUpdateStatusDialog(
+            title = "检测失败",
+            message = "暂时无法获取最新版本，请稍后重试。",
+            autoPromptDisabled = autoPromptDisabled,
+            onDismiss = onDismiss,
+            onRestoreAutoPrompts = onRestoreAutoPrompts,
+        )
+    }
+}
+
+@Composable
+private fun AppUpdateStatusDialog(
+    title: String,
+    message: String,
+    autoPromptDisabled: Boolean,
+    onDismiss: () -> Unit,
+    onRestoreAutoPrompts: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(message) },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+        dismissButton = {
+            if (autoPromptDisabled) {
+                TextButton(
+                    onClick = {
+                        onRestoreAutoPrompts()
+                        onDismiss()
+                    },
+                ) {
+                    Text("恢复自动提示")
+                }
+            }
+        },
+    )
 }
 
 @Composable

@@ -154,6 +154,74 @@ data class CourseSelectionRunState(
     val completed: Boolean = false,
 )
 
+@Serializable
+data class TeachingAssessmentCourse(
+    val id: String,
+    val courseCode: String,
+    val section: String,
+    val courseName: String,
+    val teacher: String,
+    val assessmentType: String,
+    val status: String,
+    val actionPath: String? = null,
+    val viewPath: String? = null,
+    val canEvaluate: Boolean = false,
+)
+
+@Serializable
+data class TeachingAssessmentData(
+    val title: String? = null,
+    val courses: List<TeachingAssessmentCourse> = emptyList(),
+)
+
+@Serializable
+data class TeachingAssessmentOption(
+    val value: String,
+    val label: String,
+    val selected: Boolean = false,
+)
+
+@Serializable
+data class TeachingAssessmentQuestion(
+    val index: Int,
+    val prompt: String,
+    val name: String,
+    val resultId: String? = null,
+    val options: List<TeachingAssessmentOption> = emptyList(),
+    val selectedValue: String? = null,
+    val recommendedValue: String? = null,
+)
+
+@Serializable
+data class TeachingAssessmentComment(
+    val index: Int,
+    val prompt: String,
+    val name: String,
+    val resultId: String? = null,
+    val value: String? = null,
+)
+
+@Serializable
+data class TeachingAssessmentForm(
+    val courseId: String,
+    val actionUrl: String,
+    val method: String = "post",
+    val referer: String,
+    val fields: Map<String, String> = emptyMap(),
+    val questions: List<TeachingAssessmentQuestion> = emptyList(),
+    val comments: List<TeachingAssessmentComment> = emptyList(),
+    val unsupportedMultiCount: Int = 0,
+)
+
+@Serializable
+data class TeachingAssessmentSubmitResult(
+    val courseId: String,
+    val status: String,
+    val message: String? = null,
+    val success: Boolean = false,
+    val course: TeachingAssessmentCourse? = null,
+)
+
 enum class UserCourseDurationType {
     Temporary,
     LongTerm,
@@ -1092,6 +1160,7 @@ object ModuleKeys {
     const val Homework = "homework"
     const val CourseResources = "course_resources"
     const val CourseReplay = "course_replay"
+    const val TeachingAssessment = "teaching_assessment"
     const val EmptyRooms = "empty_rooms"
     const val Mail = "mail"
     const val Zhixing = "zhixing"

@@ -94,8 +94,8 @@ android {
         applicationId = "cn.edu.bjtu.mis"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "v1.1.1"
+        versionCode = 4
+        versionName = "v1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

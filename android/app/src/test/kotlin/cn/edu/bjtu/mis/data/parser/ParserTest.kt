@@ -51,6 +51,44 @@ class ParserTest {
     }
 
     @Test
+    fun parseTeachingAssessmentListFixture() {
+        val data = parseTeachingAssessmentList(text("teaching_assessment_list.html"))
+
+        assertEquals("2025-2026-2-2 待评教课程列表", data.title)
+        assertEquals(2, data.courses.size)
+        assertEquals("1001", data.courses[0].id)
+        assertTrue(data.courses[0].canEvaluate)
+        assertEquals("/teaching_assessment/stu/1001/update/", data.courses[0].actionPath)
+        assertEquals("待评教", data.courses[0].status)
+        assertEquals("1002", data.courses[1].id)
+        assertEquals(false, data.courses[1].canEvaluate)
+        assertEquals("已评教", data.courses[1].status)
+    }
+
+    @Test
+    fun parseTeachingAssessmentFormFixture() {
+        val form = parseTeachingAssessmentForm(
+            text("teaching_assessment_form.html"),
+            "https://aa.bjtu.edu.cn/teaching_assessment/stu/1001/update/",
+        )
+
+        assertEquals("1001", form.courseId)
+        assertEquals("post", form.method)
+        assertEquals("csrf-token", form.fields["csrfmiddlewaretoken"])
+        assertEquals("2", form.fields["select-TOTAL_FORMS"])
+        assertEquals(0, form.unsupportedMultiCount)
+        assertEquals(2, form.questions.size)
+        assertEquals("9001", form.questions[0].resultId)
+        assertEquals("1115", form.questions[0].recommendedValue)
+        assertEquals("非常符合", form.questions[0].options.first { it.value == "1115" }.label)
+        assertEquals("2112", form.questions[1].recommendedValue)
+        assertEquals("优秀", form.questions[1].options.first { it.value == "2112" }.label)
+        assertEquals(1, form.comments.size)
+        assertEquals("comment-0-comment_result", form.comments.single().name)
+        assertEquals("9003", form.comments.single().resultId)
+    }
+
+    @Test
     fun parseScoresFixture() {
         val data = parseScores(text("scores_main.html"))
         assertEquals(2, data.items.size)

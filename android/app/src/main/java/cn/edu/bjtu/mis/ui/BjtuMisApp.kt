@@ -79,9 +79,12 @@ import cn.edu.bjtu.mis.ui.screens.ProfileThemeScreen
 import cn.edu.bjtu.mis.ui.screens.ProfileTrainingInfoScreen
 import cn.edu.bjtu.mis.ui.screens.ScoresScreen
 import cn.edu.bjtu.mis.ui.screens.ServicesScreen
+import cn.edu.bjtu.mis.ui.screens.TeachingAssessmentScreen
 import cn.edu.bjtu.mis.ui.screens.TimetableScreen
 import cn.edu.bjtu.mis.ui.screens.ZhixingScreen
 import cn.edu.bjtu.mis.ui.screens.navigationTargets
+import cn.edu.bjtu.mis.ui.components.AppUpdateAvailableDialog
+import cn.edu.bjtu.mis.ui.components.AppUpdateDialogPreference
 import cn.edu.bjtu.mis.ui.theme.AppThemeOption
 import cn.edu.bjtu.mis.ui.theme.BjtuMisSystemBars
 import kotlinx.coroutines.CancellationException
@@ -224,12 +227,31 @@ fun BjtuMisApp(
         }
     }
 
+    fun applyUpdateDialogPreference(
+        update: AppUpdateInfo,
+        preference: AppUpdateDialogPreference,
+        afterApply: () -> Unit = {},
+    ) {
+        scope.launch {
+            runCatching {
+                when {
+                    preference.disableAutoPrompts -> container.appUpdatePreferenceStore.disableAutoPrompts()
+                    preference.ignoreThisVersion -> container.appUpdatePreferenceStore.ignoreVersion(update.latestVersion)
+                }
+            }
+            afterApply()
+        }
+    }
+
     LaunchedEffect(Unit) { refreshSession() }
     LaunchedEffect(ready) {
         if (!updateCheckStarted && ready != null) {
             updateCheckStarted = true
             pendingUpdate = try {
-                container.appUpdateChecker.checkForUpdate()
+                val update = container.appUpdateChecker.checkForUpdate()
+                update?.takeIf {
+                    container.appUpdatePreferenceStore.snapshot().shouldPromptForUpdate(it)
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
@@ -258,25 +280,16 @@ fun BjtuMisApp(
     }
 
     pendingUpdate?.takeIf { !showAutoLoginFailedDialog }?.let { update ->
-        AlertDialog(
-            onDismissRequest = { pendingUpdate = null },
-            title = { Text("发现新版本") },
-            text = {
-                Text("当前版本：${update.currentVersion}\n最新版本：${update.latestVersion}")
+        AppUpdateAvailableDialog(
+            update = update,
+            onDismiss = { preference ->
+                pendingUpdate = null
+                applyUpdateDialogPreference(update, preference)
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        pendingUpdate = null
-                        openExternalUrl(context, update.releaseUrl)
-                    },
-                ) {
-                    Text("查看更新")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingUpdate = null }) {
-                    Text("稍后")
+            onOpenUpdate = { preference ->
+                pendingUpdate = null
+                applyUpdateDialogPreference(update, preference) {
+                    openExternalUrl(context, update.releaseUrl)
                 }
             },
         )
@@ -434,6 +447,8 @@ fun BjtuMisApp(
                         ModuleKeys.Profile -> MainScreenPadding {
                             ProfileScreen(
                                 repository = container.moduleRepository,
+                                appUpdateChecker = container.appUpdateChecker,
+                                appUpdatePreferenceStore = container.appUpdatePreferenceStore,
                                 selectedTheme = themeOption,
                                 onLogout = {
                                     container.sessionRepository.logout()
@@ -538,6 +553,7 @@ private fun ModuleRoute(
         )
         ModuleKeys.CourseResources -> CourseResourcesScreen(container.courseResourceRepository)
         ModuleKeys.CourseReplay -> CourseReplayScreen(container.courseReplayRepository, container.httpClient.client)
+        ModuleKeys.TeachingAssessment -> TeachingAssessmentScreen(container.moduleRepository)
         ModuleKeys.EmptyRooms -> EmptyRoomsScreen(container.moduleRepository)
     }
 }

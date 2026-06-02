@@ -38,6 +38,22 @@ class AppUpdateCheckerTest {
     }
 
     @Test
+    fun checkForUpdateResultReturnsAvailableWhenLatestReleaseIsNewer() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(releaseJson("v1.0.1", body = "Fixes and improvements"))
+
+            val result = checker(server, currentVersion = "1.0.0").checkForUpdateResult()
+
+            assertTrue(result is AppUpdateCheckResult.UpdateAvailable)
+            val update = (result as AppUpdateCheckResult.UpdateAvailable).update
+            assertEquals("1.0.0", update.currentVersion)
+            assertEquals("1.0.1", update.latestVersion)
+            assertEquals("https://github.com/wan300/bjtu_web/releases/tag/v1.0.1", update.releaseUrl)
+            assertEquals("Fixes and improvements", update.releaseNotes)
+        }
+    }
+
+    @Test
     fun checkForUpdateIgnoresSameAndOlderReleases() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(releaseJson("v1.0.0"))
@@ -45,6 +61,23 @@ class AppUpdateCheckerTest {
 
             assertNull(checker(server, currentVersion = "1.0.0").checkForUpdate())
             assertNull(checker(server, currentVersion = "1.0.0").checkForUpdate())
+        }
+    }
+
+    @Test
+    fun checkForUpdateResultReturnsUpToDateForSameAndOlderReleases() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(releaseJson("v1.0.0"))
+            server.enqueue(releaseJson("v0.9.9"))
+
+            assertEquals(
+                AppUpdateCheckResult.UpToDate(currentVersion = "1.0.0", latestVersion = "1.0.0"),
+                checker(server, currentVersion = "1.0.0").checkForUpdateResult(),
+            )
+            assertEquals(
+                AppUpdateCheckResult.UpToDate(currentVersion = "1.0.0", latestVersion = "0.9.9"),
+                checker(server, currentVersion = "1.0.0").checkForUpdateResult(),
+            )
         }
     }
 
@@ -60,6 +93,23 @@ class AppUpdateCheckerTest {
     }
 
     @Test
+    fun checkForUpdateResultReturnsUnavailableForInvalidAndPrereleaseTags() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(releaseJson("v1.1.0-beta.1"))
+            server.enqueue(releaseJson("latest"))
+
+            assertEquals(
+                AppUpdateCheckResult.Unavailable(currentVersion = "1.0.0"),
+                checker(server, currentVersion = "1.0.0").checkForUpdateResult(),
+            )
+            assertEquals(
+                AppUpdateCheckResult.Unavailable(currentVersion = "1.0.0"),
+                checker(server, currentVersion = "1.0.0").checkForUpdateResult(),
+            )
+        }
+    }
+
+    @Test
     fun checkForUpdateReturnsNullOnHttpAndMalformedResponses() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(404))
@@ -71,11 +121,38 @@ class AppUpdateCheckerTest {
     }
 
     @Test
+    fun checkForUpdateResultReturnsUnavailableOnHttpAndMalformedResponses() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(404))
+            server.enqueue(json("not json"))
+
+            assertEquals(
+                AppUpdateCheckResult.Unavailable(currentVersion = "1.0.0"),
+                checker(server, currentVersion = "1.0.0").checkForUpdateResult(),
+            )
+            assertEquals(
+                AppUpdateCheckResult.Unavailable(currentVersion = "1.0.0"),
+                checker(server, currentVersion = "1.0.0").checkForUpdateResult(),
+            )
+        }
+    }
+
+    @Test
     fun checkForUpdateReturnsNullWhenCurrentVersionIsInvalid() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(releaseJson("v1.0.1"))
 
             assertNull(checker(server, currentVersion = "1.0").checkForUpdate())
+            assertEquals(0, server.requestCount)
+        }
+    }
+
+    @Test
+    fun checkForUpdateResultReturnsUnavailableWhenCurrentVersionIsInvalid() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(releaseJson("v1.0.1"))
+
+            assertEquals(AppUpdateCheckResult.Unavailable(), checker(server, currentVersion = "1.0").checkForUpdateResult())
             assertEquals(0, server.requestCount)
         }
     }

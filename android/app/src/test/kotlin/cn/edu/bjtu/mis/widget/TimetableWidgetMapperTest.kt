@@ -1,10 +1,15 @@
 package cn.edu.bjtu.mis.widget
 
+import cn.edu.bjtu.mis.data.employment.EmploymentCalendarEvent
 import cn.edu.bjtu.mis.model.CourseEntry
 import cn.edu.bjtu.mis.model.CalendarData
 import cn.edu.bjtu.mis.model.CalendarItem
+import cn.edu.bjtu.mis.model.EmploymentSectionType
+import cn.edu.bjtu.mis.model.HomeworkItem
 import cn.edu.bjtu.mis.model.TimetableData
+import cn.edu.bjtu.mis.model.UserTodoItem
 import java.time.LocalDate
+import java.time.LocalDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -140,6 +145,51 @@ class TimetableWidgetMapperTest {
     }
 
     @Test
+    fun mapsAcademicCalendarItemsBeyondSchoolCalendarNotes() {
+        val model = TimetableWidgetMapper.map(
+            data = TimetableData(),
+            currentWeek = 12,
+            today = monday,
+            calendar = CalendarData(
+                month = "2026-05",
+                items = listOf(
+                    CalendarItem(date = "2026-05-19", week = "12", note = "校历安排"),
+                ),
+            ),
+            homework = listOf(
+                homework("课程作业", dueAt = "2026-05-19 23:59"),
+                homework("后天作业", dueAt = "2026-05-20 23:59"),
+            ),
+            todos = listOf(
+                todo("实验待办", date = "2026-05-19"),
+            ),
+            employmentEvents = listOf(
+                EmploymentCalendarEvent(
+                    id = "career-talk-1",
+                    type = EmploymentSectionType.CareerTalk,
+                    title = "企业宣讲",
+                    date = LocalDate.of(2026, 5, 19),
+                    startTime = "2026-05-19 14:00:00",
+                    endTime = "2026-05-19 15:00:00",
+                    organization = "示例公司",
+                    location = "逸夫楼",
+                    url = "https://example.com/career-talk-1",
+                    sortDateTime = LocalDateTime.of(2026, 5, 19, 14, 0),
+                )
+            ),
+        )
+
+        val tomorrowEvents = model.calendarEvents.filter { it.dayLabel == "明天" }
+        assertEquals(
+            listOf("校历安排", "课程作业", "实验待办", "宣讲会 企业宣讲"),
+            tomorrowEvents.map { it.title },
+        )
+        assertTrue(tomorrowEvents.any { it.detail.contains("作业") || it.detail.contains("未提交") })
+        assertTrue(tomorrowEvents.any { it.detail.contains("逸夫楼") })
+        assertFalse(model.calendarEvents.any { it.title == "后天作业" })
+    }
+
+    @Test
     fun leavesCalendarAreaEmptyWhenThereAreNoRealEvents() {
         val model = TimetableWidgetMapper.map(
             data = TimetableData(),
@@ -177,5 +227,30 @@ class TimetableWidgetMapperTest {
             weeks = weeks,
             locationText = location,
             isUserCreated = isUserCreated,
+        )
+
+    private fun homework(
+        title: String,
+        dueAt: String,
+    ): HomeworkItem =
+        HomeworkItem(
+            course = "操作系统",
+            courseId = 1,
+            title = title,
+            dueAt = dueAt,
+            status = "open",
+            subType = 0,
+        )
+
+    private fun todo(
+        title: String,
+        date: String,
+    ): UserTodoItem =
+        UserTodoItem(
+            id = 1,
+            title = title,
+            date = date,
+            createdAt = "${date}T08:00:00",
+            updatedAt = "${date}T08:00:00",
         )
 }

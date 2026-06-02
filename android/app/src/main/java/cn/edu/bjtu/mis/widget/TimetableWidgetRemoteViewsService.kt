@@ -58,7 +58,10 @@ class TimetableWidgetRemoteViewsService : RemoteViewsService() {
                 if (app == null) {
                     TimetableWidgetMapper.empty()
                 } else {
-                    TimetableWidgetDataSource(app.container.database.dao()).load()
+                    TimetableWidgetDataSource(
+                        dao = app.container.database.dao(),
+                        employmentCalendarSyncStore = app.container.employmentCalendarSyncStore,
+                    ).load()
                 }
             }
             calendarEvents = model.calendarEvents
@@ -104,7 +107,7 @@ class TimetableWidgetRemoteViewsService : RemoteViewsService() {
 
         private fun calendarEventView(event: TimetableWidgetCalendarEvent): RemoteViews =
             RemoteViews(context.packageName, R.layout.timetable_widget_calendar_item).apply {
-                setInt(R.id.timetable_widget_calendar_item_bar, "setBackgroundColor", 0xFF2563EB.toInt())
+                setInt(R.id.timetable_widget_calendar_item_bar, "setBackgroundColor", event.color)
                 setTextViewText(R.id.timetable_widget_calendar_item_title, event.title)
                 setTextColor(R.id.timetable_widget_calendar_item_title, 0xFF111827.toInt())
                 setTextViewText(

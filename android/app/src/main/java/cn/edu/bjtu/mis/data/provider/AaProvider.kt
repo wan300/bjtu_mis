@@ -12,6 +12,8 @@ import cn.edu.bjtu.mis.data.parser.parseScoreDetail
 import cn.edu.bjtu.mis.data.parser.parseScorecardProgress
 import cn.edu.bjtu.mis.data.parser.parseScores
 import cn.edu.bjtu.mis.data.parser.parseStudentStatusProfile
+import cn.edu.bjtu.mis.data.parser.parseTeachingAssessmentForm
+import cn.edu.bjtu.mis.data.parser.parseTeachingAssessmentList
 import cn.edu.bjtu.mis.data.parser.parseTimetable
 import cn.edu.bjtu.mis.model.AcademicProgressData
 import cn.edu.bjtu.mis.model.CoverageLevel
@@ -27,6 +29,9 @@ import cn.edu.bjtu.mis.model.ScoreDetailData
 import cn.edu.bjtu.mis.model.ScoreData
 import cn.edu.bjtu.mis.model.ScoreItem
 import cn.edu.bjtu.mis.model.StudentProfileData
+import cn.edu.bjtu.mis.model.TeachingAssessmentData
+import cn.edu.bjtu.mis.model.TeachingAssessmentForm
+import cn.edu.bjtu.mis.model.TeachingAssessmentSubmitResult
 import cn.edu.bjtu.mis.model.TimetableData
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -43,6 +48,7 @@ import java.util.UUID
 private const val HISTORY_ALL_TERMS = "all"
 private const val AA_RETRY_ATTEMPTS = 3
 private const val AA_COURSE_SELECTION_PATH = "/course_selection/courseselecttask/selects/"
+private const val AA_TEACHING_ASSESSMENT_LIST_PATH = "/teaching_assessment/stu/list/"
 
 internal fun mergeScoreItems(items: Iterable<ScoreItem>): List<ScoreItem> =
     items.distinctBy { item ->
@@ -75,6 +81,8 @@ class AaProvider(
 ) {
     private val courseSelectionUrl: String
         get() = "$aaBaseUrl$AA_COURSE_SELECTION_PATH"
+    private val teachingAssessmentListUrl: String
+        get() = "$aaBaseUrl$AA_TEACHING_ASSESSMENT_LIST_PATH"
 
     suspend fun fetchTimetable(term: String? = null, week: String? = null): ModuleEnvelope<TimetableData> {
         val html = getText("/course_selection/courseselect/stuschedule/")
@@ -98,6 +106,96 @@ class AaProvider(
             sourceSystem = "aa",
             coverage = CoverageLevel.Verified,
             data = parsed.data,
+        )
+    }
+
+    suspend fun fetchTeachingAssessmentList(): ModuleEnvelope<TeachingAssessmentData> {
+        val html = getText(AA_TEACHING_ASSESSMENT_LIST_PATH)
+        val parsed = parseTeachingAssessmentList(html, teachingAssessmentListUrl)
+        return ModuleEnvelope(
+            module = "teaching_assessment",
+            sourceSystem = "aa",
+            coverage = CoverageLevel.Verified,
+            data = parsed,
+        )
+    }
+
+    suspend fun fetchTeachingAssessmentForm(courseId: String): TeachingAssessmentForm {
+        val cleanedId = courseId.trim()
+        require(cleanedId.isNotBlank()) { "评教课程 ID 不能为空。" }
+        val path = "/teaching_assessment/stu/$cleanedId/update/"
+        val html = getText(path)
+        return parseTeachingAssessmentForm(html, "$aaBaseUrl$path")
+    }
+
+    suspend fun submitTeachingAssessment(
+        form: TeachingAssessmentForm,
+        answerValues: Map<String, String>,
+        commentValues: Map<String, String>,
+    ): TeachingAssessmentSubmitResult {
+        if (form.unsupportedMultiCount > 0) {
+            return TeachingAssessmentSubmitResult(
+                courseId = form.courseId,
+                status = "unsupported",
+                message = "该评教表包含暂不支持的多选题，请到原系统提交。",
+                success = false,
+            )
+        }
+        if (form.questions.isEmpty() && form.comments.isEmpty()) {
+            return TeachingAssessmentSubmitResult(
+                courseId = form.courseId,
+                status = "empty_form",
+                message = "未解析到可提交的评教题目。",
+                success = false,
+            )
+        }
+        val missing = form.questions.filter { question ->
+            answerValues[question.name].isNullOrBlank()
+        }
+        if (missing.isNotEmpty()) {
+            return TeachingAssessmentSubmitResult(
+                courseId = form.courseId,
+                status = "missing_answers",
+                message = "还有 ${missing.size} 道单选题未选择。",
+                success = false,
+            )
+        }
+
+        val fields = form.fields.toMutableMap()
+        form.questions.forEach { question ->
+            fields[question.name] = answerValues.getValue(question.name)
+        }
+        form.comments.forEach { comment ->
+            fields[comment.name] = commentValues[comment.name].orEmpty()
+        }
+
+        val response = if (form.method.lowercase() == "get") {
+            client.getText(form.actionUrl, fields, headers = mapOf("Referer" to form.referer))
+        } else {
+            client.postForm(
+                form.actionUrl,
+                form = fields,
+                headers = mapOf(
+                    "Referer" to form.referer,
+                    "Origin" to aaBaseUrl,
+                ),
+            )
+        }
+        val head = response.body.take(4096)
+        if (response.url.contains("/client/login/") || (head.contains("用户登录") && head.contains("教学"))) {
+            throw SessionExpiredException("教学支撑平台未登录，请重新登录。")
+        }
+        val list = parseTeachingAssessmentList(response.body, response.url)
+        val refreshed = list.courses.firstOrNull { it.id == form.courseId }
+        val success = response.body.contains("评教成功") ||
+            refreshed?.canEvaluate == false ||
+            refreshed?.status?.contains("已") == true
+        return TeachingAssessmentSubmitResult(
+            courseId = form.courseId,
+            status = if (success) "success" else "submitted",
+            message = if (success) "评教成功。" else "已提交评教请求，请刷新列表确认结果。",
+            success = success,
+            course = refreshed,
         )
     }
 

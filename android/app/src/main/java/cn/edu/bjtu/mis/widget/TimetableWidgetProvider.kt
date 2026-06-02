@@ -82,7 +82,10 @@ class TimetableWidgetProvider : AppWidgetProvider() {
             withContext(Dispatchers.IO) {
                 val app = context.applicationContext as? BjtuMisApplication
                     ?: return@withContext TimetableWidgetMapper.empty()
-                TimetableWidgetDataSource(app.container.database.dao()).load()
+                TimetableWidgetDataSource(
+                    dao = app.container.database.dao(),
+                    employmentCalendarSyncStore = app.container.employmentCalendarSyncStore,
+                ).load()
             }
 
         private fun buildRemoteViews(
@@ -120,10 +123,6 @@ class TimetableWidgetProvider : AppWidgetProvider() {
                 setTextViewText(R.id.timetable_widget_today_calendar_date, "${model.today.dateLabel} ${model.today.weekdayLabel}")
                 setTextViewText(R.id.timetable_widget_tomorrow_calendar_label, model.tomorrow.label)
                 setTextViewText(R.id.timetable_widget_tomorrow_calendar_date, "${model.tomorrow.dateLabel} ${model.tomorrow.weekdayLabel}")
-                setTextViewText(R.id.timetable_widget_today_label, model.today.label)
-                setTextViewText(R.id.timetable_widget_today_date, "${model.today.dateLabel} ${model.today.weekdayLabel}")
-                setTextViewText(R.id.timetable_widget_tomorrow_label, model.tomorrow.label)
-                setTextViewText(R.id.timetable_widget_tomorrow_date, "${model.tomorrow.dateLabel} ${model.tomorrow.weekdayLabel}")
 
                 setRemoteAdapter(
                     R.id.timetable_widget_today_calendar_list,
@@ -151,6 +150,7 @@ class TimetableWidgetProvider : AppWidgetProvider() {
                 setOnClickPendingIntent(R.id.timetable_widget_root, calendarPendingIntent)
                 setOnClickPendingIntent(R.id.timetable_widget_calendar_title, calendarPendingIntent)
                 setOnClickPendingIntent(R.id.timetable_widget_calendar_section, calendarPendingIntent)
+                setOnClickPendingIntent(R.id.timetable_widget_course_title, timetablePendingIntent)
                 setOnClickPendingIntent(R.id.timetable_widget_course_section, timetablePendingIntent)
                 setOnClickPendingIntent(R.id.timetable_widget_today_course_empty, timetablePendingIntent)
                 setOnClickPendingIntent(R.id.timetable_widget_tomorrow_course_empty, timetablePendingIntent)

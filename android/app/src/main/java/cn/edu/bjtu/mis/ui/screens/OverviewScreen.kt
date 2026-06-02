@@ -94,6 +94,7 @@ val navigationTargets = listOf(
     NavigationTarget(ModuleKeys.Scores, "主修成绩"),
     NavigationTarget(ModuleKeys.Calendar, "学年日历"),
     NavigationTarget(ModuleKeys.Homework, "作业"),
+    NavigationTarget(ModuleKeys.TeachingAssessment, "评教"),
     NavigationTarget(ModuleKeys.Mail, "邮箱"),
     NavigationTarget(ModuleKeys.Zhixing, "知行"),
     NavigationTarget(ModuleKeys.EmploymentConsultation, "就业咨询"),
@@ -146,6 +147,7 @@ private val ServiceGroups = listOf(
             ServiceEntry(ModuleKeys.CourseResources, "课程资源", "资料下载", Icons.Filled.LibraryBooks, Color(0xFF7C58C2), R.drawable.icon_course_resources),
             ServiceEntry(ModuleKeys.CourseReplay, "课程回放", "课堂回看", Icons.Filled.PlayCircle, Color(0xFFFF8A00), R.drawable.icon_course_replay),
             ServiceEntry(ModuleKeys.CourseSelection, "抢课", "课程选择", Icons.Filled.AutoStories, Color(0xFF0E9D9D), R.drawable.icon_course_selection),
+            ServiceEntry(ModuleKeys.TeachingAssessment, "评教", "课程评价", Icons.Filled.Grade, Color(0xFFD64B6B), R.drawable.icon_teaching_assessment),
         ),
     ),
     ServiceGroup(

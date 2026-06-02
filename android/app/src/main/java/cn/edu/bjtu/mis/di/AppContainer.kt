@@ -43,6 +43,7 @@ import cn.edu.bjtu.mis.data.repository.ZhixingRepository
 import cn.edu.bjtu.mis.data.security.SecureCookieStore
 import cn.edu.bjtu.mis.data.security.SecureCredentialStore
 import cn.edu.bjtu.mis.data.update.AppUpdateChecker
+import cn.edu.bjtu.mis.data.update.AppUpdatePreferenceStore
 import cn.edu.bjtu.mis.data.update.installedVersionName
 import cn.edu.bjtu.mis.ui.theme.AppThemeStore
 
@@ -65,6 +66,7 @@ class AppContainer(context: Context) {
         client = httpClient,
         currentVersionProvider = { appContext.installedVersionName() },
     )
+    val appUpdatePreferenceStore = AppUpdatePreferenceStore(appContext)
     val sessionManager = SessionManager(cookieStore, credentialStore, cookieJar, httpClient, captchaSolver)
     val sessionRepository = SessionRepository(sessionManager)
     val syncRepository = SyncRepository(database.dao(), sessionManager)

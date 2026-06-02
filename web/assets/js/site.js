@@ -2,8 +2,9 @@
   const repoApi = "https://api.github.com/repos/wan300/bjtu_mis_Android/releases/latest";
   const fallbackApk = "https://github.com/wan300/bjtu_mis_Android/releases/latest/download/app-release.apk";
   const fallbackRelease = "https://github.com/wan300/bjtu_mis_Android/releases/latest";
-  const fallbackTag = "v1.1.0";
-  const fallbackSize = 212222513;
+  const fallbackTag = "latest";
+  const fallbackSizeText = "--";
+  const releaseRefreshInterval = 5 * 60 * 1000;
 
   const moduleData = window.BJTU_MODULES || [];
   const isModulePage = document.body.dataset.page === "module";
@@ -183,6 +184,8 @@
     const releaseLinks = Array.from(document.querySelectorAll("[data-release-link]"));
     const versions = Array.from(document.querySelectorAll("[data-release-version]"));
     const sizes = Array.from(document.querySelectorAll("[data-release-size]"));
+    let lastReleaseFetch = 0;
+    let releaseFetchInFlight = null;
 
     buttons.forEach((button) => {
       button.href = fallbackApk;
@@ -194,44 +197,74 @@
       node.textContent = fallbackTag;
     });
     sizes.forEach((node) => {
-      node.textContent = formatBytes(fallbackSize);
+      node.textContent = fallbackSizeText;
     });
 
     if (!buttons.length && !releaseLinks.length) return;
 
-    fetch(repoApi, {
-      headers: { Accept: "application/vnd.github+json" }
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error(`GitHub API ${response.status}`);
-        return response.json();
-      })
-      .then((release) => {
-        const apk = Array.isArray(release.assets)
-          ? release.assets.find((asset) => /\.apk$/i.test(asset.name))
-          : null;
-        const apkUrl = apk && apk.browser_download_url ? apk.browser_download_url : fallbackApk;
-        const releaseUrl = release.html_url || fallbackRelease;
-        const tag = release.tag_name || fallbackTag;
-        const sizeText = apk && apk.size ? formatBytes(apk.size) : formatBytes(fallbackSize);
+    function findApkAsset(assets) {
+      if (!Array.isArray(assets)) return null;
+      return (
+        assets.find((asset) => asset.name === "app-release.apk") ||
+        assets.find((asset) => /\.apk$/i.test(asset.name))
+      );
+    }
 
-        buttons.forEach((button) => {
-          button.href = apkUrl;
-          button.dataset.version = tag;
-        });
-        releaseLinks.forEach((link) => {
-          link.href = releaseUrl;
-        });
-        versions.forEach((node) => {
-          node.textContent = tag;
-        });
-        sizes.forEach((node) => {
-          node.textContent = sizeText;
-        });
-      })
-      .catch(() => {
-        document.body.classList.add("release-fallback");
+    function applyRelease(release) {
+      const apk = findApkAsset(release.assets);
+      const apkUrl = apk && apk.browser_download_url ? apk.browser_download_url : fallbackApk;
+      const releaseUrl = release.html_url || fallbackRelease;
+      const tag = release.tag_name || fallbackTag;
+      const sizeText = apk && apk.size ? formatBytes(apk.size) : fallbackSizeText;
+
+      buttons.forEach((button) => {
+        button.href = apkUrl;
+        button.dataset.version = tag;
       });
+      releaseLinks.forEach((link) => {
+        link.href = releaseUrl;
+      });
+      versions.forEach((node) => {
+        node.textContent = tag;
+      });
+      sizes.forEach((node) => {
+        node.textContent = sizeText;
+      });
+      document.body.classList.remove("release-fallback");
+    }
+
+    function syncRelease(force) {
+      const now = Date.now();
+      if (!force && now - lastReleaseFetch < releaseRefreshInterval) return releaseFetchInFlight;
+      if (releaseFetchInFlight) return releaseFetchInFlight;
+
+      lastReleaseFetch = now;
+      releaseFetchInFlight = fetch(repoApi, {
+        cache: "no-store",
+        headers: { Accept: "application/vnd.github+json" }
+      })
+        .then((response) => {
+          if (!response.ok) throw new Error(`GitHub API ${response.status}`);
+          return response.json();
+        })
+        .then(applyRelease)
+        .catch(() => {
+          document.body.classList.add("release-fallback");
+        })
+        .finally(() => {
+          releaseFetchInFlight = null;
+        });
+
+      return releaseFetchInFlight;
+    }
+
+    syncRelease(true);
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") syncRelease(false);
+    });
+    window.addEventListener("focus", () => syncRelease(false));
+    window.addEventListener("pageshow", () => syncRelease(false));
   }
 
   function initReveal() {

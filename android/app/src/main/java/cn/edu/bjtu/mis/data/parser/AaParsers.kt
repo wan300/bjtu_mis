@@ -21,6 +21,12 @@ import cn.edu.bjtu.mis.model.ScoreDetailTable
 import cn.edu.bjtu.mis.model.ScoreItem
 import cn.edu.bjtu.mis.model.StudentProfileData
 import cn.edu.bjtu.mis.model.TermOption
+import cn.edu.bjtu.mis.model.TeachingAssessmentComment
+import cn.edu.bjtu.mis.model.TeachingAssessmentCourse
+import cn.edu.bjtu.mis.model.TeachingAssessmentData
+import cn.edu.bjtu.mis.model.TeachingAssessmentForm
+import cn.edu.bjtu.mis.model.TeachingAssessmentOption
+import cn.edu.bjtu.mis.model.TeachingAssessmentQuestion
 import cn.edu.bjtu.mis.model.TimetableData
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
@@ -141,6 +147,149 @@ fun parseCourseSelectionCaptcha(html: String, pageUrl: String): CourseSelectionC
     )
 }
 
+fun parseTeachingAssessmentList(
+    html: String,
+    pageUrl: String = "https://aa.bjtu.edu.cn/teaching_assessment/stu/list/",
+): TeachingAssessmentData {
+    val document = Jsoup.parse(html, pageUrl)
+    val title = normalizeSpace(document.selectFirst(".widget-title")?.text())
+        .takeIf { it.isNotBlank() }
+    val table = document.select("table.table-bordered, table.table, table")
+        .firstOrNull { table ->
+            val header = table.selectFirst("tr")?.text().orEmpty()
+            header.contains("课程号") && header.contains("操作")
+        }
+        ?: return TeachingAssessmentData(title = title)
+
+    val rows = table.select("> tbody > tr, > tr")
+    val courses = rows.drop(1).mapNotNull { row ->
+        val cells = row.select("> th, > td")
+        if (cells.size < 6) return@mapNotNull null
+        val actionCell = cells.getOrNull(cells.size - 1) ?: return@mapNotNull null
+        val links = actionCell.select("a[href]")
+        val evaluateLink = links.firstOrNull { normalizeSpace(it.text()).contains("评教") }
+        val viewLink = links.firstOrNull { normalizeSpace(it.text()).contains("查看") }
+        val actionLink = evaluateLink ?: viewLink ?: links.firstOrNull()
+        val href = actionLink?.attr("href")?.takeIf { it.isNotBlank() }
+        val id = href?.let(::teachingAssessmentIdFromPath)
+            ?: "${normalizeSpace(cells[0].text())}_${normalizeSpace(cells[1].text())}".trim('_')
+                .ifBlank { return@mapNotNull null }
+        val status = when {
+            evaluateLink != null -> "待评教"
+            viewLink != null -> "已评教"
+            else -> normalizeSpace(actionCell.text()).ifBlank { "未知" }
+        }
+        TeachingAssessmentCourse(
+            id = id,
+            courseCode = normalizeSpace(cells[0].text()),
+            section = normalizeSpace(cells[1].text()),
+            courseName = normalizeSpace(cells[2].text()),
+            teacher = normalizeSpace(cells[3].text()),
+            assessmentType = normalizeSpace(cells[4].text()),
+            status = status,
+            actionPath = evaluateLink?.attr("href")?.takeIf { it.isNotBlank() },
+            viewPath = viewLink?.attr("href")?.takeIf { it.isNotBlank() },
+            canEvaluate = evaluateLink != null,
+        )
+    }
+    return TeachingAssessmentData(title = title, courses = courses)
+}
+
+fun parseTeachingAssessmentForm(
+    html: String,
+    pageUrl: String,
+): TeachingAssessmentForm {
+    val document = Jsoup.parse(html, pageUrl)
+    val form = document.selectFirst("form.teaching-assessment-form") ?: document.selectFirst("form")
+    val actionUrl = form?.attr("action")
+        ?.takeIf { it.isNotBlank() }
+        ?.let { resolveUrl(pageUrl, it) }
+        ?: pageUrl
+    val method = form?.attr("method")?.let(::normalizeSpace)?.lowercase()?.ifBlank { null } ?: "post"
+    val referer = pageUrl
+    val baseFields = formFields(form).let { fields ->
+        if ("refer" in fields) {
+            fields
+        } else {
+            fields + ("refer" to resolveUrl(pageUrl, "/teaching_assessment/stu/list/"))
+        }
+    }
+
+    val radios = form?.select("input[type=radio][name]")?.filter { radio ->
+        normalizeSpace(radio.attr("name")).endsWith("-select_result")
+    }.orEmpty()
+    val radiosByName = linkedMapOf<String, MutableList<Element>>()
+    radios.forEach { radio ->
+        val name = normalizeSpace(radio.attr("name"))
+        radiosByName.getOrPut(name) { mutableListOf() } += radio
+    }
+    val questions = radiosByName.entries.mapIndexed { index, (name, group) ->
+        val prefix = name.removeSuffix("-select_result")
+        val options = group.map { radio ->
+            TeachingAssessmentOption(
+                value = radio.attr("value"),
+                label = teachingAssessmentRadioLabel(form, radio),
+                selected = radio.hasAttr("checked"),
+            )
+        }
+        TeachingAssessmentQuestion(
+            index = teachingAssessmentIndex(prefix) ?: index,
+            prompt = teachingAssessmentQuestionPrompt(group.firstOrNull()),
+            name = name,
+            resultId = formFieldValue(form, "$prefix-id"),
+            options = options,
+            selectedValue = options.firstOrNull { it.selected }?.value,
+            recommendedValue = chooseTeachingAssessmentPositiveOption(options)?.value,
+        )
+    }
+
+    val comments = form?.select("textarea[name]")?.filter { textarea ->
+        normalizeSpace(textarea.attr("name")).endsWith("-comment_result")
+    }?.mapIndexed { index, textarea ->
+        val name = normalizeSpace(textarea.attr("name"))
+        val prefix = name.removeSuffix("-comment_result")
+        TeachingAssessmentComment(
+            index = teachingAssessmentIndex(prefix) ?: index,
+            prompt = teachingAssessmentQuestionPrompt(textarea),
+            name = name,
+            resultId = formFieldValue(form, "$prefix-id"),
+            value = normalizeSpace(textarea.text()).takeIf { it.isNotBlank() },
+        )
+    }.orEmpty()
+
+    return TeachingAssessmentForm(
+        courseId = teachingAssessmentIdFromPath(pageUrl) ?: "",
+        actionUrl = actionUrl,
+        method = method,
+        referer = referer,
+        fields = baseFields,
+        questions = questions.sortedBy { it.index },
+        comments = comments.sortedBy { it.index },
+        unsupportedMultiCount = baseFields["multi-TOTAL_FORMS"]?.toIntOrNull() ?: 0,
+    )
+}
+
+fun chooseTeachingAssessmentPositiveOption(options: List<TeachingAssessmentOption>): TeachingAssessmentOption? {
+    if (options.isEmpty()) return null
+    val exactPriority = listOf(
+        "非常符合",
+        "优秀",
+        "非常满意",
+        "满意",
+        "很好",
+        "好",
+        "符合",
+    )
+    exactPriority.forEach { label ->
+        options.firstOrNull { it.label == label }?.let { return it }
+    }
+    val containsPriority = listOf("非常", "优秀", "满意", "很好")
+    containsPriority.forEach { needle ->
+        options.firstOrNull { it.label.contains(needle) }?.let { return it }
+    }
+    return options.last()
+}
+
 private data class SubmitAction(
     val actionUrl: String?,
     val method: String,
@@ -185,6 +334,45 @@ private fun formFields(form: Element?): Map<String, String> {
             name to input.attr("value")
         }
     }.toMap()
+}
+
+private fun formFieldValue(form: Element?, name: String): String? =
+    form?.select("input[name], textarea[name], select[name]")
+        ?.firstOrNull { normalizeSpace(it.attr("name")) == name }
+        ?.let { field ->
+            when (field.tagName().lowercase()) {
+                "textarea" -> field.text()
+                else -> field.attr("value")
+            }
+        }
+        ?.let(::normalizeSpace)
+        ?.takeIf { it.isNotBlank() }
+
+private fun teachingAssessmentIdFromPath(value: String): String? =
+    Regex("""/teaching_assessment/stu/([^/?#]+)/""")
+        .find(value)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.let(::normalizeSpace)
+        ?.takeIf { it.isNotBlank() }
+
+private fun teachingAssessmentIndex(prefix: String): Int? =
+    Regex("""-(\d+)$""").find(prefix)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+private fun teachingAssessmentQuestionPrompt(element: Element?): String {
+    val paragraph = element?.parents()?.firstOrNull { it.tagName().equals("p", ignoreCase = true) }
+    val label = paragraph?.select("> label")?.firstOrNull { !it.hasAttr("for") }
+        ?: element?.previousElementSiblings()?.firstOrNull { it.tagName().equals("label", ignoreCase = true) }
+    return normalizeSpace(label?.text()).trimEnd(':', '：')
+}
+
+private fun teachingAssessmentRadioLabel(form: Element?, radio: Element): String {
+    val parentLabel = radio.parent()?.takeIf { it.tagName().equals("label", ignoreCase = true) }
+    val explicitLabel = radio.id().takeIf { it.isNotBlank() }?.let { id ->
+        form?.select("label[for=$id]")?.firstOrNull()
+    }
+    val text = normalizeSpace((parentLabel ?: explicitLabel)?.text())
+    return text.ifBlank { radio.attr("value") }
 }
 
 private fun checkboxPayload(cell: Element?): Pair<String?, String?> {
