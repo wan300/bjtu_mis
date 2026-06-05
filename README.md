@@ -4,13 +4,11 @@
   <img src="docs/img/readmeimg.png" alt="BJTU MIS Android 应用展示" width="720" />
 </p>
 
-BJTU MIS Android 是面向北京交通大学学生的校园学习服务 App。它把 MIS、教学服务、校园邮箱和作业辅助能力整合到手机端，帮助你更快查看课程与学习信息，并在离线场景下继续访问已同步的数据。
+BJTU MIS Android 是面向北京交通大学学生的校园学习服务 App。它把 MIS、教学服务、校园邮箱和作业辅助能力整合到手机端，帮助同学们更快查看课程与学习信息，并在离线场景下继续访问已同步的数据。
 
 ## 适合谁使用
 
 - 北京交通大学在校学生
-- 希望在手机上集中查看课程、成绩、考试、作业和校园邮箱的用户
-- 需要在作业资料较多时快速整理要求、附件和参考信息的用户
 
 ## 主要功能
 
@@ -99,4 +97,3 @@ npm run test:frontend -- --run
 - Android 工程位于 `android/`。
 - 本地 SDK 配置文件 `android/local.properties` 不应提交。
 - Open WebUI 构建产物、Android 构建产物、APK/AAB、Room schema 和本地缓存均不应提交。
-- `test/` 目录包含本地浏览器自动化与网页数据采集脚本，已作为本地工具目录忽略。

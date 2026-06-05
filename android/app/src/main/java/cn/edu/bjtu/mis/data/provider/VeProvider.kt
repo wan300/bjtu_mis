@@ -788,7 +788,6 @@ class VeProvider(private val client: BjtuHttpClient) {
         val downloadUrl = if (rpUrl.startsWith("http")) rpUrl else "${ProviderConstants.VE_BASE_URL}/ve/${rpUrl.trimStart('/')}"
         return client.downloadToFile(downloadUrl, target, headers = mapOf("Referer" to coursePlatformReferer))
     }
-
     suspend fun previewCourseResource(resource: CourseResourceItem): String {
         ensureStrictFlow("course resource preview")
         val previewId = resource.resId?.trim().orEmpty().ifBlank { resource.rpId.trim() }
@@ -1256,7 +1255,6 @@ class VeProvider(private val client: BjtuHttpClient) {
         )
         return parseHomeworkAttachments(payload)
     }
-
     private suspend fun openCourseResourcesContext(course: CourseSummary, courseToPage: String): Map<String, String> {
         val coursePage = client.getText(
             ProviderConstants.VE_COURSE_PLATFORM_BASE_URL,

@@ -571,7 +571,6 @@ class AaProvider(
             data = parseScoreDetail(html),
         )
     }
-
     suspend fun fetchStudentProfile(): ModuleEnvelope<StudentProfileData> {
         val html = getText("/school_census/schoolcensus/stuview/")
         val parsed = parseStudentStatusProfile(html).let { profile ->

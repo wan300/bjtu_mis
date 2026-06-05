@@ -119,7 +119,6 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
             previewing = null
         }
     }
-
     LaunchedEffect(Unit) { load() }
 
     previewTarget?.let { target ->
@@ -199,6 +198,7 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
                 item { ProgressiveStatus(state) }
                 item {
                     val currentTerm = data.currentTerm
+                    val selectedCourse = data.courses.firstOrNull { it.courseId.toString() == selectedCourseId }
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (!currentTerm.isNullOrBlank()) {
                             AssistChip(onClick = {}, label = { Text(currentTerm) })

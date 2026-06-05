@@ -193,6 +193,25 @@ class SessionManagerRecoveryTest {
         }
     }
 
+    @Test
+    fun explicitAutoLoginReportsNetworkFailureWithoutManualCaptchaFallback() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        val manager = manager(
+            server = server,
+            cookieStore = MemoryCookieStore(payload = null),
+            credentialStore = MemoryCredentialStore(credentials = null),
+            captchaSolver = FakeCaptchaSolver { CaptchaSolveResult(expression = "1+1=", answer = "2") },
+        )
+        server.shutdown()
+
+        val result = manager.loginAuto("student", "secret")
+
+        assertEquals(AutoLoginStatus.AutoFailed, result.status)
+        assertEquals(1, result.attempts)
+        assertEquals(0, server.requestCount)
+    }
+
     private fun manager(
         server: MockWebServer,
         cookieStore: MemoryCookieStore,

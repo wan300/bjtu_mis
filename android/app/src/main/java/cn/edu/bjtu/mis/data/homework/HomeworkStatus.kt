@@ -32,6 +32,9 @@ fun parseHomeworkDueAt(value: String?): LocalDateTime? {
 fun homeworkDueDate(item: HomeworkItem): LocalDate? =
     parseHomeworkDueAt(item.dueAt)?.toLocalDate()
 
+fun homeworkOpenDate(item: HomeworkItem): LocalDate? =
+    parseHomeworkDueAt(item.openedAt)?.toLocalDate()
+
 fun homeworkCalendarStatusLabel(
     item: HomeworkItem,
     now: LocalDateTime = LocalDateTime.now(),

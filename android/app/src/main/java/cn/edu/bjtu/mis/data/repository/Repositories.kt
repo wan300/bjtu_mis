@@ -15,6 +15,7 @@ import cn.edu.bjtu.mis.data.employment.EmploymentCalendarEvent
 import cn.edu.bjtu.mis.data.employment.employmentCalendarEvents
 import cn.edu.bjtu.mis.data.homework.homeworkMatchesStatusFilter
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
+import cn.edu.bjtu.mis.data.network.SingleFlight
 import cn.edu.bjtu.mis.data.perf.PerfTrace
 import cn.edu.bjtu.mis.data.provider.AaProvider
 import cn.edu.bjtu.mis.data.provider.CoremailProvider
@@ -397,6 +398,7 @@ class OverviewRepository(
 class ModuleRepository(
     private val syncRepository: SyncRepository,
     private val sessionManager: SessionManager,
+    private val singleFlight: SingleFlight = SingleFlight(),
 ) {
     suspend fun profile(): ModuleEnvelope<StudentProfileData> =
         snapshotOrFetch(ModuleKeys.Profile) { AaProvider(it).fetchStudentProfile() }
@@ -405,7 +407,9 @@ class ModuleRepository(
         snapshotOrFetch(ModuleKeys.AcademicProgress) { AaProvider(it).fetchAcademicProgress() }
 
     suspend fun historyScores(term: String? = null): ModuleEnvelope<ScoreData> =
-        fetchLiveOrSnapshot(ModuleKeys.HistoryScores) { AaProvider(it).fetchHistoryScores(term) }
+        fetchLiveOrSnapshot(ModuleKeys.HistoryScores, requestKey(ModuleKeys.HistoryScores, "term" to term)) {
+            AaProvider(it).fetchHistoryScores(term)
+        }
 
     fun historyScoresProgressive(term: String? = null): Flow<ProgressiveModuleState<ScoreData>> =
         progressiveLiveOrSnapshot(ModuleKeys.HistoryScores) { client ->
@@ -417,19 +421,27 @@ class ModuleRepository(
             .withUserCourses()
 
     suspend fun exams(term: String? = null): ModuleEnvelope<ExamData> =
-        fetchLiveOrSnapshot(ModuleKeys.Exams) { AaProvider(it).fetchExams(term) }
+        fetchLiveOrSnapshot(ModuleKeys.Exams, requestKey(ModuleKeys.Exams, "term" to term)) {
+            AaProvider(it).fetchExams(term)
+        }
 
     suspend fun scores(term: String? = null, ctype: String? = null): ModuleEnvelope<ScoreData> =
-        fetchLiveOrSnapshot(ModuleKeys.Scores) { AaProvider(it).fetchScores(term, ctype) }
+        fetchLiveOrSnapshot(ModuleKeys.Scores, requestKey(ModuleKeys.Scores, "term" to term, "ctype" to ctype)) {
+            AaProvider(it).fetchScores(term, ctype)
+        }
 
     suspend fun scoreDetail(detailPath: String): ModuleEnvelope<ScoreDetailData> =
         sessionManager.withAuthenticatedClient { AaProvider(it).fetchScoreDetail(detailPath) }.copy(syncedAt = nowIso())
 
     suspend fun calendar(month: String? = null): ModuleEnvelope<CalendarData> =
-        fetchLiveOrSnapshot(ModuleKeys.Calendar) { VeProvider(it).fetchCalendar(month) }
+        fetchLiveOrSnapshot(ModuleKeys.Calendar, requestKey(ModuleKeys.Calendar, "month" to month)) {
+            VeProvider(it).fetchCalendar(month)
+        }
 
     suspend fun homework(status: String = "all"): ModuleEnvelope<HomeworkData> {
-        val envelope = fetchLiveOrSnapshot(ModuleKeys.Homework) { VeProvider(it).fetchHomework() }
+        val envelope = fetchLiveOrSnapshot(ModuleKeys.Homework, requestKey(ModuleKeys.Homework, "status" to "all")) {
+            VeProvider(it).fetchHomework()
+        }
         if (status == "all") return envelope
         return envelope.copy(data = envelope.data.copy(items = envelope.data.items.filter {
             homeworkMatchesStatusFilter(it, status)
@@ -458,7 +470,12 @@ class ModuleRepository(
         building: String? = null,
         room: String? = null,
     ): ModuleEnvelope<EmptyRoomData> =
-        fetchLiveOrSnapshot(ModuleKeys.EmptyRooms) { AaProvider(it).fetchEmptyRooms(term, week, building, room) }
+        fetchLiveOrSnapshot(
+            ModuleKeys.EmptyRooms,
+            requestKey(ModuleKeys.EmptyRooms, "term" to term, "week" to week, "building" to building, "room" to room),
+        ) {
+            AaProvider(it).fetchEmptyRooms(term, week, building, room)
+        }
 
     suspend fun teachingAssessments(): ModuleEnvelope<TeachingAssessmentData> =
         sessionManager.withAuthenticatedClient { AaProvider(it).fetchTeachingAssessmentList() }
@@ -481,7 +498,17 @@ class ModuleRepository(
         search: String? = null,
         categoryKey: String? = null,
     ): ModuleEnvelope<CourseResourcesData> =
-        fetchLiveOrSnapshot(ModuleKeys.CourseResources) {
+        fetchLiveOrSnapshot(
+            ModuleKeys.CourseResources,
+            requestKey(
+                ModuleKeys.CourseResources,
+                "term" to term,
+                "courseId" to courseId,
+                "folderId" to folderId,
+                "search" to search,
+                "categoryKey" to categoryKey,
+            ),
+        ) {
             VeProvider(it).fetchCourseResources(term, courseId, folderId, search, categoryKey)
         }
 
@@ -537,20 +564,28 @@ class ModuleRepository(
         moduleKey: String,
         crossinline fetcher: suspend (cn.edu.bjtu.mis.data.network.BjtuHttpClient) -> ModuleEnvelope<T>,
     ): ModuleEnvelope<T> =
-        syncRepository.snapshot<T>(moduleKey) ?: fetchLiveOrSnapshot(moduleKey, fetcher)
+        syncRepository.snapshot<T>(moduleKey) ?: fetchLiveOrSnapshot(moduleKey, fetcher = fetcher)
 
     private suspend inline fun <reified T> fetchLiveOrSnapshot(
         moduleKey: String,
+        requestKey: String = moduleKey,
         crossinline fetcher: suspend (cn.edu.bjtu.mis.data.network.BjtuHttpClient) -> ModuleEnvelope<T>,
     ): ModuleEnvelope<T> {
-        return runCatching {
-            val envelope = sessionManager.withAuthenticatedClient { fetcher(it) }.copy(syncedAt = nowIso())
-            syncRepository.saveSnapshot(moduleKey, envelope)
-            envelope
-        }.getOrElse {
-            syncRepository.snapshot<T>(moduleKey)
-                ?: throw it
+        return singleFlight.run(requestKey) {
+            runCatching {
+                val envelope = sessionManager.withAuthenticatedClient { fetcher(it) }.copy(syncedAt = nowIso())
+                syncRepository.saveSnapshot(moduleKey, envelope)
+                envelope
+            }.getOrElse {
+                syncRepository.snapshot<T>(moduleKey)
+                    ?: throw it
+            }
         }
+    }
+
+    private fun requestKey(moduleKey: String, vararg params: Pair<String, String?>): String {
+        val suffix = params.joinToString("&") { (key, value) -> "$key=${value?.trim().orEmpty()}" }
+        return if (suffix.isBlank()) moduleKey else "$moduleKey:$suffix"
     }
 
     private inline fun <reified T> progressiveLiveOrSnapshot(
@@ -631,6 +666,7 @@ class CourseResourceRepository(
     private val context: Context,
     private val moduleRepository: ModuleRepository,
     private val sessionManager: SessionManager,
+    private val singleFlight: SingleFlight = SingleFlight(),
 ) {
     suspend fun listing(
         term: String? = null,
@@ -651,21 +687,24 @@ class CourseResourceRepository(
         moduleRepository.courseResourcesProgressive(term, courseId, folderId, search, categoryKey)
 
     suspend fun download(rpId: String, filename: String, extension: String? = null): File =
-        sessionManager.withAuthenticatedClient { client ->
-            val targetDir = File(context.filesDir, "downloads").apply { mkdirs() }
-            val target = File(targetDir, safeDownloadFileName(filename, extension, rpId))
-            VeProvider(client).downloadCourseResource(rpId, target).file
+        singleFlight.run("course_resource:download:${rpId.trim()}") {
+            sessionManager.withAuthenticatedClient { client ->
+                val targetDir = File(context.filesDir, "downloads").apply { mkdirs() }
+                val target = File(targetDir, safeDownloadFileName(filename, extension, rpId))
+                VeProvider(client).downloadCourseResource(rpId, target).file
+            }
         }
-
     suspend fun preview(resource: CourseResourceItem): DocumentPreview {
         if (!courseResourcePreviewSupported(resource)) {
             throw IllegalStateException("该文件暂不支持在线预览，请下载后查看")
         }
-        return sessionManager.withAuthenticatedClient { client ->
-            DocumentPreview(
-                url = VeProvider(client).previewCourseResource(resource),
-                cookies = client.cookieJar.snapshot().map { it.toDocumentPreviewCookie() },
-            )
+        return singleFlight.run("course_resource:preview:${resource.rpId.trim()}") {
+            sessionManager.withAuthenticatedClient { client ->
+                DocumentPreview(
+                    url = VeProvider(client).previewCourseResource(resource),
+                    cookies = client.cookieJar.snapshot().map { it.toDocumentPreviewCookie() },
+                )
+            }
         }
     }
 

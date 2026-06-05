@@ -6,6 +6,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
 
@@ -56,6 +57,47 @@ class HomeworkReminderEvaluatorTest {
         assertEquals(listOf("第一", "第二", "第三", "第四"), content?.candidates?.map { it.item.title })
         assertEquals("你有 4 项作业即将截止", content?.title)
         assertTrue(content?.bigText?.contains("等 4 项作业即将截止") == true)
+    }
+
+    @Test
+    fun classifiesUrgentHomeworkByConfiguredThreshold() {
+        val evaluator = HomeworkReminderEvaluator(
+            HomeworkReminderConfig(
+                normalWindow = Duration.ofHours(48),
+                urgentWindow = Duration.ofHours(12),
+            )
+        )
+
+        val content = evaluator.evaluate(
+            items = listOf(
+                homework(title = "普通", dueAt = "2026-05-11 08:00"),
+                homework(title = "紧急", dueAt = "2026-05-10 18:00"),
+            ),
+            now = now,
+        )
+
+        assertEquals(HomeworkReminderUrgency.Urgent, content?.candidates?.first()?.urgency)
+        assertTrue(content?.bigText?.contains("【紧急】") == true)
+    }
+
+    @Test
+    fun returnsNullWhenReminderIsDisabled() {
+        val evaluator = HomeworkReminderEvaluator(HomeworkReminderConfig(enabled = false))
+
+        val content = evaluator.evaluate(
+            items = listOf(homework(title = "接口设计", dueAt = "2026-05-11 08:00")),
+            now = now,
+        )
+
+        assertNull(content)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsInvalidThresholds() {
+        HomeworkReminderConfig(
+            normalWindow = Duration.ofHours(24),
+            urgentWindow = Duration.ofHours(24),
+        )
     }
 
     @Test

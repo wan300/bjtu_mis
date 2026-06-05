@@ -1,10 +1,11 @@
 (function () {
   const repoApi = "https://api.github.com/repos/wan300/bjtu_mis_Android/releases/latest";
-  const fallbackApk = "https://github.com/wan300/bjtu_mis_Android/releases/latest/download/app-release.apk";
-  const fallbackRelease = "https://github.com/wan300/bjtu_mis_Android/releases/latest";
-  const fallbackTag = "latest";
+  const fallbackApk = "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.2.1/app-release.apk";
+  const fallbackRelease = "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.2.1";
+  const fallbackTag = "v1.2.1";
   const fallbackSizeText = "--";
   const releaseRefreshInterval = 5 * 60 * 1000;
+  const imageAssetQuery = "?v=2026060601";
 
   const moduleData = window.BJTU_MODULES || [];
   const isModulePage = document.body.dataset.page === "module";
@@ -21,7 +22,7 @@
   }
 
   function iconPath(icon) {
-    return `${assetPrefix}icons/${icon}`;
+    return `${assetPrefix}icons/${icon}${imageAssetQuery}`;
   }
 
   function moduleLink(slug) {

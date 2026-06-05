@@ -23,6 +23,7 @@ import cn.edu.bjtu.mis.data.db.MIGRATION_6_7
 import cn.edu.bjtu.mis.data.employment.EmploymentCalendarSyncStore
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderCoordinator
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderNotifier
+import cn.edu.bjtu.mis.data.homework.HomeworkReminderPreferenceStore
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderRunner
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderStateStore
 import cn.edu.bjtu.mis.data.network.AppCookieJar
@@ -110,11 +111,13 @@ class AppContainer(context: Context) {
             EmploymentConsultationRepository(syncRepository, httpClient)
         }
     }
+    val homeworkReminderPreferenceStore = HomeworkReminderPreferenceStore(appContext)
     val homeworkReminderRunner = HomeworkReminderRunner(
         dao = database.dao(),
         coordinator = HomeworkReminderCoordinator(
             state = HomeworkReminderStateStore(appContext),
             sender = HomeworkReminderNotifier(appContext),
+            configProvider = { homeworkReminderPreferenceStore.config() },
         ),
     )
     val courseSelectionRepository: CourseSelectionRepository by lazy {

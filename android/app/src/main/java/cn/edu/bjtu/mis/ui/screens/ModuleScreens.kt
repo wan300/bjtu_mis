@@ -1,5 +1,6 @@
 package cn.edu.bjtu.mis.ui.screens
 
+import android.Manifest
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AlertDialog
@@ -86,9 +88,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import cn.edu.bjtu.mis.data.repository.CourseResourceRepository
+import cn.edu.bjtu.mis.data.calendar.TaskCalendarBuckets
+import cn.edu.bjtu.mis.data.calendar.groupTaskCalendarBuckets
 import cn.edu.bjtu.mis.data.employment.EmploymentCalendarEvent
 import cn.edu.bjtu.mis.data.employment.EmploymentCalendarSyncStore
 import cn.edu.bjtu.mis.data.employment.employmentCalendarEventTypeLabel
+import cn.edu.bjtu.mis.data.exporting.CalendarExportData
+import cn.edu.bjtu.mis.data.exporting.CalendarExportScope
+import cn.edu.bjtu.mis.data.exporting.ScheduleExportContentBuilder
+import cn.edu.bjtu.mis.data.exporting.ScheduleExportDocument
+import cn.edu.bjtu.mis.data.exporting.ScheduleExportFormat
+import cn.edu.bjtu.mis.data.exporting.ScheduleExportStorage
 import cn.edu.bjtu.mis.data.homework.HomeworkStatusKind
 import cn.edu.bjtu.mis.data.homework.homeworkCalendarStatusLabel
 import cn.edu.bjtu.mis.data.homework.homeworkDueDate
@@ -111,6 +121,7 @@ import cn.edu.bjtu.mis.model.AcademicMonthCalendar
 import cn.edu.bjtu.mis.model.AcademicMonthDay
 import cn.edu.bjtu.mis.model.AcademicProgressData
 import cn.edu.bjtu.mis.model.CalendarData
+import cn.edu.bjtu.mis.model.CalendarItem
 import cn.edu.bjtu.mis.model.CourseEntry
 import cn.edu.bjtu.mis.model.CourseResourceItem
 import cn.edu.bjtu.mis.model.CourseResourcesData
@@ -120,6 +131,7 @@ import cn.edu.bjtu.mis.model.EmptyRoomData
 import cn.edu.bjtu.mis.model.EmptyRoomRow
 import cn.edu.bjtu.mis.model.EmptyRoomSlotHeader
 import cn.edu.bjtu.mis.model.ExamData
+import cn.edu.bjtu.mis.model.ExamItem
 import cn.edu.bjtu.mis.model.HomeworkAttachment
 import cn.edu.bjtu.mis.model.HomeworkData
 import cn.edu.bjtu.mis.model.HomeworkItem
@@ -192,6 +204,53 @@ private val UserCourseColors = listOf(
     Color(0xFF7986CB),
 )
 
+private data class PendingScheduleExport(
+    val document: ScheduleExportDocument,
+    val format: ScheduleExportFormat,
+)
+
+@Composable
+private fun rememberScheduleExportLauncher(): (ScheduleExportDocument, ScheduleExportFormat) -> Unit {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pendingExport by remember { mutableStateOf<PendingScheduleExport?>(null) }
+
+    fun saveExport(export: PendingScheduleExport) {
+        scope.launch {
+            runCatching {
+                ScheduleExportStorage.save(context, export.document, export.format)
+            }.onSuccess { saved ->
+                if (export.format == ScheduleExportFormat.Pdf) {
+                    runCatching { ScheduleExportStorage.sharePdf(context, saved) }
+                }
+                Toast.makeText(context, "已导出：${saved.displayName}", Toast.LENGTH_LONG).show()
+            }.onFailure { error ->
+                Toast.makeText(context, error.message ?: "导出失败", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val export = pendingExport
+        pendingExport = null
+        if (granted && export != null) {
+            saveExport(export)
+        } else {
+            Toast.makeText(context, "需要存储权限才能导出文件", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    return { document, format ->
+        val export = PendingScheduleExport(document, format)
+        if (ScheduleExportStorage.needsLegacyWritePermission(context)) {
+            pendingExport = export
+            permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else {
+            saveExport(export)
+        }
+    }
+}
+
 @Composable
 private fun SecondaryModuleLinks(
     title: String,
@@ -222,6 +281,7 @@ fun ProfileScreen(
     onOpenPersonalInfo: () -> Unit,
     onOpenTrainingInfo: () -> Unit,
     onOpenTheme: () -> Unit,
+    onOpenHomeworkReminder: () -> Unit,
     onNavigate: (String) -> Unit,
 ) {
     val context = LocalContext.current
@@ -341,6 +401,13 @@ fun ProfileScreen(
                         iconColor = Color(0xFFE4B96A),
                         trailingText = themeOptionLabel(selectedTheme),
                         onClick = onOpenTheme,
+                    ),
+                    ProfileSettingsItem(
+                        title = "作业提醒",
+                        subtitle = "设置普通和紧急提醒阈值",
+                        iconLabel = "醒",
+                        iconColor = Color(0xFF7C58C2),
+                        onClick = onOpenHomeworkReminder,
                     ),
                     ProfileSettingsItem(
                         title = "检测更新",
@@ -916,10 +983,12 @@ fun AcademicProgressScreen(repository: ModuleRepository) {
 fun TimetableScreen(
     repository: ModuleRepository,
     courseResourceRepository: CourseResourceRepository,
+    homeworkAttachmentRepository: HomeworkAttachmentRepository,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
+    val exportSchedule = rememberScheduleExportLauncher()
     val isWide = configuration.screenWidthDp >= 840
     var state by remember { mutableStateOf<LoadState<ModuleEnvelope<TimetableData>>>(LoadState.Loading) }
     var selectedCourses by remember { mutableStateOf<List<CourseEntry>>(emptyList()) }
@@ -929,6 +998,7 @@ fun TimetableScreen(
     var courseEditorSeed by remember { mutableStateOf<UserCourseEditorSeed?>(null) }
     var courseEditorError by remember { mutableStateOf<String?>(null) }
     var pendingDeleteCourse by remember { mutableStateOf<CourseEntry?>(null) }
+    var timetableExportTarget by remember { mutableStateOf<TimetableData?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val editorSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -1047,6 +1117,17 @@ fun TimetableScreen(
         }
     }
 
+    fun exportTimetable(data: TimetableData, format: ScheduleExportFormat) {
+        if (data.entries.isEmpty()) {
+            Toast.makeText(context, "当前课表为空", Toast.LENGTH_SHORT).show()
+        }
+        val document = ScheduleExportContentBuilder.buildTimetable(
+            data = data,
+            currentWeek = currentWeek,
+        )
+        exportSchedule(document, format)
+    }
+
     LaunchedEffect(Unit) {
         loadTimetable()
         runCatching { repository.calendar() }
@@ -1070,6 +1151,7 @@ fun TimetableScreen(
                         selectedCourses = selectedCourses,
                         onSelect = ::loadDetail,
                         onAddToHomeWidget = ::addTimetableWidget,
+                        onExport = { timetableExportTarget = envelope.data },
                         onAddUserCourse = { day, slot ->
                             courseEditorError = null
                             selectedCourses = emptyList()
@@ -1096,6 +1178,7 @@ fun TimetableScreen(
                                 homeworkStates = homeworkStates,
                                 resourceStates = resourceStates,
                                 courseResourceRepository = courseResourceRepository,
+                                homeworkAttachmentRepository = homeworkAttachmentRepository,
                                 onEditUserCourse = {
                                     courseEditorError = null
                                     selectedCourses = emptyList()
@@ -1117,6 +1200,7 @@ fun TimetableScreen(
                     selectedCourses = selectedCourses,
                     onSelect = ::loadDetail,
                     onAddToHomeWidget = ::addTimetableWidget,
+                    onExport = { timetableExportTarget = envelope.data },
                     onAddUserCourse = { day, slot ->
                         courseEditorError = null
                         selectedCourses = emptyList()
@@ -1140,6 +1224,7 @@ fun TimetableScreen(
                             homeworkStates = homeworkStates,
                             resourceStates = resourceStates,
                             courseResourceRepository = courseResourceRepository,
+                            homeworkAttachmentRepository = homeworkAttachmentRepository,
                             onEditUserCourse = {
                                 courseEditorError = null
                                 selectedCourses = emptyList()
@@ -1156,6 +1241,16 @@ fun TimetableScreen(
                 }
             }
         }
+    }
+
+    timetableExportTarget?.let { data ->
+        TimetableExportDialog(
+            onDismiss = { timetableExportTarget = null },
+            onExport = { format ->
+                timetableExportTarget = null
+                exportTimetable(data, format)
+            },
+        )
     }
 
     courseEditorSeed?.let { seed ->
@@ -1564,6 +1659,7 @@ private fun TermSelector(
 private data class CalendarDashboard(
     val calendarEnvelope: ModuleEnvelope<CalendarData>,
     val homework: List<HomeworkItem>,
+    val exams: List<ExamItem>,
     val todos: List<UserTodoItem>,
 )
 
@@ -1571,6 +1667,11 @@ private data class CalendarCellChip(
     val text: String,
     val color: Color,
 )
+
+private enum class CalendarViewMode {
+    Month,
+    Week,
+}
 
 private val CalendarMonthTitleFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy年M月")
@@ -1586,7 +1687,9 @@ fun CalendarScreen(
     employmentCalendarSyncStore: EmploymentCalendarSyncStore,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
+    val exportSchedule = rememberScheduleExportLauncher()
     val employmentSyncEnabled by employmentCalendarSyncStore.enabled.collectAsState(initial = false)
     val today = remember { LocalDate.now() }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1596,6 +1699,8 @@ fun CalendarScreen(
     var addTodoDate by remember { mutableStateOf<LocalDate?>(null) }
     var todoSaveError by remember { mutableStateOf<String?>(null) }
     var showTermOverview by remember { mutableStateOf(false) }
+    var calendarViewMode by remember { mutableStateOf(CalendarViewMode.Month) }
+    var showCalendarExportDialog by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf<LoadState<CalendarDashboard>>(LoadState.Loading) }
     var employmentEventsState by remember {
         mutableStateOf<LoadState<List<EmploymentCalendarEvent>>>(LoadState.Data(emptyList()))
@@ -1609,6 +1714,7 @@ fun CalendarScreen(
                 CalendarDashboard(
                     calendarEnvelope = calendar,
                     homework = runCatching { repository.homework("all").data.items }.getOrDefault(emptyList()),
+                    exams = runCatching { repository.exams().data.items }.getOrDefault(emptyList()),
                     todos = repository.userTodos(),
                 )
             }.onSuccess {
@@ -1723,7 +1829,13 @@ fun CalendarScreen(
                 val monthCalendar = remember(displayMonth) { buildAcademicMonthCalendar(displayMonth) }
                 val selectedIsCurrentTerm = effectiveTerm != null && effectiveTerm == data.currentTerm
                 val currentWeek = if (selectedIsCurrentTerm) parseWeekNumber(data.currentWeek) else null
-                val homeworkByDate = remember(dashboard.homework) { dashboard.homework.groupByHomeworkDueDate() }
+                val taskBucketsByDate = remember(dashboard.homework, dashboard.exams, data.items) {
+                    groupTaskCalendarBuckets(
+                        homework = dashboard.homework,
+                        exams = dashboard.exams,
+                        calendarItems = data.items,
+                    )
+                }
                 val todosByDate = remember(dashboard.todos) { dashboard.todos.groupByTodoDate() }
                 val employmentEvents = if (employmentSyncEnabled) {
                     (employmentEventsState as? LoadState.Data)?.value.orEmpty()
@@ -1731,6 +1843,48 @@ fun CalendarScreen(
                     emptyList()
                 }
                 val employmentEventsByDate = remember(employmentEvents) { employmentEvents.groupByEmploymentEventDate() }
+                val calendarExportData = remember(taskBucketsByDate, todosByDate, employmentEventsByDate) {
+                    CalendarExportData(
+                        bucketsByDate = taskBucketsByDate,
+                        todosByDate = todosByDate,
+                        employmentEventsByDate = employmentEventsByDate,
+                    )
+                }
+
+                fun exportCalendar(scopeValue: CalendarExportScope, format: ScheduleExportFormat) {
+                    val document = when (scopeValue) {
+                        CalendarExportScope.TermOverview -> {
+                            val termCalendar = calendar
+                            if (termCalendar == null) {
+                                Toast.makeText(context, "无法生成学期周表", Toast.LENGTH_LONG).show()
+                                return
+                            }
+                            ScheduleExportContentBuilder.buildTermOverview(
+                                calendar = termCalendar,
+                                currentWeek = currentWeek,
+                                today = today,
+                            )
+                        }
+                        CalendarExportScope.Month -> ScheduleExportContentBuilder.buildMonthView(
+                            calendar = monthCalendar,
+                            exportData = calendarExportData,
+                            today = today,
+                        )
+                        CalendarExportScope.Week -> {
+                            val anchor = ScheduleExportContentBuilder.weekAnchorDate(
+                                selectedDate = selectedDate,
+                                today = today,
+                                displayMonth = displayMonth,
+                            )
+                            ScheduleExportContentBuilder.buildWeekView(
+                                anchorDate = anchor,
+                                exportData = calendarExportData,
+                                today = today,
+                            )
+                        }
+                    }
+                    exportSchedule(document, format)
+                }
 
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -1757,6 +1911,7 @@ fun CalendarScreen(
                                 selectedMonth = YearMonth.from(today)
                                 selectedDate = today
                             },
+                            onExport = { showCalendarExportDialog = true },
                             onTermChange = { value ->
                                 selectedCalendarTerm = value
                                 val term = terms.firstOrNull { it.value == value }
@@ -1770,21 +1925,39 @@ fun CalendarScreen(
                     item {
                         CalendarMonthOverviewCard(
                             month = displayMonth,
-                            homework = dashboard.homework,
+                            taskBucketsByDate = taskBucketsByDate,
                             todos = dashboard.todos,
                             employmentEvents = employmentEvents,
                         )
                     }
                     item {
-                        AcademicMonthGrid(
-                            calendar = monthCalendar,
-                            today = today,
-                            selectedDate = selectedDate,
-                            homeworkByDate = homeworkByDate,
-                            todosByDate = todosByDate,
-                            employmentEventsByDate = employmentEventsByDate,
-                            onDateClick = { selectedDate = it },
+                        CalendarViewModeSelector(
+                            value = calendarViewMode,
+                            onValueChange = { calendarViewMode = it },
                         )
+                    }
+                    item {
+                        if (calendarViewMode == CalendarViewMode.Month) {
+                            AcademicMonthGrid(
+                                calendar = monthCalendar,
+                                today = today,
+                                selectedDate = selectedDate,
+                                taskBucketsByDate = taskBucketsByDate,
+                                todosByDate = todosByDate,
+                                employmentEventsByDate = employmentEventsByDate,
+                                onDateClick = { selectedDate = it },
+                            )
+                        } else {
+                            CalendarWeekTaskList(
+                                anchorDate = selectedDate ?: if (YearMonth.from(today) == displayMonth) today else displayMonth.atDay(1),
+                                today = today,
+                                selectedDate = selectedDate,
+                                taskBucketsByDate = taskBucketsByDate,
+                                todosByDate = todosByDate,
+                                employmentEventsByDate = employmentEventsByDate,
+                                onDateClick = { selectedDate = it },
+                            )
+                        }
                     }
                     item {
                         OutlinedButton(
@@ -1825,6 +1998,17 @@ fun CalendarScreen(
                     Icon(Icons.Filled.Add, contentDescription = "新增待办")
                 }
 
+                if (showCalendarExportDialog) {
+                    CalendarExportDialog(
+                        termOverviewAvailable = calendar != null,
+                        onDismiss = { showCalendarExportDialog = false },
+                        onExport = { scopeValue, format ->
+                            showCalendarExportDialog = false
+                            exportCalendar(scopeValue, format)
+                        },
+                    )
+                }
+
                 selectedDate?.let { date ->
                     ModalBottomSheet(
                         onDismissRequest = { selectedDate = null },
@@ -1832,7 +2016,7 @@ fun CalendarScreen(
                     ) {
                         CalendarDayDetail(
                             date = date,
-                            homework = homeworkByDate[date].orEmpty(),
+                            buckets = taskBucketsByDate[date] ?: TaskCalendarBuckets(),
                             todos = todosByDate[date].orEmpty(),
                             employmentEvents = employmentEventsByDate[date].orEmpty(),
                             onAddTodo = {
@@ -1906,6 +2090,7 @@ private fun CalendarMonthHeaderCard(
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
     onToday: () -> Unit,
+    onExport: () -> Unit,
     onTermChange: (String) -> Unit,
 ) {
     InfoCard(
@@ -1946,6 +2131,11 @@ private fun CalendarMonthHeaderCard(
                 Spacer(Modifier.width(6.dp))
                 Text("今天")
             }
+            OutlinedButton(onClick = onExport, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+                Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("导出")
+            }
             AssistChip(onClick = {}, label = { Text("今天 ${today.monthValue}月${today.dayOfMonth}日") })
             calendar?.let {
                 AssistChip(onClick = {}, label = { Text("${it.weeks.size} 周") })
@@ -1958,33 +2148,105 @@ private fun CalendarMonthHeaderCard(
 }
 
 @Composable
+private fun CalendarExportDialog(
+    termOverviewAvailable: Boolean,
+    onDismiss: () -> Unit,
+    onExport: (CalendarExportScope, ScheduleExportFormat) -> Unit,
+) {
+    var scope by remember(termOverviewAvailable) {
+        mutableStateOf(if (termOverviewAvailable) CalendarExportScope.TermOverview else CalendarExportScope.Month)
+    }
+    var format by remember { mutableStateOf(ScheduleExportFormat.Pdf) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("导出学年日历") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("导出范围")
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CalendarExportScope.values().forEach { option ->
+                        FilterChip(
+                            selected = scope == option,
+                            enabled = option != CalendarExportScope.TermOverview || termOverviewAvailable,
+                            onClick = { scope = option },
+                            label = {
+                                Text(
+                                    if (option == CalendarExportScope.TermOverview && !termOverviewAvailable) {
+                                        "${option.label}（无法生成）"
+                                    } else {
+                                        option.label
+                                    }
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                Text("导出格式")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    ScheduleExportFormat.values().forEach { option ->
+                        FilterChip(
+                            selected = format == option,
+                            onClick = { format = option },
+                            label = { Text(option.label) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onExport(scope, format) }) {
+                Text("导出")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
+@Composable
 private fun CalendarMonthOverviewCard(
     month: YearMonth,
-    homework: List<HomeworkItem>,
+    taskBucketsByDate: Map<LocalDate, TaskCalendarBuckets>,
     todos: List<UserTodoItem>,
     employmentEvents: List<EmploymentCalendarEvent>,
 ) {
-    val monthHomework = homework.filter { item ->
-        homeworkDueDate(item)?.let { YearMonth.from(it) == month } == true
-    }
+    val monthBuckets = taskBucketsByDate
+        .filterKeys { YearMonth.from(it) == month }
+        .values
     val monthTodos = todos.filter { item ->
         item.todoDate()?.let { YearMonth.from(it) == month } == true
     }
     val monthEmploymentEvents = employmentEvents.filter { YearMonth.from(it.date) == month }
+    val monthHomework = monthBuckets.flatMap { it.homeworkDues }
+    val homeworkStarts = monthBuckets.sumOf { it.homeworkStarts.size }
     val unsubmittedHomework = monthHomework.count { homeworkCalendarStatusLabel(it) == "未提交" }
+    val homeworkDues = monthBuckets.sumOf { it.homeworkDues.size }
+    val exams = monthBuckets.sumOf { it.exams.size }
+    val schoolCalendarItems = monthBuckets.sumOf { it.calendarItems.size }
     val doneHomework = monthHomework.size - unsubmittedHomework
     val openTodos = monthTodos.count { !it.done }
 
     InfoCard(
-        title = "本月总览",
+        title = "本月任务",
         subtitle = month.format(CalendarMonthTitleFormatter),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            CalendarMetric("作业截止", monthHomework.size.toString(), MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-            CalendarMetric("未提交", unsubmittedHomework.toString(), Color(0xFFD64B6B), Modifier.weight(1f))
-            CalendarMetric("已提交", doneHomework.toString(), Color(0xFF2AA876), Modifier.weight(1f))
-            CalendarMetric("待办", openTodos.toString(), Color(0xFF7C58C2), Modifier.weight(1f))
-            CalendarMetric("就业活动", monthEmploymentEvents.size.toString(), Color(0xFF0E7490), Modifier.weight(1f))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                CalendarMetric("作业开始", homeworkStarts.toString(), Color(0xFF2F8DD8), Modifier.weight(1f))
+                CalendarMetric("作业截止", homeworkDues.toString(), Color(0xFFD64B6B), Modifier.weight(1f))
+                CalendarMetric("考试", exams.toString(), Color(0xFFFF8A00), Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                CalendarMetric("校历", schoolCalendarItems.toString(), Color(0xFF0E9D9D), Modifier.weight(1f))
+                CalendarMetric("待办", openTodos.toString(), Color(0xFF7C58C2), Modifier.weight(1f))
+                CalendarMetric("就业", monthEmploymentEvents.size.toString(), Color(0xFF0E7490), Modifier.weight(1f))
+            }
         }
     }
 }
@@ -2010,11 +2272,154 @@ private fun CalendarMetric(label: String, value: String, tint: Color, modifier: 
 }
 
 @Composable
+private fun CalendarViewModeSelector(
+    value: CalendarViewMode,
+    onValueChange: (CalendarViewMode) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        FilterChip(
+            selected = value == CalendarViewMode.Month,
+            onClick = { onValueChange(CalendarViewMode.Month) },
+            label = { Text("月视图") },
+            modifier = Modifier.weight(1f),
+        )
+        FilterChip(
+            selected = value == CalendarViewMode.Week,
+            onClick = { onValueChange(CalendarViewMode.Week) },
+            label = { Text("周视图") },
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun CalendarWeekTaskList(
+    anchorDate: LocalDate,
+    today: LocalDate,
+    selectedDate: LocalDate?,
+    taskBucketsByDate: Map<LocalDate, TaskCalendarBuckets>,
+    todosByDate: Map<LocalDate, List<UserTodoItem>>,
+    employmentEventsByDate: Map<LocalDate, List<EmploymentCalendarEvent>>,
+    onDateClick: (LocalDate) -> Unit,
+) {
+    val weekStart = remember(anchorDate) {
+        anchorDate.minusDays((anchorDate.dayOfWeek.value - 1).toLong())
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        (0L..6L).forEach { offset ->
+            val date = weekStart.plusDays(offset)
+            CalendarWeekDayRow(
+                date = date,
+                isToday = date == today,
+                selected = date == selectedDate,
+                buckets = taskBucketsByDate[date] ?: TaskCalendarBuckets(),
+                todos = todosByDate[date].orEmpty(),
+                employmentEvents = employmentEventsByDate[date].orEmpty(),
+                onClick = { onDateClick(date) },
+            )
+        }
+    }
+}
+
+private fun buildCalendarChips(
+    buckets: TaskCalendarBuckets,
+    todos: List<UserTodoItem>,
+    employmentEvents: List<EmploymentCalendarEvent>,
+): List<CalendarCellChip> = buildList {
+    buckets.homeworkStarts.forEach { item ->
+        add(CalendarCellChip(text = "开始 ${item.title}", color = Color(0xFF2F8DD8)))
+    }
+    buckets.homeworkDues.forEach { item ->
+        val submitted = homeworkStatusKind(item) == HomeworkStatusKind.Done
+        add(
+            CalendarCellChip(
+                text = "截止 ${item.title}",
+                color = if (submitted) Color(0xFF2AA876) else Color(0xFFD64B6B),
+            )
+        )
+    }
+    buckets.exams.forEach { exam ->
+        add(CalendarCellChip(text = "考试 ${exam.courseName}", color = Color(0xFFFF8A00)))
+    }
+    buckets.calendarItems.forEach { item ->
+        add(CalendarCellChip(text = item.note.orEmpty(), color = Color(0xFF0E9D9D)))
+    }
+    todos.forEach { todo ->
+        add(CalendarCellChip(text = todo.title, color = if (todo.done) Color(0xFF6B7280) else Color(0xFF7C58C2)))
+    }
+    employmentEvents.forEach { event ->
+        add(
+            CalendarCellChip(
+                text = "${employmentCalendarEventTypeLabel(event.type)} ${event.title}",
+                color = Color(0xFF0E7490),
+            )
+        )
+    }
+}
+
+@Composable
+private fun CalendarWeekDayRow(
+    date: LocalDate,
+    isToday: Boolean,
+    selected: Boolean,
+    buckets: TaskCalendarBuckets,
+    todos: List<UserTodoItem>,
+    employmentEvents: List<EmploymentCalendarEvent>,
+    onClick: () -> Unit,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val borderColor = if (selected) colorScheme.primary else colorScheme.outline.copy(alpha = 0.32f)
+    val chips = buildCalendarChips(buckets, todos, employmentEvents)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = if (isToday) colorScheme.primaryContainer.copy(alpha = 0.28f) else colorScheme.surface,
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(if (selected) 1.5.dp else 0.5.dp, borderColor),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(52.dp)) {
+                Text(
+                    text = date.dayOfMonth.toString(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = if (isToday || selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isToday || selected) colorScheme.primary else colorScheme.onSurface,
+                )
+                Text(
+                    text = CalendarWeekdayLabels[date.dayOfWeek.value % 7],
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colorScheme.onSurfaceVariant,
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (chips.isEmpty()) {
+                    Text("暂无任务", style = MaterialTheme.typography.bodySmall, color = colorScheme.onSurfaceVariant)
+                } else {
+                    chips.take(4).forEach { CalendarCellChipView(it) }
+                    if (chips.size > 4) {
+                        Text(
+                            "+${chips.size - 4}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun AcademicMonthGrid(
     calendar: AcademicMonthCalendar,
     today: LocalDate,
     selectedDate: LocalDate?,
-    homeworkByDate: Map<LocalDate, List<HomeworkItem>>,
+    taskBucketsByDate: Map<LocalDate, TaskCalendarBuckets>,
     todosByDate: Map<LocalDate, List<UserTodoItem>>,
     employmentEventsByDate: Map<LocalDate, List<EmploymentCalendarEvent>>,
     onDateClick: (LocalDate) -> Unit,
@@ -2045,7 +2450,7 @@ private fun AcademicMonthGrid(
                             day = day,
                             today = today,
                             selected = selectedDate == day.date,
-                            homework = homeworkByDate[day.date].orEmpty(),
+                            buckets = taskBucketsByDate[day.date] ?: TaskCalendarBuckets(),
                             todos = todosByDate[day.date].orEmpty(),
                             employmentEvents = employmentEventsByDate[day.date].orEmpty(),
                             onClick = { onDateClick(day.date) },
@@ -2065,7 +2470,7 @@ private fun AcademicMonthDayCell(
     day: AcademicMonthDay,
     today: LocalDate,
     selected: Boolean,
-    homework: List<HomeworkItem>,
+    buckets: TaskCalendarBuckets,
     todos: List<UserTodoItem>,
     employmentEvents: List<EmploymentCalendarEvent>,
     onClick: () -> Unit,
@@ -2088,14 +2493,38 @@ private fun AcademicMonthDayCell(
         isToday || selected -> colorScheme.primary
         else -> colorScheme.onSurface
     }
-    val chips = remember(homework, todos, employmentEvents) {
+    val chips = remember(buckets, todos, employmentEvents) {
         buildList {
-            homework.forEach { item ->
+            buckets.homeworkStarts.forEach { item ->
+                add(
+                    CalendarCellChip(
+                        text = "开始 ${item.title}",
+                        color = Color(0xFF2F8DD8),
+                    )
+                )
+            }
+            buckets.homeworkDues.forEach { item ->
                 val submitted = homeworkCalendarStatusLabel(item) == "已提交"
                 add(
                     CalendarCellChip(
-                        text = item.title,
+                        text = "截止 ${item.title}",
                         color = if (submitted) Color(0xFF2AA876) else Color(0xFFD64B6B),
+                    )
+                )
+            }
+            buckets.exams.forEach { exam ->
+                add(
+                    CalendarCellChip(
+                        text = "考试 ${exam.courseName}",
+                        color = Color(0xFFFF8A00),
+                    )
+                )
+            }
+            buckets.calendarItems.forEach { item ->
+                add(
+                    CalendarCellChip(
+                        text = item.note.orEmpty(),
+                        color = Color(0xFF0E9D9D),
                     )
                 )
             }
@@ -2169,7 +2598,7 @@ private fun CalendarCellChipView(chip: CalendarCellChip) {
 @Composable
 private fun CalendarDayDetail(
     date: LocalDate,
-    homework: List<HomeworkItem>,
+    buckets: TaskCalendarBuckets,
     todos: List<UserTodoItem>,
     employmentEvents: List<EmploymentCalendarEvent>,
     onAddTodo: () -> Unit,
@@ -2177,6 +2606,19 @@ private fun CalendarDayDetail(
     onDeleteTodo: (UserTodoItem) -> Unit,
     onOpenEmploymentUrl: (String) -> Unit,
 ) {
+    val homeworkStarts = buckets.homeworkStarts
+    val homework = buckets.homeworkDues
+    val exams = buckets.exams
+    val calendarItems = buckets.calendarItems
+    val summary = buildList {
+        if (homeworkStarts.isNotEmpty()) add("${homeworkStarts.size} 项作业开始")
+        if (homework.isNotEmpty()) add("${homework.size} 项作业截止")
+        if (exams.isNotEmpty()) add("${exams.size} 场考试")
+        if (calendarItems.isNotEmpty()) add("${calendarItems.size} 项校历安排")
+        if (todos.isNotEmpty()) add("${todos.size} 项自定义待办")
+        if (employmentEvents.isNotEmpty()) add("${employmentEvents.size} 项就业活动")
+    }.ifEmpty { listOf("当天暂无任务") }.joinToString(" · ")
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -2196,7 +2638,7 @@ private fun CalendarDayDetail(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "${homework.size} 项作业截止 · ${todos.size} 项自定义待办 · ${employmentEvents.size} 项就业活动",
+                    summary,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -2208,8 +2650,52 @@ private fun CalendarDayDetail(
             }
         }
 
-        if (homework.isEmpty() && todos.isEmpty() && employmentEvents.isEmpty()) {
-            Text("当天暂无作业截止、自定义待办或就业活动。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (buckets.isEmpty && todos.isEmpty() && employmentEvents.isEmpty()) {
+            Text("当天暂无任务。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        if (homeworkStarts.isNotEmpty()) {
+            Text("今天开始的作业", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            homeworkStarts.forEach { item ->
+                InfoCard(
+                    title = item.title,
+                    subtitle = item.course,
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+                        KeyValue("开始", item.openedAt, Modifier.weight(1f))
+                        KeyValue("截止", item.dueAt, Modifier.weight(1f))
+                    }
+                    KeyValue("内容", item.contentExcerpt)
+                }
+            }
+        }
+
+        if (exams.isNotEmpty()) {
+            Text("今天的考试", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            exams.forEach { exam ->
+                InfoCard(
+                    title = exam.courseName,
+                    subtitle = exam.examMode,
+                ) {
+                    KeyValue("安排", exam.schedule)
+                    Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+                        KeyValue("状态", exam.status, Modifier.weight(1f))
+                        KeyValue("备注", exam.remark, Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
+        if (calendarItems.isNotEmpty()) {
+            Text("校历安排", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            calendarItems.forEach { item ->
+                InfoCard(
+                    title = item.note.orEmpty(),
+                    subtitle = item.week,
+                ) {
+                    KeyValue("日期", item.date)
+                }
+            }
         }
 
         if (homework.isNotEmpty()) {
@@ -2993,7 +3479,10 @@ private fun HomeworkAttachmentsSection(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     OutlinedButton(
                         enabled = busyKey == null && attachment.attachmentId.isNotBlank(),
                         onClick = { onPreview(attachment) },
@@ -3744,6 +4233,7 @@ private fun TimetableList(
     selectedCourses: List<CourseEntry>,
     onSelect: (List<CourseEntry>) -> Unit,
     onAddToHomeWidget: () -> Unit,
+    onExport: () -> Unit,
     onAddUserCourse: (TimetableDayColumn, TimetablePeriodSlot) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -3768,7 +4258,10 @@ private fun TimetableList(
                         }
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     AssistChip(onClick = {}, label = { Text("${entries.size} 门课程") })
                     if (data.days.isNotEmpty()) {
                         AssistChip(onClick = {}, label = { Text("${data.days.size} 天") })
@@ -3779,6 +4272,17 @@ private fun TimetableList(
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.AddToHomeScreen,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        },
+                    )
+                    AssistChip(
+                        onClick = onExport,
+                        label = { Text("导出") },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Filled.FileDownload,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp),
                             )
@@ -3805,6 +4309,44 @@ private fun TimetableList(
             )
         }
     }
+}
+
+@Composable
+private fun TimetableExportDialog(
+    onDismiss: () -> Unit,
+    onExport: (ScheduleExportFormat) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("导出课表") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("选择导出格式。")
+                OutlinedButton(
+                    onClick = { onExport(ScheduleExportFormat.Pdf) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("导出 PDF")
+                }
+                OutlinedButton(
+                    onClick = { onExport(ScheduleExportFormat.Png) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("导出 PNG")
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 @Composable
@@ -4595,6 +5137,7 @@ private fun CourseDetailPanel(
     homeworkStates: Map<String, LoadState<List<HomeworkItem>>>,
     resourceStates: Map<String, LoadState<ModuleEnvelope<CourseResourcesData>>>,
     courseResourceRepository: CourseResourceRepository,
+    homeworkAttachmentRepository: HomeworkAttachmentRepository,
     onEditUserCourse: (CourseEntry) -> Unit,
     onDeleteUserCourse: (CourseEntry) -> Unit,
     modifier: Modifier = Modifier,
@@ -4606,6 +5149,9 @@ private fun CourseDetailPanel(
     var previewing by remember(panelKey) { mutableStateOf<String?>(null) }
     var previewTarget by remember(panelKey) { mutableStateOf<TimetableResourcePreviewTarget?>(null) }
     var downloadError by remember(panelKey) { mutableStateOf<String?>(null) }
+    var attachmentBusyKey by remember(panelKey) { mutableStateOf<String?>(null) }
+    var attachmentError by remember(panelKey) { mutableStateOf<String?>(null) }
+    var attachmentPreviewTarget by remember(panelKey) { mutableStateOf<HomeworkAttachmentPreviewTarget?>(null) }
 
     fun downloadResource(resource: CourseResourceItem, actionKey: String) {
         scope.launch {
@@ -4633,6 +5179,56 @@ private fun CourseDetailPanel(
                 .onFailure { downloadError = it.message ?: "预览失败" }
             previewing = null
         }
+    }
+
+    fun previewAttachment(item: HomeworkItem, attachment: HomeworkAttachment) {
+        val homeworkId = item.homeworkId ?: return
+        val busyKey = homeworkAttachmentActionKey("preview", attachment)
+        scope.launch {
+            attachmentBusyKey = busyKey
+            attachmentError = null
+            runCatching {
+                homeworkAttachmentRepository.preview(homeworkId, attachment.attachmentId, attachment.filename)
+            }.onSuccess { preview ->
+                attachmentPreviewTarget = HomeworkAttachmentPreviewTarget(item, attachment, preview)
+            }.onFailure { error ->
+                attachmentError = error.message ?: "预览附件失败"
+            }
+            attachmentBusyKey = null
+        }
+    }
+
+    fun downloadAttachment(item: HomeworkItem, attachment: HomeworkAttachment) {
+        val homeworkId = item.homeworkId ?: return
+        val busyKey = homeworkAttachmentActionKey("download", attachment)
+        scope.launch {
+            attachmentBusyKey = busyKey
+            attachmentError = null
+            runCatching {
+                homeworkAttachmentRepository.download(homeworkId, attachment.attachmentId, attachment.filename)
+            }.onSuccess { file ->
+                if (!openFile(context, file)) {
+                    attachmentError = "已下载，但未找到可打开该文件的应用"
+                }
+            }.onFailure { error ->
+                attachmentError = error.message ?: "下载附件失败"
+            }
+            attachmentBusyKey = null
+        }
+    }
+
+    attachmentPreviewTarget?.let { target ->
+        HomeworkAttachmentPreviewScreen(
+            target = target,
+            busyKey = attachmentBusyKey,
+            error = attachmentError,
+            onClose = {
+                attachmentPreviewTarget = null
+                attachmentError = null
+            },
+            onDownload = { downloadAttachment(target.homework, target.attachment) },
+        )
+        return
     }
 
     previewTarget?.let { target ->
@@ -4708,6 +5304,11 @@ private fun CourseDetailPanel(
             } else {
             item(key = "$entryKey-homework-divider") { HorizontalDivider() }
             item(key = "$entryKey-homework-title") { Text("作业", style = MaterialTheme.typography.titleMedium) }
+            if (!attachmentError.isNullOrBlank()) {
+                item(key = "$entryKey-attachment-error") {
+                    Text(attachmentError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                }
+            }
             when (val current = homeworkState) {
                 LoadState.Loading, is LoadState.Error -> item(key = "$entryKey-homework-state") { LoadingOrError(current) }
                 is LoadState.Data -> {
@@ -4723,6 +5324,12 @@ private fun CourseDetailPanel(
                                 KeyValue("截止", homework.dueAt)
                                 KeyValue("状态", homework.status)
                                 KeyValue("内容", homework.contentExcerpt)
+                                HomeworkAttachmentsSection(
+                                    attachments = homework.attachments,
+                                    busyKey = attachmentBusyKey,
+                                    onPreview = { previewAttachment(homework, it) },
+                                    onDownload = { downloadAttachment(homework, it) },
+                                )
                             }
                         }
                     }

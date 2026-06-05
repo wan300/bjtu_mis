@@ -101,6 +101,26 @@
       ]
     },
     {
+      slug: "teaching-assessment",
+      key: "teaching_assessment",
+      title: "评教",
+      subtitle: "待评课程、批量预览与确认提交",
+      category: "教学学习",
+      icon: "icon_teaching_assessment.png",
+      accent: "#d64b6b",
+      summary:
+        "评教模块接入 AA 教学支撑平台，实时读取待评课程，并在移动端提供课程选择、预填预览和确认提交流程。",
+      scenario:
+        "适合评教开放期间集中查看待评课程，在提交前逐门核对预填内容，减少在网页表单中反复切换的时间。",
+      abilities: [
+        "实时读取 AA 平台返回的待评、已评和不可评课程状态",
+        "支持选择一门或多门待评课程并进入批量预览",
+        "自动整理可填写题目和默认正向单选项",
+        "提交前展示课程和评价内容确认，不会静默提交",
+        "逐门提交并汇总成功、失败和需原系统处理的结果"
+      ]
+    },
+    {
       slug: "academic-progress",
       key: "academic_progress",
       title: "学业进度",

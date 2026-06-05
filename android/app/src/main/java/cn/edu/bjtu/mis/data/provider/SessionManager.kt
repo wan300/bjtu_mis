@@ -19,6 +19,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
+import java.io.IOException
 import java.net.URI
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -212,6 +213,14 @@ class SessionManager(
                 }
             } catch (error: SessionExpiredException) {
                 lastMessage = error.message.orEmpty()
+            } catch (error: IOException) {
+                lastMessage = error.message.orEmpty()
+                inlineLoginState = null
+                return AutoLoginResult(
+                    status = AutoLoginStatus.AutoFailed,
+                    message = lastMessage.ifBlank { "网络连接失败，请检查网络后重试。" },
+                    attempts = index + 1,
+                )
             }
         }
 

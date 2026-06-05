@@ -68,6 +68,7 @@ import cn.edu.bjtu.mis.ui.screens.CourseSelectionScreen
 import cn.edu.bjtu.mis.ui.screens.EmptyRoomsScreen
 import cn.edu.bjtu.mis.ui.screens.EmploymentConsultationScreen
 import cn.edu.bjtu.mis.ui.screens.ExamsScreen
+import cn.edu.bjtu.mis.ui.screens.HomeworkReminderSettingsScreen
 import cn.edu.bjtu.mis.ui.screens.HomeworkScreen
 import cn.edu.bjtu.mis.ui.screens.LoginScreen
 import cn.edu.bjtu.mis.ui.screens.MailScreen
@@ -96,11 +97,13 @@ private const val LegacyNativeAgentRoute = "agent"
 private const val RouteProfilePersonalInfo = "profile_personal_info"
 private const val RouteProfileTrainingInfo = "profile_training_info"
 private const val RouteProfileTheme = "profile_theme"
+private const val RouteProfileHomeworkReminder = "profile_homework_reminder"
 private val MainRoutes = setOf(RouteHome, RouteServices, ModuleKeys.OpenWebUiAgent, ModuleKeys.Profile)
 private val ProfileDetailRouteTitles = mapOf(
     RouteProfilePersonalInfo to "人员信息",
     RouteProfileTrainingInfo to "培养信息",
     RouteProfileTheme to "主题",
+    RouteProfileHomeworkReminder to "作业提醒",
 )
 
 private data class BottomTab(
@@ -155,6 +158,9 @@ fun BjtuMisApp(
         }
     }
 
+    fun autoLoginFailureMessage(error: Throwable): String =
+        error.message?.takeIf { it.isNotBlank() } ?: "自动登录失败，请检查网络后重试。"
+
     fun navigateMain(route: String) {
         val target = normalizeRoute(route)
         current = target
@@ -191,21 +197,29 @@ fun BjtuMisApp(
                 ready = true
             }
 
-            val session = container.sessionRepository.recoverSession(SessionValidationPolicy.UseRecentOrValidate)
-            val isReady = session.status == AutoLoginStatus.Ready
-            val autoLoggedIn = isReady && session.attempts > 0
-            sessionDetail = session.session?.detail ?: session.message.orEmpty().ifBlank { sessionDetail }
-            if (isReady) {
-                showAutoLoginFailedDialog = false
-            } else if (session.status == AutoLoginStatus.AutoFailed && session.attempts > 0) {
-                autoLoginFailedMessage = session.message ?: "自动重新登录失败。"
+            try {
+                val session = container.sessionRepository.recoverSession(SessionValidationPolicy.UseRecentOrValidate)
+                val isReady = session.status == AutoLoginStatus.Ready
+                val autoLoggedIn = isReady && session.attempts > 0
+                sessionDetail = session.session?.detail ?: session.message.orEmpty().ifBlank { sessionDetail }
+                if (isReady) {
+                    showAutoLoginFailedDialog = false
+                } else if (session.status == AutoLoginStatus.AutoFailed && session.attempts > 0) {
+                    autoLoginFailedMessage = session.message ?: "自动重新登录失败。"
+                    showAutoLoginFailedDialog = true
+                }
+                if (isReady) {
+                    ready = true
+                    if (autoLoggedIn) startBackgroundQuickSync()
+                } else if (!hadCachedSession) {
+                    ready = false
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                autoLoginFailedMessage = autoLoginFailureMessage(error)
                 showAutoLoginFailedDialog = true
-            }
-            if (isReady) {
-                ready = true
-                if (autoLoggedIn) startBackgroundQuickSync()
-            } else if (!hadCachedSession) {
-                ready = false
+                if (!hadCachedSession) ready = false
             }
         }
     }
@@ -213,17 +227,25 @@ fun BjtuMisApp(
     fun continueAutoLoginRetry() {
         scope.launch {
             autoLoginRetrying = true
-            val result = container.sessionRepository.recoverSession(SessionValidationPolicy.Fresh)
-            if (result.status == AutoLoginStatus.Ready) {
-                ready = true
-                sessionDetail = result.session?.detail ?: result.message.orEmpty()
-                showAutoLoginFailedDialog = false
-                startBackgroundQuickSync()
-            } else {
-                autoLoginFailedMessage = result.message ?: "自动重新登录失败。"
+            try {
+                val result = container.sessionRepository.recoverSession(SessionValidationPolicy.Fresh)
+                if (result.status == AutoLoginStatus.Ready) {
+                    ready = true
+                    sessionDetail = result.session?.detail ?: result.message.orEmpty()
+                    showAutoLoginFailedDialog = false
+                    startBackgroundQuickSync()
+                } else {
+                    autoLoginFailedMessage = result.message ?: "自动重新登录失败。"
+                    showAutoLoginFailedDialog = true
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                autoLoginFailedMessage = autoLoginFailureMessage(error)
                 showAutoLoginFailedDialog = true
+            } finally {
+                autoLoginRetrying = false
             }
-            autoLoginRetrying = false
         }
     }
 
@@ -459,6 +481,7 @@ fun BjtuMisApp(
                                 onOpenPersonalInfo = { navigateProfileDetail(RouteProfilePersonalInfo) },
                                 onOpenTrainingInfo = { navigateProfileDetail(RouteProfileTrainingInfo) },
                                 onOpenTheme = { navigateProfileDetail(RouteProfileTheme) },
+                                onOpenHomeworkReminder = { navigateProfileDetail(RouteProfileHomeworkReminder) },
                                 onNavigate = ::navigateModule,
                             )
                         }
@@ -475,6 +498,9 @@ fun BjtuMisApp(
                                     scope.launch { container.themeStore.save(nextTheme) }
                                 },
                             )
+                        }
+                        RouteProfileHomeworkReminder -> MainScreenPadding {
+                            HomeworkReminderSettingsScreen(container.homeworkReminderPreferenceStore)
                         }
                         else -> MainScreenPadding {
                             ModuleRoute(
@@ -524,7 +550,11 @@ private fun ModuleRoute(
     when (route) {
         ModuleKeys.AcademicProgress -> AcademicProgressScreen(container.moduleRepository)
         ModuleKeys.HistoryScores -> ScoresScreen(container.moduleRepository, history = true)
-        ModuleKeys.Timetable -> TimetableScreen(container.moduleRepository, container.courseResourceRepository)
+        ModuleKeys.Timetable -> TimetableScreen(
+            container.moduleRepository,
+            container.courseResourceRepository,
+            container.homeworkAttachmentRepository,
+        )
         ModuleKeys.CourseSelection -> CourseSelectionScreen(
             repository = container.courseSelectionRepository,
             runner = container.courseSelectionRunner,
