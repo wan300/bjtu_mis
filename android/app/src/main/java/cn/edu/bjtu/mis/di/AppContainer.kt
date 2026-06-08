@@ -20,6 +20,8 @@ import cn.edu.bjtu.mis.data.db.MIGRATION_3_4
 import cn.edu.bjtu.mis.data.db.MIGRATION_4_5
 import cn.edu.bjtu.mis.data.db.MIGRATION_5_6
 import cn.edu.bjtu.mis.data.db.MIGRATION_6_7
+import cn.edu.bjtu.mis.data.db.MIGRATION_7_8
+import cn.edu.bjtu.mis.data.db.MIGRATION_8_9
 import cn.edu.bjtu.mis.data.employment.EmploymentCalendarSyncStore
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderCoordinator
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderNotifier
@@ -43,6 +45,10 @@ import cn.edu.bjtu.mis.data.repository.SyncRepository
 import cn.edu.bjtu.mis.data.repository.ZhixingRepository
 import cn.edu.bjtu.mis.data.security.SecureCookieStore
 import cn.edu.bjtu.mis.data.security.SecureCredentialStore
+import cn.edu.bjtu.mis.data.thirdparty.AssetThirdPartyBundledServiceProvider
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceApiRegistry
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceInstaller
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceRepository
 import cn.edu.bjtu.mis.data.update.AppUpdateChecker
 import cn.edu.bjtu.mis.data.update.AppUpdatePreferenceStore
 import cn.edu.bjtu.mis.data.update.installedVersionName
@@ -50,12 +56,22 @@ import cn.edu.bjtu.mis.ui.theme.AppThemeStore
 
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
+    private val thirdPartyServicesRoot = java.io.File(appContext.filesDir, "third-party-services")
     val database: AppDatabase = PerfTrace.measure("AppContainer.database") {
         Room.databaseBuilder(
             appContext,
             AppDatabase::class.java,
             "bjtu_mis.sqlite3",
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build()
+        ).addMigrations(
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+            MIGRATION_6_7,
+            MIGRATION_7_8,
+            MIGRATION_8_9,
+        ).build()
     }
 
     val cookieJar = AppCookieJar()
@@ -164,6 +180,35 @@ class AppContainer(context: Context) {
                     CodeTool(agentRuntimeManager).tools() +
                     MailAgentTool(mailRepository).tools() +
                     PackageTool(agentWorkspaceManager).tools()
+            )
+        }
+    }
+    val thirdPartyServiceInstaller: ThirdPartyServiceInstaller by lazy {
+        PerfTrace.measure("AppContainer.thirdPartyServiceInstaller") {
+            ThirdPartyServiceInstaller(
+                client = httpClient,
+                servicesRoot = thirdPartyServicesRoot,
+            )
+        }
+    }
+    val thirdPartyServiceRepository: ThirdPartyServiceRepository by lazy {
+        PerfTrace.measure("AppContainer.thirdPartyServiceRepository") {
+            ThirdPartyServiceRepository(
+                dao = database.thirdPartyServiceDao(),
+                installer = thirdPartyServiceInstaller,
+                bundledProvider = AssetThirdPartyBundledServiceProvider(
+                    context = appContext,
+                    installer = thirdPartyServiceInstaller,
+                    servicesRoot = thirdPartyServicesRoot,
+                ),
+            )
+        }
+    }
+    val thirdPartyServiceApiRegistry: ThirdPartyServiceApiRegistry by lazy {
+        PerfTrace.measure("AppContainer.thirdPartyServiceApiRegistry") {
+            ThirdPartyServiceApiRegistry(
+                moduleRepository = moduleRepository,
+                mailRepository = mailRepository,
             )
         }
     }

@@ -24,6 +24,7 @@ desktop.ini
 # Automation captures and runtime state
 /captures/
 /runtime/
+/.playwright-mcp/
 .github/java-upgrade/
 
 # Gradle / Android build outputs
@@ -45,6 +46,7 @@ android/app/release/
 android/app/src/main/assets/capacitor.config.json
 android/app/src/main/assets/capacitor.plugins.json
 android/app/src/main/assets/public/
+android/app/src/main/assets/third-party-services/
 
 # Embedded Open WebUI source is tracked; generated frontend state is not
 android/open-webui/node_modules/

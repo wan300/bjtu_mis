@@ -17,6 +17,10 @@ val packagedAbis = providers.gradleProperty("targetAbis")
 val openWebUiDir = rootProject.layout.projectDirectory.dir("open-webui")
 val openWebUiBuildDir = openWebUiDir.dir("build")
 val openWebUiAssetsDir = layout.projectDirectory.dir("src/main/assets/public")
+val jijiangPackageDir = rootProject.layout.projectDirectory.dir("../jijiang")
+val jijiangFrontendDir = jijiangPackageDir.dir("12group-frontend")
+val jijiangDistDir = jijiangPackageDir.dir("dist")
+val bundledThirdPartyServicesAssetsDir = layout.projectDirectory.dir("src/main/assets/third-party-services")
 val npmExecutable = if (System.getProperty("os.name").lowercase().contains("windows")) {
     "npm.cmd"
 } else {
@@ -83,6 +87,61 @@ val syncOpenWebUiAssets by tasks.registering(Copy::class) {
         listOf("cordova.js", "cordova_plugins.js").forEach { shim ->
             outputDir.resolve(shim).writeBytes(ByteArray(0))
         }
+    }
+}
+
+val npmCiJijiang by tasks.registering(Exec::class) {
+    group = "thirdparty"
+    description = "Install jijiang frontend dependencies."
+    workingDir = jijiangFrontendDir.asFile
+    commandLine(npmExecutable, "ci")
+    onlyIf {
+        !jijiangFrontendDir.dir("node_modules").asFile.isDirectory
+    }
+
+    inputs.files(
+        jijiangFrontendDir.file("package.json"),
+        jijiangFrontendDir.file("package-lock.json"),
+    )
+    outputs.dir(jijiangFrontendDir.dir("node_modules"))
+}
+
+val buildJijiangService by tasks.registering(Exec::class) {
+    group = "thirdparty"
+    description = "Build jijiang as a bundled BJTU third-party service."
+    dependsOn(npmCiJijiang)
+    workingDir = jijiangFrontendDir.asFile
+    commandLine(npmExecutable, "run", "build:bjtu-service")
+
+    inputs.files(
+        jijiangFrontendDir.file("package.json"),
+        jijiangFrontendDir.file("package-lock.json"),
+        jijiangFrontendDir.file("vite.config.ts"),
+        jijiangFrontendDir.file("tsconfig.json"),
+        jijiangFrontendDir.file("src/pages.json"),
+        jijiangPackageDir.file("bjtu-service.json"),
+    )
+    inputs.dir(jijiangFrontendDir.dir("src"))
+    outputs.dir(jijiangFrontendDir.dir("dist"))
+    outputs.dir(jijiangDistDir)
+}
+
+val syncBundledThirdPartyServices by tasks.registering(Copy::class) {
+    group = "thirdparty"
+    description = "Sync bundled third-party service assets into the Android APK."
+    dependsOn(buildJijiangService)
+
+    val jijiangAssetDir = bundledThirdPartyServicesAssetsDir.dir("com.jijiang.campus-service")
+
+    from(jijiangPackageDir.file("bjtu-service.json"))
+    from(jijiangDistDir) {
+        into("dist")
+        exclude("**/*.map")
+    }
+    into(jijiangAssetDir)
+
+    doFirst {
+        delete(jijiangAssetDir.asFile)
     }
 }
 
@@ -182,4 +241,5 @@ dependencies {
 
 tasks.named("preBuild") {
     dependsOn(syncOpenWebUiAssets)
+    dependsOn(syncBundledThirdPartyServices)
 }

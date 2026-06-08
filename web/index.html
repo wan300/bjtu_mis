@@ -11,14 +11,14 @@
       name="description"
       content="BJTU MIS Android 是面向北京交通大学学生的校园学习服务 App，整合课表、成绩、考务、作业、课程资源、邮箱和内置 Open WebUI Agent。"
     >
-    <link rel="icon" type="image/png" href="assets/icons/icon_home.png?v=2026060601">
-    <link rel="stylesheet" href="assets/css/styles.css?v=2026060601">
+    <link rel="icon" type="image/png" href="assets/icons/icon_home.png?v=2026060603">
+    <link rel="stylesheet" href="assets/css/styles.css?v=2026060603">
   </head>
   <body data-page="home">
     <header class="site-header">
       <div class="site-header__inner">
         <a class="brand" href="index.html" aria-label="BJTU MIS Android 主页">
-          <img src="assets/icons/icon_home.png?v=2026060601" alt="" width="40" height="40">
+          <img src="assets/icons/icon_home.png?v=2026060603" alt="" width="40" height="40">
           <span>BJTU MIS Android</span>
         </a>
         <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false" data-nav-toggle>
@@ -29,6 +29,7 @@
         <nav class="site-nav" aria-label="主导航">
           <a href="#features">特色</a>
           <a href="#modules">模块</a>
+          <a href="developers.html">开发者文档</a>
           <a href="#download">下载</a>
           <a data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases/latest" target="_blank" rel="noreferrer">GitHub</a>
         </nav>
@@ -56,7 +57,7 @@
             </div>
           </div>
         </div>
-        <img class="hero__rail" src="assets/img/rail-characters.png?v=2026060601" alt="" width="764" height="316">
+        <img class="hero__rail" src="assets/img/rail-characters.png?v=2026060603" alt="" width="764" height="316">
         <div class="rail-bed" aria-hidden="true"></div>
       </section>
 
@@ -105,6 +106,30 @@
         <div class="category-rails" data-category-rails></div>
       </section>
 
+      <section class="content-section" id="developers">
+        <div class="developer-panel reveal">
+          <div>
+            <p class="eyebrow">Developer platform</p>
+            <h2>第三方插件开发</h2>
+            <p>
+              第三方插件是安装在应用内的静态 Web 服务，可以在用户授权后读取课表、成绩、考务、作业、课程资源和邮箱等受控数据，也可以通过 <code>allowed_origins</code> 与 <code>app.http_request</code> 访问声明过的远端 API、支付跳转或回调来源。开发者文档提供 manifest、权限、JavaScript API、预检 digest、lint 工具和发布检查清单。
+            </p>
+            <div class="developer-panel__actions">
+              <a class="btn btn--primary" href="developers.html">阅读开发者文档</a>
+              <a class="btn btn--ghost" href="assets/schemas/third-party-service-manifest.schema.json" download>下载 manifest schema</a>
+            </div>
+          </div>
+          <ul class="developer-panel__list" aria-label="第三方插件能力摘要">
+            <li>公开 GitHub 仓库导入</li>
+            <li>纯静态 Web 包运行</li>
+            <li>manifest 权限声明</li>
+            <li>受控 HTTP 请求</li>
+            <li>导入预检与 digest</li>
+            <li>WebView 桥接 API</li>
+          </ul>
+        </div>
+      </section>
+
       <section class="content-section download-section" id="download">
         <div class="download-panel reveal">
           <div>
@@ -151,7 +176,7 @@
       </div>
     </footer>
 
-    <script src="assets/js/modules.js?v=2026060601"></script>
-    <script src="assets/js/site.js?v=2026060601"></script>
+    <script src="assets/js/modules.js?v=2026060603"></script>
+    <script src="assets/js/site.js?v=2026060603"></script>
   </body>
 </html>

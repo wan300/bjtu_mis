@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "bjtu.example.profile_timetable",
+  "name": "Profile Timetable Example",
+  "description": "Demonstrates profile and timetable reads through the BJTU MIS bridge.",
+  "version": "1.0.0",
+  "entrypoint": "index.html",
+  "icon": "icon.svg",
+  "author": "BJTU MIS",
+  "permissions": {
+    "required": ["identity.profile.read"],
+    "optional": ["academic.timetable.read"]
+  },
+  "allowed_origins": []
+}

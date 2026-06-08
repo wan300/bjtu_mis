@@ -1,0 +1,77 @@
+/* ═══════════════════════════════════════════════════════════════════
+   技匠 · 新孟菲斯玻璃拟态设计令牌 (Neo-Memphis Glassmorphism)
+   全局单一真理源 —— 所有颜色、阴影、圆角、边框必须引用此处变量
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── 品牌冰淇淋拼色系统 ── */
+  --color-primary:         #5A9AFC;   /* 冰川蓝 — 品牌主色、导航、认证、官方徽章 */
+  --color-primary-soft:    rgba(90, 154, 252, 0.10);
+  --color-accent-1:        #74D6C1;   /* 薄荷绿 — 价格高亮、成功、已接单、已完成 */
+  --color-accent-2:        #F9E58A;   /* 奶油黄 — 学业分类、待处理/待接单、警告条 */
+  --color-accent-3:        #F78DA7;   /* 珊瑚粉 — 求职分类、退款/维权、红点提示 */
+  --color-dark:            #212529;   /* 墨黑色 — 全局外边框(Stroke) + 主标题文字 */
+
+  /* ── 背景色阶 ── */
+  --color-bg-main:         #FBFBFF;   /* 极光白 — 全局页面背景，极微冷调 */
+  --color-bg-soft:         #F0F4FA;
+  --color-card:            #FFFFFF;
+  --color-card-muted:      #FAFBFD;
+  --color-glass-bg:        rgba(255, 255, 255, 0.65);
+
+  /* ── 文字色阶（保留原有层级） ── */
+  --color-text:            #111827;
+  --color-text-secondary:  #374151;
+  --color-text-muted:      #6B7280;
+  --color-text-faint:      #9CA3AF;
+
+  /* ── 语义色（映射到拼色系统） ── */
+  --color-success:         var(--color-accent-1);
+  --color-warning:         #946018;                /* 警告文字色 */
+  --color-warning-bg:      var(--color-accent-2);  /* 警告背景色 */
+  --color-danger:          var(--color-accent-3);
+  --color-price:           #0F766E;  /* 深碧绿 — 高对比度价格（白底可见） */
+
+  /* ── 标签色（保留兼容） ── */
+  --color-tag-positive-bg:    rgba(90, 154, 252, 0.12);
+  --color-tag-positive-text:  #2F5BFF;
+  --color-tag-negative-bg:    rgba(247, 141, 167, 0.12);
+  --color-tag-negative-text:  #D94A5E;
+  --color-tag-neutral-bg:     #F1F4F8;
+  --color-tag-neutral-text:   #596579;
+  --color-tag-success-bg:     rgba(116, 214, 193, 0.15);
+  --color-tag-success-text:   #147B61;
+  --color-tag-warning-bg:     rgba(249, 229, 138, 0.25);
+  --color-tag-warning-text:   #946018;
+  --color-error-bg:           rgba(247, 141, 167, 0.12);
+  --color-error-text:         #B42336;
+
+  /* ── 孟菲斯硬阴影（无模糊、有位移） ── */
+  --shadow-sm:  4rpx 4rpx 0px 0px var(--color-dark);
+  --shadow-md:  6rpx 6rpx 0px 0px var(--color-dark);
+  --shadow-lg:  8rpx 8rpx 0px 0px var(--color-dark);
+
+  /* ── 圆角曲率 ── */
+  --radius-sm:  8rpx;    /* 标签/徽章/小组件 */
+  --radius-md:  16rpx;   /* 普通按钮/输入框/表单卡片 */
+  --radius-lg:  24rpx;   /* 超大容器/大卡片 */
+  --radius-xl:  32rpx;
+  --radius-pill: 999rpx; /* 胶囊型（少数场景保留） */
+
+  /* ── 全局边框 ── */
+  --stroke-width: 2px;
+  --stroke-color: var(--color-dark);
+  --stroke: var(--stroke-width) solid var(--stroke-color);
+
+  /* ── 玻璃拟态 ── */
+  --glass-blur:     12px;
+  --glass-border:   1.5px solid rgba(255, 255, 255, 0.4);
+
+  /* ── 交互 ── */
+  --pressed-y:      2rpx;
+  --disabled-opacity: 0.48;
+
+  /* ── 骨架屏 ── */
+  --skeleton-base:      #E9EEF6;
+  --skeleton-highlight: #F7FAFF;
+}

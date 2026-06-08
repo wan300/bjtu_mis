@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "bjtu.template.basic",
+  "name": "Basic Template",
+  "description": "A minimal BJTU MIS third-party service template.",
+  "version": "1.0.0",
+  "entrypoint": "index.html",
+  "icon": "icon.svg",
+  "author": "BJTU MIS",
+  "permissions": {
+    "required": [],
+    "optional": []
+  },
+  "allowed_origins": []
+}

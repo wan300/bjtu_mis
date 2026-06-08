@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bjtu-mis.local/schemas/third-party-service-manifest.schema.json",
+  "title": "BJTU MIS Third Party Service Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "description",
+    "version",
+    "entrypoint",
+    "icon",
+    "author",
+    "permissions",
+    "allowed_origins"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]{2,63}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 400
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "entrypoint": {
+      "$ref": "#/$defs/asset_path"
+    },
+    "icon": {
+      "$ref": "#/$defs/asset_path"
+    },
+    "author": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "optional"],
+      "properties": {
+        "required": {
+          "$ref": "#/$defs/permission_array"
+        },
+        "optional": {
+          "$ref": "#/$defs/permission_array"
+        }
+      }
+    },
+    "allowed_origins": {
+      "type": "array",
+      "description": "Trusted HTTP/HTTPS origins that may be loaded as executable plugin pages or used for network requests.",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^https?://[A-Za-z0-9.-]+(:[0-9]+)?/?$"
+      }
+    }
+  },
+  "$defs": {
+    "asset_path": {
+      "type": "string",
+      "minLength": 1,
+      "not": {
+        "anyOf": [
+          { "pattern": "^/" },
+          { "pattern": "\\.\\." },
+          { "pattern": "\\\\" },
+          { "pattern": ":" }
+        ]
+      }
+    },
+    "permission_array": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "identity.profile.read",
+          "academic.timetable.read",
+          "academic.user_courses.write",
+          "academic.scores.read",
+          "academic.history_scores.read",
+          "academic.exams.read",
+          "academic.calendar.read",
+          "academic.progress.read",
+          "academic.homework.read",
+          "academic.homework.submit",
+          "academic.course_resources.read",
+          "mail.folders.read",
+          "mail.messages.read",
+          "mail.message_detail.read",
+          "mail.send"
+        ]
+      }
+    }
+  }
+}

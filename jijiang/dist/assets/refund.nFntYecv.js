@@ -1,0 +1,1 @@
+import{N as r}from"./index-Bk6wQs2T.js";function t(t){return r({url:"/api/refund/submit",method:"POST",data:t,idempotent:!0})}function e(t){return r({url:"/api/refund/detail",params:{refundId:t}})}export{e as g,t as s};

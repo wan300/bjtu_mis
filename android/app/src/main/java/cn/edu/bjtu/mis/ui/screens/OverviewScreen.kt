@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -65,6 +67,10 @@ import cn.edu.bjtu.mis.data.repository.OverviewDashboard
 import cn.edu.bjtu.mis.data.repository.OverviewRepository
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
 import cn.edu.bjtu.mis.data.repository.SyncRepository
+import cn.edu.bjtu.mis.data.thirdparty.THIRD_PARTY_SERVICES_ROUTE
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyService
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceRepository
+import cn.edu.bjtu.mis.data.thirdparty.thirdPartyServiceRoute
 import cn.edu.bjtu.mis.model.CalendarData
 import cn.edu.bjtu.mis.model.CalendarItem
 import cn.edu.bjtu.mis.model.HomeworkItem
@@ -304,9 +310,17 @@ fun OverviewScreen(
 @Composable
 fun ServicesScreen(
     moduleRepository: ModuleRepository,
+    thirdPartyServiceRepository: ThirdPartyServiceRepository,
     onNavigate: (String) -> Unit,
 ) {
+    var thirdPartyServices by remember { mutableStateOf<List<ThirdPartyService>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        thirdPartyServices = runCatching { thirdPartyServiceRepository.listServices() }.getOrDefault(emptyList())
+    }
     moduleRepository.hashCode()
+    val groups = remember(thirdPartyServices) {
+        ServiceGroups + thirdPartyServiceGroup(thirdPartyServices)
+    }
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 16.dp),
@@ -314,13 +328,30 @@ fun ServicesScreen(
         item {
             SectionTitle(title = "服务", subtitle = "按使用场景聚合当前已实现模块")
         }
-        items(ServiceGroups, key = { it.title }) { group ->
+        items(groups, key = { it.title }) { group ->
             InfoCard(title = group.title, subtitle = group.subtitle) {
                 ServiceGrid(entries = group.entries, onNavigate = onNavigate)
             }
         }
     }
 }
+
+private fun thirdPartyServiceGroup(services: List<ThirdPartyService>): ServiceGroup =
+    ServiceGroup(
+        title = "第三方服务",
+        subtitle = "从公开 GitHub 仓库导入并在应用内打开",
+        entries = listOf(
+            ServiceEntry(THIRD_PARTY_SERVICES_ROUTE, "导入服务", "GitHub 仓库", Icons.Filled.Add, Color(0xFF0E9D9D)),
+        ) + services.map { service ->
+            ServiceEntry(
+                route = thirdPartyServiceRoute(service.serviceId),
+                label = service.manifest.name,
+                description = if (service.needsReview || !service.enabled) "待授权" else service.manifest.version,
+                icon = Icons.Filled.Psychology,
+                tint = Color(0xFF5A6FE8),
+            )
+        } + ServiceEntry(THIRD_PARTY_SERVICES_ROUTE, "服务管理", "权限与更新", Icons.Filled.Security, Color(0xFF7C58C2)),
+    )
 
 private fun dashboardActions(): List<DashboardAction> = listOf(
     DashboardAction("作业", ModuleKeys.Homework, Icons.Filled.Assignment, Color(0xFF2AA876), R.drawable.icon_homework),

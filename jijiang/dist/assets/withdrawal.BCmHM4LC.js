@@ -1,0 +1,1 @@
+import{N as a}from"./index-Bk6wQs2T.js";function r(){return a({url:"/api/withdrawals/check"})}function t(r){return a({url:"/api/withdrawals/apply",method:"POST",data:r})}function i(r){return a({url:"/api/withdrawals",params:r})}export{t as a,r as c,i as l};

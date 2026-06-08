@@ -5,7 +5,7 @@
   const fallbackTag = "v1.2.1";
   const fallbackSizeText = "--";
   const releaseRefreshInterval = 5 * 60 * 1000;
-  const imageAssetQuery = "?v=2026060601";
+  const imageAssetQuery = "?v=2026060603";
 
   const moduleData = window.BJTU_MODULES || [];
   const isModulePage = document.body.dataset.page === "module";

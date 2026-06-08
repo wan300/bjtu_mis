@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "com.jijiang.campus-service",
+  "name": "技匠",
+  "description": "高校技能交易与知识共享服务",
+  "version": "1.0.0",
+  "entrypoint": "index.html",
+  "icon": "static/logo.png",
+  "author": "jijiang",
+  "permissions": {
+    "required": [
+      "identity.profile.read"
+    ],
+    "optional": []
+  },
+  "allowed_origins": [
+    "http://47.95.238.140:8080",
+    "https://api.jijiang.com",
+    "https://pay.jijiang.com",
+    "https://api.xunhupay.com",
+    "https://jijiang-1325125602.cos.ap-beijing.myqcloud.com"
+  ]
+}

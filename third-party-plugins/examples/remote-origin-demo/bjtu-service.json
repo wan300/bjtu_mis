@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "bjtu.example.remote_origin",
+  "name": "Remote Origin Demo",
+  "description": "Shows how trusted allowed origins can be loaded as plugin pages or iframes.",
+  "version": "1.0.0",
+  "entrypoint": "index.html",
+  "icon": "icon.svg",
+  "author": "BJTU MIS",
+  "permissions": {
+    "required": [],
+    "optional": ["identity.profile.read"]
+  },
+  "allowed_origins": ["https://example.com"]
+}

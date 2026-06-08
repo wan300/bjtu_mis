@@ -55,6 +55,8 @@ import androidx.compose.ui.zIndex
 import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.data.provider.SessionValidationPolicy
 import cn.edu.bjtu.mis.data.sync.SessionKeepAliveForegroundService
+import cn.edu.bjtu.mis.data.thirdparty.THIRD_PARTY_SERVICES_ROUTE
+import cn.edu.bjtu.mis.data.thirdparty.thirdPartyServiceIdFromRoute
 import cn.edu.bjtu.mis.data.update.AppUpdateInfo
 import cn.edu.bjtu.mis.di.AppContainer
 import cn.edu.bjtu.mis.model.AutoLoginStatus
@@ -81,6 +83,8 @@ import cn.edu.bjtu.mis.ui.screens.ProfileTrainingInfoScreen
 import cn.edu.bjtu.mis.ui.screens.ScoresScreen
 import cn.edu.bjtu.mis.ui.screens.ServicesScreen
 import cn.edu.bjtu.mis.ui.screens.TeachingAssessmentScreen
+import cn.edu.bjtu.mis.ui.screens.ThirdPartyServiceRoute
+import cn.edu.bjtu.mis.ui.screens.ThirdPartyServicesScreen
 import cn.edu.bjtu.mis.ui.screens.TimetableScreen
 import cn.edu.bjtu.mis.ui.screens.ZhixingScreen
 import cn.edu.bjtu.mis.ui.screens.navigationTargets
@@ -151,6 +155,7 @@ fun BjtuMisApp(
     var hasOpenedOpenWebUiAgent by remember { mutableStateOf(false) }
     var updateCheckStarted by remember { mutableStateOf(false) }
     var pendingUpdate by remember { mutableStateOf<AppUpdateInfo?>(null) }
+    var thirdPartyServiceTitle by remember { mutableStateOf<String?>(null) }
 
     fun startBackgroundQuickSync() {
         scope.launch {
@@ -284,6 +289,19 @@ fun BjtuMisApp(
     LaunchedEffect(current) {
         if (current == ModuleKeys.OpenWebUiAgent) {
             hasOpenedOpenWebUiAgent = true
+        }
+    }
+    LaunchedEffect(current) {
+        val serviceId = thirdPartyServiceIdFromRoute(current)
+        if (serviceId == null) {
+            thirdPartyServiceTitle = null
+        } else {
+            thirdPartyServiceTitle = null
+            thirdPartyServiceTitle = runCatching {
+                container.thirdPartyServiceRepository.getService(serviceId)?.manifest?.name
+            }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() }
         }
     }
     LaunchedEffect(requestedRoute, ready) {
@@ -422,6 +440,14 @@ fun BjtuMisApp(
                     when {
                         current == RouteServices -> MainTitleBar("服务")
                         current == ModuleKeys.Profile -> MainTitleBar("我的")
+                        current == THIRD_PARTY_SERVICES_ROUTE -> DetailTitleBar(
+                            title = "第三方服务",
+                            onBack = { current = RouteServices },
+                        )
+                        thirdPartyServiceIdFromRoute(current) != null -> DetailTitleBar(
+                            title = thirdPartyServiceTitle ?: "第三方服务",
+                            onBack = { current = RouteServices },
+                        )
                         current in ProfileDetailRouteTitles -> DetailTitleBar(
                             title = ProfileDetailRouteTitles.getValue(current),
                             onBack = {
@@ -463,7 +489,12 @@ fun BjtuMisApp(
                         )
                         RouteServices -> ServicesScreen(
                             moduleRepository = container.moduleRepository,
+                            thirdPartyServiceRepository = container.thirdPartyServiceRepository,
                             onNavigate = ::navigateModule,
+                        )
+                        THIRD_PARTY_SERVICES_ROUTE -> ThirdPartyServicesScreen(
+                            repository = container.thirdPartyServiceRepository,
+                            onOpenService = ::navigateModule,
                         )
                         ModuleKeys.OpenWebUiAgent -> Unit
                         ModuleKeys.Profile -> MainScreenPadding {
@@ -502,12 +533,24 @@ fun BjtuMisApp(
                         RouteProfileHomeworkReminder -> MainScreenPadding {
                             HomeworkReminderSettingsScreen(container.homeworkReminderPreferenceStore)
                         }
-                        else -> MainScreenPadding {
-                            ModuleRoute(
-                                route = current,
-                                container = container,
-                                onNavigate = ::navigateModule,
-                            )
+                        else -> {
+                            val thirdPartyServiceId = thirdPartyServiceIdFromRoute(current)
+                            if (thirdPartyServiceId != null) {
+                                ThirdPartyServiceRoute(
+                                    serviceId = thirdPartyServiceId,
+                                    repository = container.thirdPartyServiceRepository,
+                                    apiRegistry = container.thirdPartyServiceApiRegistry,
+                                    onBackToServices = { current = THIRD_PARTY_SERVICES_ROUTE },
+                                )
+                            } else {
+                                MainScreenPadding {
+                                    ModuleRoute(
+                                        route = current,
+                                        container = container,
+                                        onNavigate = ::navigateModule,
+                                    )
+                                }
+                            }
                         }
                     }
                     if (keepOpenWebUiAgent) {

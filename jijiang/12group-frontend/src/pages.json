@@ -1,0 +1,59 @@
+{
+  "pages": [
+    { "path": "pages/tabbar/home/index", "style": { "navigationBarTitleText": "技匠", "navigationStyle": "custom" } },
+    { "path": "pages/tabbar/discover/index", "style": { "navigationBarTitleText": "发现", "navigationStyle": "custom" } },
+    { "path": "pages/tabbar/message/index", "style": { "navigationBarTitleText": "消息", "navigationStyle": "custom" } },
+    { "path": "pages/tabbar/mine/index", "style": { "navigationBarTitleText": "我的", "navigationStyle": "custom" } },
+    { "path": "pages/tabbar/seller-desk/index", "style": { "navigationBarTitleText": "工作台", "navigationStyle": "custom" } },
+    { "path": "pages/tabbar/seller-order/index", "style": { "navigationBarTitleText": "订单管理", "navigationStyle": "custom" } },
+    { "path": "pages/tabbar/seller-service/index", "style": { "navigationBarTitleText": "服务管理", "navigationStyle": "custom" } },
+    { "path": "pages/login/index", "style": { "navigationBarTitleText": "登录", "navigationStyle": "custom" } },
+    { "path": "pages/service/search", "style": { "navigationBarTitleText": "搜索服务" } },
+    { "path": "pages/service/detail", "style": { "navigationBarTitleText": "服务详情" } },
+    { "path": "pages/service/publish", "style": { "navigationBarTitleText": "发布服务" } },
+    { "path": "pages/demand/list", "style": { "navigationBarTitleText": "悬赏需求大厅" } },
+    { "path": "pages/demand/detail", "style": { "navigationBarTitleText": "需求详情" } },
+    { "path": "pages/demand/publish", "style": { "navigationBarTitleText": "发布需求" } },
+    { "path": "pages/notification/index", "style": { "navigationBarTitleText": "通知中心" } },
+    { "path": "pages/order/list", "style": { "navigationBarTitleText": "订单列表" } },
+    { "path": "pages/order/detail", "style": { "navigationBarTitleText": "订单详情" } },
+    { "path": "pages/order/create", "style": { "navigationBarTitleText": "确认订单" } },
+    { "path": "pages/order/pay-result", "style": { "navigationBarTitleText": "支付结果" } },
+    { "path": "pages/order/refund", "style": { "navigationBarTitleText": "退款申请" } },
+    { "path": "pages/user/verify", "style": { "navigationBarTitleText": "实名认证" } },
+    { "path": "pages/user/profile", "style": { "navigationBarTitleText": "个人资料" } },
+    { "path": "pages/user/my-credit", "style": { "navigationBarTitleText": "我的信誉" } },
+    { "path": "pages/user/logout", "style": { "navigationBarTitleText": "第三方服务身份" } },
+    { "path": "pages/user/my-service", "style": { "navigationBarTitleText": "我的服务" } },
+    { "path": "pages/seller/income", "style": { "navigationBarTitleText": "收益中心" } },
+    { "path": "pages/seller/withdraw", "style": { "navigationBarTitleText": "提现" } },
+    { "path": "pages/seller/deposit", "style": { "navigationBarTitleText": "保证金" } },
+    { "path": "pages/seller/deposit-result", "style": { "navigationBarTitleText": "保证金支付" } },
+    { "path": "pages/chat/detail", "style": { "navigationBarTitleText": "订单站内信" } },
+    { "path": "pages/review/submit", "style": { "navigationBarTitleText": "提交评价" } },
+    { "path": "pages/review/list", "style": { "navigationBarTitleText": "全部评价" } },
+    { "path": "pages/report/submit", "style": { "navigationBarTitleText": "举报反馈" } },
+    { "path": "pages/common/webview", "style": { "navigationBarTitleText": "协议" } },
+    { "path": "pages/common/empty", "style": { "navigationBarTitleText": "空状态" } }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "技匠",
+    "navigationBarBackgroundColor": "#F5F7FB",
+    "backgroundColor": "#F5F7FB",
+    "app-plus": { "bounce": "none" }
+  },
+  "tabBar": {
+    "custom": true,
+    "color": "#8A95AA",
+    "selectedColor": "#1F4FD8",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/tabbar/home/index", "text": "首页", "iconPath": "static/tabbar/home.png", "selectedIconPath": "static/tabbar/home-active.png" },
+      { "pagePath": "pages/tabbar/discover/index", "text": "发现", "iconPath": "static/tabbar/discover.png", "selectedIconPath": "static/tabbar/discover-active.png" },
+      { "pagePath": "pages/tabbar/message/index", "text": "消息", "iconPath": "static/tabbar/message.png", "selectedIconPath": "static/tabbar/message-active.png" },
+      { "pagePath": "pages/tabbar/mine/index", "text": "我的", "iconPath": "static/tabbar/mine.png", "selectedIconPath": "static/tabbar/mine-active.png" }
+    ]
+  }
+}

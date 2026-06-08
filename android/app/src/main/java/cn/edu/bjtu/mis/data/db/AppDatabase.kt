@@ -20,6 +20,8 @@ import cn.edu.bjtu.mis.model.SyncModuleSummary
 import cn.edu.bjtu.mis.model.SyncRun
 import cn.edu.bjtu.mis.model.UserTodoItem
 import cn.edu.bjtu.mis.model.formatUserCourseWeeks
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceDao
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceEntity
 import kotlinx.serialization.encodeToString
 
 @Entity(tableName = "sync_runs")
@@ -274,12 +276,14 @@ interface BjtuMisDao {
         UserTodoEntity::class,
         MailFolderEntity::class,
         MailMessageSummaryEntity::class,
+        ThirdPartyServiceEntity::class,
     ],
-    version = 7,
+    version = 9,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): BjtuMisDao
+    abstract fun thirdPartyServiceDao(): ThirdPartyServiceDao
 }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -390,6 +394,51 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
         db.execSQL("DROP TABLE IF EXISTS `agent_tasks`")
     }
 }
+
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(CREATE_THIRD_PARTY_SERVICES_SQL)
+        db.execSQL(CREATE_THIRD_PARTY_SERVICES_GITHUB_INDEX_SQL)
+    }
+}
+
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(ADD_THIRD_PARTY_SERVICE_PACKAGE_DIGEST_SQL)
+    }
+}
+
+internal const val CREATE_THIRD_PARTY_SERVICES_SQL = """
+CREATE TABLE IF NOT EXISTS `third_party_services` (
+    `service_id` TEXT NOT NULL,
+    `name` TEXT NOT NULL,
+    `description` TEXT NOT NULL,
+    `version` TEXT NOT NULL,
+    `author` TEXT NOT NULL,
+    `source_url` TEXT NOT NULL,
+    `github_owner` TEXT NOT NULL,
+    `github_repo` TEXT NOT NULL,
+    `default_branch` TEXT NOT NULL,
+    `commit_sha` TEXT NOT NULL,
+    `manifest_json` TEXT NOT NULL,
+    `granted_permissions_json` TEXT NOT NULL,
+    `allowed_origins_json` TEXT NOT NULL,
+    `install_dir` TEXT NOT NULL,
+    `entrypoint` TEXT NOT NULL,
+    `icon` TEXT NOT NULL,
+    `enabled` INTEGER NOT NULL,
+    `needs_review` INTEGER NOT NULL,
+    `installed_at` TEXT NOT NULL,
+    `updated_at` TEXT NOT NULL,
+    PRIMARY KEY(`service_id`)
+)
+"""
+
+internal const val CREATE_THIRD_PARTY_SERVICES_GITHUB_INDEX_SQL =
+    "CREATE INDEX IF NOT EXISTS `index_third_party_services_github_owner_github_repo` ON `third_party_services` (`github_owner`, `github_repo`)"
+
+internal const val ADD_THIRD_PARTY_SERVICE_PACKAGE_DIGEST_SQL =
+    "ALTER TABLE `third_party_services` ADD COLUMN `package_digest_sha256` TEXT NOT NULL DEFAULT ''"
 
 fun SyncRunEntity.toModel(): SyncRun {
     val summary = runCatching {
