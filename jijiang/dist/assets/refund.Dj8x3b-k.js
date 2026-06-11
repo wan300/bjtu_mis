@@ -1,0 +1,1 @@
+import{R as r}from"./index-C84RB2NM.js";function t(t){return r({url:"/api/refund/submit",method:"POST",data:t,idempotent:!0})}function e(t){return r({url:"/api/refund/detail",params:{refundId:t}})}export{e as g,t as s};

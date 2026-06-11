@@ -1,12 +1,7 @@
 <script setup lang="ts">
-import { onHide, onLaunch, onShow } from "@dcloudio/uni-app";
+import { onHide, onShow } from "@dcloudio/uni-app";
 import { useNotificationStore } from "@/store/notification";
 import { useUserStore } from "@/store/user";
-
-onLaunch(() => {
-  const user = useUserStore();
-  void user.loginWithBjtuServiceIdentity().catch(() => undefined);
-});
 
 onShow(() => {
   const user = useUserStore();

@@ -1,0 +1,1 @@
+import{R as t}from"./index-C84RB2NM.js";function r(){return t({url:"/api/deposit/create",method:"POST"})}function e(){return t({url:"/api/deposit/status"})}function o(r){return t({url:"/api/deposit/sync",method:"POST",data:{outTradeNo:r}})}export{r as c,e as g,o as s};

@@ -152,6 +152,7 @@ fun BjtuMisApp(
     var autoLoginFailedMessage by remember { mutableStateOf("") }
     var autoLoginRetrying by remember { mutableStateOf(false) }
     var openWebUiBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
+    var thirdPartyServiceBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
     var hasOpenedOpenWebUiAgent by remember { mutableStateOf(false) }
     var updateCheckStarted by remember { mutableStateOf(false) }
     var pendingUpdate by remember { mutableStateOf<AppUpdateInfo?>(null) }
@@ -384,6 +385,9 @@ fun BjtuMisApp(
             BackHandler {
                 when {
                     current == ModuleKeys.OpenWebUiAgent && openWebUiBackHandler?.invoke() == true -> Unit
+                    thirdPartyServiceIdFromRoute(current) != null &&
+                        thirdPartyServiceBackHandler?.invoke() == true -> Unit
+                    thirdPartyServiceIdFromRoute(current) != null -> current = THIRD_PARTY_SERVICES_ROUTE
                     current !in MainRoutes -> current = mainTab
                     current != RouteHome -> navigateMain(RouteHome)
                     else -> showExitDialog = true
@@ -446,7 +450,7 @@ fun BjtuMisApp(
                         )
                         thirdPartyServiceIdFromRoute(current) != null -> DetailTitleBar(
                             title = thirdPartyServiceTitle ?: "第三方服务",
-                            onBack = { current = RouteServices },
+                            onBack = { current = THIRD_PARTY_SERVICES_ROUTE },
                         )
                         current in ProfileDetailRouteTitles -> DetailTitleBar(
                             title = ProfileDetailRouteTitles.getValue(current),
@@ -541,6 +545,7 @@ fun BjtuMisApp(
                                     repository = container.thirdPartyServiceRepository,
                                     apiRegistry = container.thirdPartyServiceApiRegistry,
                                     onBackToServices = { current = THIRD_PARTY_SERVICES_ROUTE },
+                                    onBackHandlerChanged = { thirdPartyServiceBackHandler = it },
                                 )
                             } else {
                                 MainScreenPadding {

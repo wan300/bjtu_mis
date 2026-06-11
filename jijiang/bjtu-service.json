@@ -9,7 +9,8 @@
   "author": "jijiang",
   "permissions": {
     "required": [
-      "identity.profile.read"
+      "identity.profile.read",
+      "identity.credentials.read"
     ],
     "optional": []
   },

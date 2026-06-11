@@ -3,6 +3,7 @@ package cn.edu.bjtu.mis.data.thirdparty
 import cn.edu.bjtu.mis.data.AppJson
 import cn.edu.bjtu.mis.data.repository.MailRepository
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
+import cn.edu.bjtu.mis.data.security.CredentialStore
 import cn.edu.bjtu.mis.model.MailComposeRequest
 import cn.edu.bjtu.mis.model.UserCourseDraft
 import cn.edu.bjtu.mis.model.UserCourseDurationType
@@ -25,6 +26,7 @@ fun interface ThirdPartySensitiveActionConfirmer {
 class ThirdPartyServiceApiRegistry(
     private val moduleRepository: ModuleRepository?,
     private val mailRepository: MailRepository?,
+    private val credentialStore: CredentialStore? = null,
 ) {
     suspend fun invoke(
         service: ThirdPartyService,
@@ -46,7 +48,6 @@ class ThirdPartyServiceApiRegistry(
             val confirmed = confirmer.confirm(spec.confirmTitle, spec.confirmMessage(service, currentPageUrl, params))
             if (!confirmed) return errorResponse("user_denied", "用户未确认该操作")
         }
-
         return runCatching {
             successResponse(execute(normalizedMethod, params))
         }.getOrElse { error ->
@@ -56,6 +57,7 @@ class ThirdPartyServiceApiRegistry(
 
     private suspend fun execute(method: String, params: JsonObject): JsonElement = when (method) {
         "identity.get_profile" -> json(moduleRepository().profile())
+        "identity.get_credentials" -> credentialsJson()
         "academic.get_timetable" -> json(moduleRepository().timetable())
         "academic.save_user_course" -> buildJsonObject {
             put("id", moduleRepository().saveUserCourse(params.toUserCourseDraft()))
@@ -116,12 +118,38 @@ class ThirdPartyServiceApiRegistry(
     private fun mailRepository(): MailRepository =
         mailRepository ?: error("MailRepository is not available")
 
+    private fun credentialStore(): CredentialStore =
+        credentialStore ?: error("CredentialStore is not available")
+
+    private fun credentialsJson(): JsonElement {
+        val credentials = credentialStore().load()
+            ?: error("未找到已保存的 BJTU 登录凭据，请先在主应用登录。")
+        val loginName = credentials.loginName.trim()
+        return buildJsonObject {
+            put("login_name", loginName)
+            put("loginName", loginName)
+            put("student_id", loginName)
+            put("studentId", loginName)
+            put("account", loginName)
+            put("password", credentials.password)
+        }
+    }
+
     private inline fun <reified T> json(value: T): JsonElement =
         AppJson.parseToJsonElement(AppJson.encodeToString(value))
 
     companion object {
         val methodSpecs: Map<String, ThirdPartyApiMethodSpec> = listOf(
             ThirdPartyApiMethodSpec("identity.get_profile", "identity.profile.read"),
+            ThirdPartyApiMethodSpec(
+                method = "identity.get_credentials",
+                permission = "identity.credentials.read",
+                highRisk = true,
+                confirmTitle = "确认读取登录凭据",
+                confirmMessage = { service, pageUrl, _ ->
+                    "${service.manifest.name} 请求从 ${pageUrl.ifBlank { "当前页面" }} 读取你首次登录 BJTU MIS 时保存的学号和密码。"
+                },
+            ),
             ThirdPartyApiMethodSpec("academic.get_timetable", "academic.timetable.read"),
             ThirdPartyApiMethodSpec("academic.save_user_course", "academic.user_courses.write"),
             ThirdPartyApiMethodSpec("academic.delete_user_course", "academic.user_courses.write"),

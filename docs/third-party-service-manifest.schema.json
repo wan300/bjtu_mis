@@ -93,6 +93,7 @@
         "type": "string",
         "enum": [
           "identity.profile.read",
+          "identity.credentials.read",
           "academic.timetable.read",
           "academic.user_courses.write",
           "academic.scores.read",

@@ -81,8 +81,10 @@ function hideSystemTabBar() {
 function handleShow() {
   syncCurrent();
   hideSystemTabBar();
-  if (user.isLogin) {
+  if (user.isLogin && !user.isBjtuServiceSession) {
     notification.startPolling();
+  } else {
+    notification.stopPolling(true);
   }
 }
 

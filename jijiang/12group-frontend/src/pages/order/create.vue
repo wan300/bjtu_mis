@@ -34,12 +34,14 @@ import { createOrder } from "@/api/order";
 import { payOrder } from "@/api/payment";
 import { getServiceDetail } from "@/api/service";
 import { useOrderStore } from "@/store/order";
+import { useUserStore } from "@/store/user";
 import { money } from "@/utils/money";
 import { parseServicePriceTiers } from "@/utils/price-tiers";
 import { toast } from "@/utils/toast";
 import type { ServiceItem } from "@/types/domain";
 
 const orderStore = useOrderStore();
+const user = useUserStore();
 const service = ref<ServiceItem | null>(null);
 const serviceId = ref(0);
 const selectedTierKey = ref("");
@@ -50,6 +52,10 @@ const priceTiers = computed(() => parseServicePriceTiers(service.value));
 const selectedTier = computed(() => priceTiers.value.find((tier) => tier.key === selectedTierKey.value) || priceTiers.value[0]);
 
 onLoad(async (query) => {
+  if (!user.isLogin) {
+    goLogin();
+    return;
+  }
   serviceId.value = Number(query?.serviceId || 0);
   selectedTierKey.value = String(query?.tierKey || orderStore.pendingTier?.key || "");
   service.value = orderStore.pendingService?.id === serviceId.value ? orderStore.pendingService : null;
@@ -61,6 +67,10 @@ onLoad(async (query) => {
 
 async function submit() {
   if (!serviceId.value) return;
+  if (!user.isLogin) {
+    goLogin();
+    return;
+  }
   loading.value = true;
   try {
     if (!selectedTier.value) {
@@ -77,6 +87,10 @@ async function submit() {
   } finally {
     loading.value = false;
   }
+}
+
+function goLogin() {
+  uni.navigateTo({ url: "/pages/login/index" });
 }
 </script>
 

@@ -317,6 +317,11 @@ function stopPagePolling() {
 }
 
 onShow(() => {
+  if (!user.isLogin) {
+    resetLoggedOutState();
+    goLogin();
+    return;
+  }
   loadFirstPage(false);
   startPagePolling();
 });

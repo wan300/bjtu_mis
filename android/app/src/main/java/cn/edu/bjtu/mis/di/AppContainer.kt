@@ -209,6 +209,7 @@ class AppContainer(context: Context) {
             ThirdPartyServiceApiRegistry(
                 moduleRepository = moduleRepository,
                 mailRepository = mailRepository,
+                credentialStore = credentialStore,
             )
         }
     }

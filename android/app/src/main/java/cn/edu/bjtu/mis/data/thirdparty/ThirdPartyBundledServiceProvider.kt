@@ -5,6 +5,7 @@ import cn.edu.bjtu.mis.data.AppJson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import java.io.File
 import java.util.UUID
 
@@ -53,9 +54,11 @@ class AssetThirdPartyBundledServiceProvider(
                 }
                 val digest = ThirdPartyPackageDigests.computeDistDigest(File(tempDir, "dist"))
                 val existing = existingServices[manifest.id]
+                val manifestJson = AppJson.encodeToString(manifest)
                 if (
                     existing != null &&
                     existing.packageDigestSha256 == digest.sha256 &&
+                    existing.manifestJson == manifestJson &&
                     File(existing.installDir, manifest.entrypoint).isFile
                 ) {
                     return@mapNotNull null
@@ -129,6 +132,6 @@ private val DefaultBundledThirdPartyServices = listOf(
             canonicalUrl = "asset://$JijiangAssetPath",
         ),
         defaultBranch = "bundled",
-        defaultGrantedPermissions = setOf("identity.profile.read"),
+        defaultGrantedPermissions = emptySet(),
     )
 )

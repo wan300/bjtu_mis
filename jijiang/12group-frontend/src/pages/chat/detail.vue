@@ -42,7 +42,7 @@
 
     <view class="inputbar">
       <input v-model="content" class="msg-input" placeholder="输入消息..." confirm-type="send" @confirm="send" />
-      <button class="send-btn" @click="send" :disabled="!content.trim()">发送</button>
+      <button class="send-btn" @click="send" :disabled="sending || !content.trim()">发送</button>
     </view>
   </view>
 </template>
@@ -65,6 +65,7 @@ const orderId = ref(0);
 const messages = ref<MessageItem[]>([]);
 const content = ref("");
 const scrollTop = ref(0);
+const sending = ref(false);
 
 const orderCtx = ref<(OrderItem & { isBuyer?: boolean }) | null>(null);
 const ctxCoverUrl = computed(() => normalizeImageUrl(orderCtx.value?.serviceCoverUrl));
@@ -87,13 +88,71 @@ async function refresh() {
   if (orderId.value) messages.value = await listMessages(orderId.value);
 }
 
+function formatLocalDateTime(date = new Date()) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function createOptimisticMessage(text: string): MessageItem {
+  return {
+    id: -Date.now(),
+    orderId: orderId.value,
+    senderId: user.userInfo?.id || 0,
+    senderName: user.userInfo?.nickname,
+    senderAvatar: user.userInfo?.avatarUrl,
+    receiverId: orderCtx.value?.isBuyer ? (orderCtx.value?.sellerId || 0) : (orderCtx.value?.buyerId || 0),
+    content: text,
+    isRead: 1,
+    createTime: formatLocalDateTime(),
+  };
+}
+
+function parseMessageTime(createTime?: string) {
+  if (!createTime) return Number.NaN;
+  return new Date(createTime.replace("T", " ")).getTime();
+}
+
+function hasConfirmedMessage(items: MessageItem[], optimisticMessage: MessageItem) {
+  const optimisticTime = parseMessageTime(optimisticMessage.createTime);
+  return items.some((item) => {
+    if (item.senderId !== optimisticMessage.senderId || item.content !== optimisticMessage.content) {
+      return false;
+    }
+    const currentTime = parseMessageTime(item.createTime);
+    if (Number.isNaN(optimisticTime) || Number.isNaN(currentTime)) {
+      return true;
+    }
+    return Math.abs(currentTime - optimisticTime) < 2 * 60 * 1000;
+  });
+}
+
 async function send() {
   const text = content.value.trim();
-  if (!text) return;
+  if (!text || sending.value) return;
   if (hitSensitiveContact(text)) { toast("请勿交换联系方式"); return; }
-  await sendMessage(orderId.value, text);
+
+  const optimisticMessage = createOptimisticMessage(text);
+  messages.value = [...messages.value, optimisticMessage];
   content.value = "";
-  await refresh();
+  sending.value = true;
+
+  try {
+    await sendMessage(orderId.value, text);
+    try {
+      const latestMessages = await listMessages(orderId.value);
+      messages.value = hasConfirmedMessage(latestMessages, optimisticMessage)
+        ? latestMessages
+        : [...latestMessages, optimisticMessage];
+    } catch {
+      // Keep the optimistic message visible if the follow-up refresh is delayed or fails.
+    }
+  } catch (error) {
+    messages.value = messages.value.filter((item) => item.id !== optimisticMessage.id);
+    content.value = text;
+    throw error;
+  } finally {
+    sending.value = false;
+  }
 }
 
 function goOrder() {
@@ -229,7 +288,7 @@ function formatMsgTime(t?: string) {
 .msg-end { height: 1rpx; }
 
 .inputbar { position: sticky; bottom: 0; z-index: 9999; display: flex; align-items: center; gap: 14rpx; padding: 20rpx 20rpx 28rpx; background: #FFFFFF !important; border-top: 2px solid #1A1A1A; }
-.msg-input { flex: 1; height: 76rpx; padding: 0 22rpx; border: var(--stroke); border-radius: var(--radius-sm); background: var(--color-card); font-size: 28rpx; }
+.msg-input { flex: 1; height: 76rpx; padding: 0 22rpx; border: var(--stroke); border-radius: var(--radius-sm); color: var(--color-text); line-height: 76rpx; background: var(--color-card); font-size: 28rpx; }
 .send-btn { width: 120rpx; height: 76rpx; border: 2px solid #1A1A1A; border-radius: var(--radius-sm); color: #fff; font-size: 28rpx; font-weight: 900; background: #07C160; box-shadow: 4rpx 4rpx 0 0 #1A1A1A; display: flex; align-items: center; justify-content: center; }
 .send-btn:active { transform: translate(2rpx, 2rpx); box-shadow: none; }
 .send-btn[disabled] { opacity: 0.45; background: #94A3B8; border-color: #64748B; box-shadow: none; color: #fff; }

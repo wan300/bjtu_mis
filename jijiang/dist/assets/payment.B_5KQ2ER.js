@@ -1,1 +1,0 @@
-import{N as t}from"./index-Bk6wQs2T.js";function r(r){return t({url:"/api/payment/create",method:"POST",data:{orderId:r}})}function a(r,a){return t({url:"/api/payment/sync",method:"POST",data:{orderId:r},skipToast:null==a?void 0:a.silent})}export{r as p,a as s};

@@ -1,0 +1,1 @@
+import{R as a}from"./index-C84RB2NM.js";function r(){return a({url:"/api/withdrawals/check"})}function t(r){return a({url:"/api/withdrawals/apply",method:"POST",data:r})}function i(r){return a({url:"/api/withdrawals",params:r})}export{t as a,r as c,i as l};

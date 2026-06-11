@@ -22,17 +22,18 @@ npm run build:bjtu-service
 
 ## 登录与退出边界
 
-嵌入 BJTU MIS Android 后，技匠前端不再提供微信登录、MIS 登录或退出登录。启动时会通过 BJTU App Bridge 调用 `identity.get_profile`，把用户身份映射为本地前端登录态。
+嵌入 BJTU MIS Android 后，技匠前端通过 BJTU App Bridge 调用 `identity.get_profile` 获取用户身份，并映射为本地前端登录态；页面内不提供微信登录、MIS 登录或退出登录入口。
 
 第三方服务内只提供“退出第三方服务”，调用 `app.close_service` 返回 BJTU MIS 服务列表，不清除 BJTU App 登录态，也不退出校园统一身份认证。
 
 ## 权限与外联
 
-当前 manifest 只申请：
+当前 manifest 申请：
 
 - `identity.profile.read`：读取 BJTU App 授权后的用户身份信息。
+- `identity.credentials.read`：读取 BJTU App 已保存的 BJTU 登录名和密码；调用 `identity.get_credentials` 时由宿主单次确认后返回，用于技匠服务自动登录。
 
-`app.close_service` 不需要权限。前端运行中如果访问 `bjtu-service.json.allowed_origins` 之外的 HTTP/HTTPS origin，会被 BJTU MIS WebView 拦截。当前保留的外联 origin 用于技匠 API、支付跳转/回调和公共资源加载：
+`app.close_service` 不需要权限。前端运行中如果访问 `bjtu-service.json.allowed_origins` 之外的 HTTP/HTTPS origin，会被 BJTU MIS WebView 拦截。`allowed_origins` 中的 origin 同时作为执行来源和联网来源使用。当前保留的 origin 用于技匠 API、支付跳转/回调和公共资源加载：
 
 - `http://47.95.238.140:8080`
 - `https://api.jijiang.com`
@@ -49,7 +50,7 @@ npm run build:bjtu-service
 
 当前 `node tools/third-party-service-lint.cjs jijiang` 可通过，但会提示若干 `WARN`：
 
-- `https://cdn.dcloud.net.cn` 来自 uni-app H5 运行时 CSS 的阴影图片引用，当前不作为受信任执行来源加入 `allowed_origins`。
+- `https://cdn.dcloud.net.cn` 来自 uni-app H5 运行时 CSS 的阴影图片引用，当前不作为运行时来源加入 `allowed_origins`。
 - `https://vuejs.org` 来自 Vue 运行时错误说明字符串，不是正常业务网络请求。
 - `https://mock-cos` 是开发占位上传 URL，前端代码会识别后走本地开发分支，不作为生产外联来源。
 
@@ -59,5 +60,5 @@ npm run build:bjtu-service
 
 - 不包含 jijiang 后端、管理后台、数据库脚本、支付服务、模型文件或服务器部署配置。
 - 不在 Android 设备端执行 npm/build。
-- 不暴露 BJTU Cookie、token、原始 HTTP 客户端或校园账号密码。
+- 第三方服务通过 BJTU MIS 桥接 API 获取授权数据；技匠声明 `identity.credentials.read`，宿主单次确认后返回已保存的 BJTU 登录名和明文密码用于自动登录。BJTU Cookie、token 和原始 HTTP 客户端不作为第三方服务 API 暴露。
 - 不支持未写入 manifest 的运行时权限申请或未声明外联域名。

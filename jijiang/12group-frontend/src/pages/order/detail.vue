@@ -164,9 +164,16 @@ function fmt(t?: string) {
 
 onLoad((query) => {
   orderId.value = Number(query?.orderId || 0);
+  if (!user.isLogin) {
+    uni.navigateTo({ url: "/pages/login/index" });
+    return;
+  }
 });
 
 onShow(async () => {
+  if (!user.isLogin) {
+    return;
+  }
   await load();
 });
 

@@ -1,5 +1,7 @@
 package cn.edu.bjtu.mis.data.thirdparty
 
+import cn.edu.bjtu.mis.data.security.CredentialStore
+import cn.edu.bjtu.mis.data.security.LoginCredentials
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.contentOrNull
@@ -50,7 +52,7 @@ class ThirdPartyServiceApiRegistryTest {
     }
 
     @Test
-    fun highRiskMethodsRequireConfirmationBeforeRepositoryAccess() = runBlocking {
+    fun highRiskMethodsRequirePerCallConfirmationBeforeRepositoryAccess() = runBlocking {
         var confirmationMessage = ""
         val response = registry.invoke(
             service = service(grants = setOf("mail.send")),
@@ -66,6 +68,52 @@ class ThirdPartyServiceApiRegistryTest {
         assertEquals("user_denied", response.errorCode())
         assertTrue(confirmationMessage.contains("Demo"))
         assertTrue(confirmationMessage.contains("https://api.example.com/plugin.html"))
+    }
+
+    @Test
+    fun credentialsMethodRequiresPerCallConfirmation() = runBlocking {
+        var confirmationCalled = false
+        val registry = ThirdPartyServiceApiRegistry(
+            moduleRepository = null,
+            mailRepository = null,
+            credentialStore = FakeCredentialStore(LoginCredentials(" 22123456 ", "secret-password")),
+        )
+
+        val response = registry.invoke(
+            service = service(grants = setOf("identity.credentials.read")),
+            method = "identity.get_credentials",
+            confirmer = ThirdPartySensitiveActionConfirmer { _, _ ->
+                confirmationCalled = true
+                false
+            },
+            currentPageUrl = "https://bjtu.demo.third-party.bjtu-mis.local/index.html",
+        )
+
+        assertFalse(response["ok"]!!.jsonPrimitive.boolean)
+        assertTrue(confirmationCalled)
+        assertEquals("user_denied", response.errorCode())
+    }
+
+    @Test
+    fun credentialsMethodReturnsSavedLoginAfterPerCallConfirmation() = runBlocking {
+        val registry = ThirdPartyServiceApiRegistry(
+            moduleRepository = null,
+            mailRepository = null,
+            credentialStore = FakeCredentialStore(LoginCredentials(" 22123456 ", "secret-password")),
+        )
+
+        val response = registry.invoke(
+            service = service(grants = setOf("identity.credentials.read")),
+            method = "identity.get_credentials",
+            confirmer = ThirdPartySensitiveActionConfirmer { _, _ -> true },
+            currentPageUrl = "https://bjtu.demo.third-party.bjtu-mis.local/index.html",
+        )
+
+        assertTrue(response["ok"]!!.jsonPrimitive.boolean)
+        val data = response["data"]!!.jsonObject
+        assertEquals("22123456", data["student_id"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("22123456", data["login_name"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("secret-password", data["password"]!!.jsonPrimitive.contentOrNull)
     }
 
     private fun service(
@@ -86,7 +134,7 @@ class ThirdPartyServiceApiRegistryTest {
                 author = "Alice",
                 permissions = ThirdPartyServicePermissionDeclaration(
                     required = listOf("identity.profile.read"),
-                    optional = listOf("mail.send"),
+                    optional = listOf("identity.credentials.read", "mail.send"),
                 ),
             ),
             sourceUrl = "https://github.com/alice/demo",
@@ -109,4 +157,14 @@ class ThirdPartyServiceApiRegistryTest {
 
     private fun kotlinx.serialization.json.JsonObject.errorCode(): String =
         this["error"]!!.jsonObject["code"]!!.jsonPrimitive.contentOrNull.orEmpty()
+}
+
+private class FakeCredentialStore(
+    private val credentials: LoginCredentials?,
+) : CredentialStore {
+    override fun save(credentials: LoginCredentials) = Unit
+
+    override fun load(): LoginCredentials? = credentials
+
+    override fun clear() = Unit
 }

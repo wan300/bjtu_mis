@@ -1,1 +1,0 @@
-import{M as t}from"./index-Bk6wQs2T.js";import{b as e}from"./service.B-BE4_0C.js";const a=t("config",{state:()=>({categories:[],loadedAt:0}),actions:{async loadCategories(t=!1){!t&&this.categories.length&&Date.now()-this.loadedAt<18e5||(this.categories=await e(),this.loadedAt=Date.now())}}});export{a as u};

@@ -90,8 +90,8 @@
             <p class="eyebrow">Overview</p>
             <h2>平台概览</h2>
             <p>
-              第三方插件不会直接接触校园账号、密码、Cookie、token 或原始 HTTP 客户端。所有校园数据都由 BJTU MIS Android
-              的受控 Repository 返回，插件只通过桥接 API 请求已经授权的能力。
+              第三方插件不会直接接触 Cookie、token 或原始 HTTP 客户端。校园数据由 BJTU MIS Android
+              的受控 Repository 返回；若插件声明并获得 <code>identity.credentials.read</code> 权限，并在调用时通过宿主单次确认，也可以通过桥接 API 读取首次登录 BJTU MIS 时保存的登录名和明文密码。
             </p>
             <div class="docs-card-grid">
               <article class="docs-card">
@@ -114,7 +114,7 @@
                   <li>应用侧自动源码构建或静默更新。</li>
                   <li>Android 端运行 Node、Vite dev server、<code>npm install</code> 或开发服务器。</li>
                   <li>原生插件、后台常驻任务、直接读取 App 内部文件。</li>
-                  <li>绕过用户确认的作业提交或邮件发送。</li>
+                  <li>调用 manifest 未声明或用户未授权的校园服务能力。</li>
                 </ul>
               </article>
             </div>
@@ -133,10 +133,10 @@
     assets/
       app.css
       app.js</code></pre>
-            <p>最小页面可以直接调用注入 API。建议所有调用都判断 <code>ok</code>，并对权限不足、高风险操作被拒绝和校园服务失败给出明确提示。</p>
+            <p>最小页面可以直接调用注入 API。建议所有调用都判断 <code>ok</code>，并对权限不足和校园服务失败给出明确提示。</p>
             <p>仓库内提供 <code>third-party-plugins/templates/basic/</code> 模板、<code>third-party-plugins/examples/profile-timetable/</code> 离线示例和 <code>third-party-plugins/examples/remote-origin-demo/</code> 远程来源语义示例。</p>
             <pre><code>node tools/third-party-service-lint.cjs third-party-plugins/examples/profile-timetable</code></pre>
-            <p>lint 的 <code>ERROR</code> 必须修复；<code>WARN</code> 不会阻止通过，但要人工判断。若 warning 指向真实运行时会加载的远端页面、iframe、接口或资源，要么加入 <code>allowed_origins</code>，要么改为本地打包或移除引用；若只是框架错误说明链接、开发占位字符串或不会触发的文本常量，可以保留，但发布说明中应记录原因。</p>
+            <p>lint 的 <code>ERROR</code> 必须修复；<code>WARN</code> 用于提示可能的运行时远端引用。若 warning 指向运行时会加载的页面、iframe、接口或资源，需要加入 <code>allowed_origins</code>，或改为本地打包/移除引用；若只是框架错误说明链接、开发占位字符串或不会触发的文本常量，可以保留，并在发布说明中记录原因。</p>
             <pre><code>&lt;!doctype html&gt;
 &lt;html lang="zh-CN"&gt;
   &lt;head&gt;
@@ -238,6 +238,7 @@
                 </thead>
                 <tbody>
                   <tr><td><code>identity.profile.read</code></td><td>读取姓名、学号、学院、专业、邮箱等个人资料。</td></tr>
+                  <tr><td><code>identity.credentials.read</code></td><td>读取首次登录 BJTU MIS 时保存的登录名和明文密码。服务启用后，调用对应接口时宿主会弹出单次确认。</td></tr>
                   <tr><td><code>academic.timetable.read</code></td><td>读取当前课表和用户自定义课程。</td></tr>
                   <tr><td><code>academic.user_courses.write</code></td><td>新增、修改或删除用户手动创建的课程。</td></tr>
                   <tr><td><code>academic.scores.read</code></td><td>读取当前学期或指定学期主修成绩。</td></tr>
@@ -246,12 +247,12 @@
                   <tr><td><code>academic.calendar.read</code></td><td>读取校历、周次和学期安排。</td></tr>
                   <tr><td><code>academic.progress.read</code></td><td>读取培养方案完成情况和学分进度。</td></tr>
                   <tr><td><code>academic.homework.read</code></td><td>读取课程作业、截止时间和提交状态。</td></tr>
-                  <tr><td><code>academic.homework.submit</code></td><td>提交作业内容。每次提交前仍会要求用户确认。</td></tr>
+                  <tr><td><code>academic.homework.submit</code></td><td>提交作业内容。服务启用后，调用对应接口时宿主会弹出单次确认。</td></tr>
                   <tr><td><code>academic.course_resources.read</code></td><td>读取课程资料列表和课程资源元数据。</td></tr>
                   <tr><td><code>mail.folders.read</code></td><td>读取邮箱文件夹和未读数量。</td></tr>
                   <tr><td><code>mail.messages.read</code></td><td>读取邮件摘要列表。</td></tr>
                   <tr><td><code>mail.message_detail.read</code></td><td>读取单封邮件正文、收发件人和附件信息。</td></tr>
-                  <tr><td><code>mail.send</code></td><td>发送邮件。每次发送前仍会要求用户确认。</td></tr>
+                  <tr><td><code>mail.send</code></td><td>发送邮件。服务启用后，调用对应接口时宿主会弹出单次确认。</td></tr>
                 </tbody>
               </table>
             </div>
@@ -275,6 +276,7 @@
               <li>除 <code>app.http_request</code> 的兼容字段 <code>statusCode</code> 外，业务接口的请求参数和返回字段都使用 snake_case。</li>
               <li>可空字段没有值时通常会被省略，而不是返回 <code>null</code>。</li>
               <li>字符串参数会 trim，空字符串按缺失处理；整数和布尔参数必须传 JSON number / boolean；<code>to</code>、<code>cc</code>、<code>bcc</code> 必须传字符串数组。</li>
+              <li>权限在服务授权页展示，用户批准后同一服务可调用已授权接口。<code>identity.get_credentials</code>、<code>academic.submit_homework</code> 和 <code>mail.send</code> 调用时需要宿主单次确认。</li>
             </ul>
             <pre><code>const profileResult = await window.BjtuService.invoke('identity.get_profile');
 if (!profileResult.ok) {
@@ -310,8 +312,8 @@ const remote = await window.BjtuService.invoke('app.http_request', {
   }
 });</code></pre>
             <div class="docs-callout">
-              <strong>高风险操作</strong>
-              <p><code>academic.submit_homework</code> 和 <code>mail.send</code> 即使已经授权，也会在应用内弹出确认框。用户取消时返回 <code>user_denied</code>。</p>
+              <strong>授权语义</strong>
+              <p><code>identity.get_credentials</code>、<code>academic.submit_homework</code> 和 <code>mail.send</code> 需要服务先获得对应权限，并在每次调用时由宿主完成单次确认。</p>
             </div>
           </section>
 
@@ -330,6 +332,7 @@ const remote = await window.BjtuService.invoke('app.http_request', {
                 </thead>
                 <tbody>
                   <tr><td><code>identity.get_profile</code></td><td><code>identity.profile.read</code></td><td>无。</td><td><code>ModuleEnvelope&lt;StudentProfileData&gt;</code></td></tr>
+                  <tr><td><code>identity.get_credentials</code></td><td><code>identity.credentials.read</code></td><td>无。</td><td><code>{ login_name: string, loginName: string, student_id: string, studentId: string, account: string, password: string }</code>，其中 <code>password</code> 为已保存的明文密码。</td></tr>
                   <tr><td><code>academic.get_timetable</code></td><td><code>academic.timetable.read</code></td><td>无。</td><td><code>ModuleEnvelope&lt;TimetableData&gt;</code></td></tr>
                   <tr><td><code>academic.save_user_course</code></td><td><code>academic.user_courses.write</code></td><td><code>course_name</code> string、<code>weekday</code> string、<code>weekday_index</code> int、<code>period</code> string、<code>period_number</code> int、<code>start_week</code> int、<code>end_week</code> int 必填；可选 <code>id</code> number/string、<code>time_range</code> string、<code>weeks_text</code> string、<code>duration_type</code> <code>"Temporary" | "LongTerm"</code>、<code>teacher</code> string、<code>location_text</code> string、<code>remark</code> string、<code>color_index</code> int。</td><td><code>{ id: number }</code></td></tr>
                   <tr><td><code>academic.delete_user_course</code></td><td><code>academic.user_courses.write</code></td><td><code>id</code> number/string 必填。</td><td><code>{ deleted: true }</code></td></tr>
@@ -353,7 +356,7 @@ const remote = await window.BjtuService.invoke('app.http_request', {
             <h3>参数补充</h3>
             <ul>
               <li><code>academic.save_user_course</code> 会把 <code>weekday_index</code> 限制在 0-6、<code>period_number</code> 至少为 1、<code>start_week</code> / <code>end_week</code> 至少为 1 并自动排序、<code>color_index</code> 限制在 0-7。<code>duration_type</code> 缺失或非法时按 <code>Temporary</code> 处理。</li>
-              <li><code>academic.submit_homework</code> 和 <code>mail.send</code> 即使已经授权，每次调用前仍会要求用户确认。用户取消时返回 <code>user_denied</code>。</li>
+              <li><code>identity.get_credentials</code>、<code>academic.submit_homework</code> 和 <code>mail.send</code> 需要服务先获得对应权限，并在每次调用时由宿主完成单次确认。</li>
               <li><code>mail.send</code> 的 <code>to</code>、<code>cc</code>、<code>bcc</code> 是数组；传逗号分隔字符串不会被拆分。</li>
               <li><code>app.http_request</code> 的 <code>headers</code> 会过滤 <code>host</code>、<code>connection</code>、<code>content-length</code>、<code>transfer-encoding</code>、<code>accept-encoding</code>、<code>cookie</code>、<code>origin</code> 等敏感或运行时控制头。</li>
             </ul>
@@ -704,7 +707,6 @@ type HttpBridgeResponse = {
                   <tr><td><code>service_not_enabled</code></td><td>服务尚未完成授权或更新后需要重新确认。</td></tr>
                   <tr><td><code>unknown_method</code></td><td>接口不存在或方法名拼写错误。</td></tr>
                   <tr><td><code>permission_denied</code></td><td>服务未获得该接口对应权限。</td></tr>
-                  <tr><td><code>user_denied</code></td><td>用户拒绝高风险操作确认。</td></tr>
                   <tr><td><code>api_failed</code></td><td>底层 BJTU MIS、教学服务或邮箱接口失败，或业务接口参数缺失、类型不正确。</td></tr>
                   <tr><td><code>bridge_failed</code></td><td>WebView 桥接请求格式错误、当前页面不在允许执行来源内、HTTP 桥接校验失败、HTTP 响应超过 5 MiB 或运行时异常。</td></tr>
                 </tbody>
@@ -718,13 +720,13 @@ type HttpBridgeResponse = {
             <ul class="docs-checklist">
               <li>WebView 通过每服务隔离的虚拟 HTTPS origin 加载已安装插件目录内的资源，例如 <code>https://&lt;service-sandbox-id&gt;.third-party.bjtu-mis.local/</code>。</li>
               <li>该虚拟 origin 只映射当前服务安装目录，并支持缺失页面路径回落到入口文件以适配 SPA history 路由。</li>
-              <li>WebView 允许加载 manifest 中声明的 HTTP/HTTPS origin；这些 origin 是受信任执行来源，不只是网络请求白名单。</li>
-              <li><code>app.http_request</code> 只能请求 manifest 中声明的 HTTP/HTTPS origin，不能绕过 <code>allowed_origins</code> 访问其他站点。</li>
+              <li>WebView 允许加载 manifest 中声明的 HTTP/HTTPS origin；这些 origin 同时作为执行来源和联网来源使用。</li>
+              <li><code>app.http_request</code> 的目标 origin 必须在 manifest 的 <code>allowed_origins</code> 中声明。</li>
               <li>其他未声明 HTTP/HTTPS origin、content URL 和未声明本地路径会被拦截。</li>
               <li>禁止通过 manifest 声明带路径、查询参数、片段、用户名或非 HTTP/HTTPS 协议的外联地址。</li>
               <li>下载包最大 25 MiB，解压后最大 50 MiB，最多 1000 个文件。</li>
               <li>Zip 包和 manifest 路径不能包含路径穿越、绝对路径或反斜杠。</li>
-              <li>插件更新后需要重新确认权限，不会静默继承旧版本授权。</li>
+              <li>插件更新会清空授权并进入重新确认状态。</li>
               <li>导入确认页会展示 commitSha、内容 digest、权限和允许执行/联网来源。</li>
             </ul>
           </section>
@@ -738,7 +740,7 @@ type HttpBridgeResponse = {
               <li><code>dist/</code> 包含入口文件、图标和所有静态资源。</li>
               <li>已运行 <code>node tools/third-party-service-lint.cjs &lt;plugin-root&gt;</code>。</li>
               <li>仅声明实际需要的权限，优先把非关键能力放到 <code>optional</code>。</li>
-              <li>仔细确认 <code>allowed_origins</code>，不要声明不完全信任的第三方页面、iframe 来源或远端 API。</li>
+              <li>只在 <code>allowed_origins</code> 中声明运行时确实需要加载的页面、iframe、接口或资源 origin。</li>
               <li>所有 API 调用都处理 <code>ok: false</code> 和常用错误码。</li>
               <li>页面在窄屏下可用，表格、按钮、长文本和代码片段不会遮挡内容。</li>
               <li>没有把真实校园账号、Cookie、token、邮箱内容、验证码或个人隐私写入代码或示例数据。</li>

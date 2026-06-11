@@ -56,6 +56,11 @@ const user = useUserStore();
 const conversations = ref<ConversationItem[]>([]);
 
 onShow(async () => {
+  if (!user.isLogin) {
+    conversations.value = [];
+    goLogin();
+    return;
+  }
   if (user.isLogin) {
     try { conversations.value = await getConversations(); }
     catch { conversations.value = []; }
@@ -63,6 +68,10 @@ onShow(async () => {
 });
 
 function openChat(orderId: number) {
+  if (!user.isLogin) {
+    goLogin();
+    return;
+  }
   uni.navigateTo({ url: `/pages/chat/detail?orderId=${orderId}` });
 }
 

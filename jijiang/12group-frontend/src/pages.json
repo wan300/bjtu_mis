@@ -1,5 +1,6 @@
-{
+﻿{
   "pages": [
+    { "path": "pages/boot/index", "style": { "navigationBarTitleText": "启动中", "navigationStyle": "custom" } },
     { "path": "pages/tabbar/home/index", "style": { "navigationBarTitleText": "技匠", "navigationStyle": "custom" } },
     { "path": "pages/tabbar/discover/index", "style": { "navigationBarTitleText": "发现", "navigationStyle": "custom" } },
     { "path": "pages/tabbar/message/index", "style": { "navigationBarTitleText": "消息", "navigationStyle": "custom" } },

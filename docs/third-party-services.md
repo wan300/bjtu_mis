@@ -6,7 +6,7 @@ BJTU MIS Android 第三方插件是安装在应用私有目录中的已构建 H5
 
 ## 1. 平台概览
 
-插件不会直接接触校园账号、密码、Cookie、token 或原始 HTTP 客户端。所有校园数据都由 BJTU MIS Android 的受控 Repository 返回，插件只通过桥接 API 请求已经授权的能力。
+插件不会直接接触 Cookie、token 或原始 HTTP 客户端。校园数据由 BJTU MIS Android 的受控 Repository 返回；若插件声明并获得 `identity.credentials.read` 权限，并在调用时通过宿主单次确认，也可以通过桥接 API 读取首次登录 BJTU MIS 时保存的登录名和明文密码，用于服务侧直登或会话恢复。
 
 当前支持：
 
@@ -25,7 +25,7 @@ BJTU MIS Android 第三方插件是安装在应用私有目录中的已构建 H5
 - 应用侧自动源码构建或静默更新。
 - Android 端运行 Node、Vite dev server、`npm install` 或开发服务器。
 - 原生插件、后台常驻任务、直接读取 App 内部文件。
-- 绕过用户确认的作业提交或邮件发送。
+- 调用 manifest 未声明或用户未授权的校园服务能力。
 
 ## 2. 仓库结构
 
@@ -56,7 +56,7 @@ v1 只支持 `https://github.com/{owner}/{repo}` 形式的公开仓库链接。�
 node tools/third-party-service-lint.cjs third-party-plugins/examples/profile-timetable
 ```
 
-lint 的 `ERROR` 必须修复；`WARN` 不会阻止通过，但必须人工判断。若 warning 指向真实运行时会加载的远端页面、iframe、接口或资源，要么加入 `allowed_origins`，要么改为本地打包或移除引用；若只是框架错误说明链接、开发占位字符串或不会触发的文本常量，可以保留，但发布说明中应记录原因。
+lint 的 `ERROR` 必须修复；`WARN` 用于提示可能的运行时远端引用。若 warning 指向运行时会加载的页面、iframe、接口或资源，需要加入 `allowed_origins`，或改为本地打包/移除引用；若只是框架错误说明链接、开发占位字符串或不会触发的文本常量，可以保留，并在发布说明中记录原因。
 
 ## 3. Manifest
 
@@ -104,6 +104,7 @@ Schema 文件：
 | 权限 ID | 能力 |
 | --- | --- |
 | `identity.profile.read` | 读取姓名、学号、学院、专业、邮箱等个人资料。 |
+| `identity.credentials.read` | 读取首次登录 BJTU MIS 时保存的登录名和明文密码。服务启用后，调用对应接口时宿主会弹出单次确认。 |
 | `academic.timetable.read` | 读取当前课表和用户自定义课程。 |
 | `academic.user_courses.write` | 新增、修改或删除用户手动创建的课程。 |
 | `academic.scores.read` | 读取当前学期或指定学期主修成绩。 |
@@ -112,12 +113,12 @@ Schema 文件：
 | `academic.calendar.read` | 读取校历、周次和学期安排。 |
 | `academic.progress.read` | 读取培养方案完成情况和学分进度。 |
 | `academic.homework.read` | 读取课程作业、截止时间和提交状态。 |
-| `academic.homework.submit` | 提交作业内容。每次提交前仍会要求用户确认。 |
+| `academic.homework.submit` | 提交作业内容。服务启用后，调用对应接口时宿主会弹出单次确认。 |
 | `academic.course_resources.read` | 读取课程资料列表和课程资源元数据。 |
 | `mail.folders.read` | 读取邮箱文件夹和未读数量。 |
 | `mail.messages.read` | 读取邮件摘要列表。 |
 | `mail.message_detail.read` | 读取单封邮件正文、收发件人和附件信息。 |
-| `mail.send` | 发送邮件。每次发送前仍会要求用户确认。 |
+| `mail.send` | 发送邮件。服务启用后，调用对应接口时宿主会弹出单次确认。 |
 
 ## 5. JavaScript API
 
@@ -141,7 +142,7 @@ window.BjtuService.invoke(
 - 除 `app.http_request` 的兼容字段 `statusCode` 外，业务接口的请求参数和返回字段都使用 snake_case。
 - Kotlin 侧 JSON 配置为 `ignoreUnknownKeys = true`、`explicitNulls = false`、`JsonNamingStrategy.SnakeCase`、`encodeDefaults = true`。可空字段没有值时通常会被省略，而不是返回 `null`。
 - 字符串参数会 trim，空字符串按缺失处理。整数和布尔参数必须传 JSON number / boolean，`to`、`cc`、`bcc` 必须传字符串数组。
-- 未声明或未授权的权限不会触发真实校园接口访问；高风险接口会先弹出用户确认。
+- 未声明或未授权的权限不会触发真实校园接口访问；权限在服务授权页展示，用户批准后同一服务可调用已授权接口。`identity.get_credentials`、`academic.submit_homework` 和 `mail.send` 调用时需要宿主单次确认。
 
 示例：
 
@@ -188,6 +189,7 @@ await window.BjtuService.invoke('app.close_service');
 | 方法 | 权限 | 参数 | 成功时 `data` |
 | --- | --- | --- | --- |
 | `identity.get_profile` | `identity.profile.read` | 无。 | `ModuleEnvelope<StudentProfileData>` |
+| `identity.get_credentials` | `identity.credentials.read` | 无。 | `{ login_name: string, loginName: string, student_id: string, studentId: string, account: string, password: string }`，其中 `password` 为已保存的明文密码。 |
 | `academic.get_timetable` | `academic.timetable.read` | 无。 | `ModuleEnvelope<TimetableData>` |
 | `academic.save_user_course` | `academic.user_courses.write` | `course_name` string、`weekday` string、`weekday_index` int、`period` string、`period_number` int、`start_week` int、`end_week` int 必填；可选 `id` number/string、`time_range` string、`weeks_text` string、`duration_type` `"Temporary" \| "LongTerm"`、`teacher` string、`location_text` string、`remark` string、`color_index` int。 | `{ id: number }` |
 | `academic.delete_user_course` | `academic.user_courses.write` | `id` number/string 必填。 | `{ deleted: true }` |
@@ -209,7 +211,7 @@ await window.BjtuService.invoke('app.close_service');
 参数补充：
 
 - `academic.save_user_course` 会把 `weekday_index` 限制在 0-6、`period_number` 至少为 1、`start_week` / `end_week` 至少为 1 并自动排序、`color_index` 限制在 0-7。`duration_type` 缺失或非法时按 `Temporary` 处理。
-- `academic.submit_homework` 和 `mail.send` 即使已经授权，每次调用前仍会要求用户确认。用户取消时返回 `user_denied`。
+- `identity.get_credentials`、`academic.submit_homework` 和 `mail.send` 需要服务先获得对应权限，并在每次调用时由宿主完成单次确认。
 - `mail.send` 的 `to`、`cc`、`bcc` 是数组；传逗号分隔字符串不会被拆分。
 - `app.http_request` 的 `headers` 会过滤 `host`、`connection`、`content-length`、`transfer-encoding`、`accept-encoding`、`cookie`、`origin` 等敏感或运行时控制头。
 
@@ -568,21 +570,21 @@ type HttpBridgeResponse = {
 | `service_not_enabled` | 服务尚未完成授权或更新后需要重新确认。 |
 | `unknown_method` | 接口不存在或方法名拼写错误。 |
 | `permission_denied` | 服务未获得该接口对应权限。 |
-| `user_denied` | 用户拒绝高风险操作确认。 |
 | `api_failed` | 底层 BJTU MIS、教学服务或邮箱接口失败，或业务接口参数缺失、类型不正确。 |
 | `bridge_failed` | WebView 桥接请求格式错误、当前页面不在允许执行来源内、HTTP 桥接校验失败、HTTP 响应超过 5 MiB 或运行时异常。 |
 
 ## 8. 安全限制
 
 - WebView 通过每服务隔离的虚拟 HTTPS origin 加载已安装插件目录内的资源，例如 `https://<service-sandbox-id>.third-party.bjtu-mis.local/`。该 origin 只映射当前服务安装目录，并支持缺失页面路径回落到入口文件以适配 SPA history 路由。
-- WebView 允许加载 manifest 中声明的 HTTP/HTTPS origin；这些 origin 是受信任执行来源，不只是网络请求白名单。
-- `app.http_request` 只能请求 manifest 中声明的 HTTP/HTTPS origin，不能绕过 `allowed_origins` 访问其他站点。
+- WebView 允许加载 manifest 中声明的 HTTP/HTTPS origin；这些 origin 同时作为执行来源和联网来源使用。
+- `app.http_request` 的目标 origin 必须在 manifest 的 `allowed_origins` 中声明。
 - 其他未声明 HTTP/HTTPS origin、content URL 和未声明本地路径会被拦截。
 - 禁止通过 manifest 声明带路径、查询参数、片段、用户名或非 HTTP/HTTPS 协议的外联地址。
 - 下载包最大 25 MiB，解压后最大 50 MiB，最多 1000 个文件。
 - Zip 包和 manifest 路径不能包含路径穿越、绝对路径或反斜杠。
-- 插件更新后需要重新确认权限，不会静默继承旧版本授权。
+- 插件更新会清空授权并进入重新确认状态。
 - 导入确认页会展示 commitSha、内容 digest、权限和允许执行/联网来源。
+- `identity.credentials.read` 对应的 `identity.get_credentials` 会在宿主单次确认后返回本机已保存的登录名和明文密码。
 
 ## 9. 发布检查清单
 
@@ -591,7 +593,7 @@ type HttpBridgeResponse = {
 - `dist/` 包含入口文件、图标和所有静态资源。
 - 已运行 `node tools/third-party-service-lint.cjs <plugin-root>`。
 - 仅声明实际需要的权限，优先把非关键能力放到 `optional`。
-- 仔细确认 `allowed_origins`，不要声明不完全信任的第三方页面、iframe 来源或远端 API。
+- 只在 `allowed_origins` 中声明运行时确实需要加载的页面、iframe、接口或资源 origin。
 - 所有 API 调用都处理 `ok: false` 和常用错误码。
 - 页面在窄屏下可用，表格、按钮、长文本和代码片段不会遮挡内容。
 - 不要把真实校园账号、Cookie、token、邮箱内容、验证码或个人隐私写入代码或示例数据。

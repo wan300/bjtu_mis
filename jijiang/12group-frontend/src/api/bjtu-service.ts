@@ -38,6 +38,15 @@ type BjtuServiceProfileData = {
   avatarUrl?: string;
 };
 
+export type BjtuServiceCredentials = {
+  login_name?: string;
+  loginName?: string;
+  student_id?: string;
+  studentId?: string;
+  account?: string;
+  password?: string;
+};
+
 type BjtuServiceProfileEnvelope = {
   data?: BjtuServiceProfileData;
 };
@@ -85,11 +94,25 @@ export async function syncBjtuServiceProfile() {
   return result.data;
 }
 
-export async function createBjtuServiceUserInfo() {
+export async function getBjtuServiceCredentials() {
+  return invokeBjtuService<BjtuServiceCredentials>("identity.get_credentials", {});
+}
+
+export async function createBjtuServiceUserInfo(credentials?: BjtuServiceCredentials | null) {
   const profile = await invokeBjtuService<BjtuServiceProfileEnvelope | BjtuServiceProfileData>("identity.get_profile", {});
   uni.setStorageSync("bjtuServiceProfile", profile);
   const data = extractProfileData(profile);
-  const studentId = text(data.student_id || data.studentId || data.account);
+  const resolvedCredentials = credentials || (await getBjtuServiceCredentials());
+  const studentId = text(
+    data.student_id ||
+      data.studentId ||
+      data.account ||
+      resolvedCredentials.student_id ||
+      resolvedCredentials.studentId ||
+      resolvedCredentials.login_name ||
+      resolvedCredentials.loginName ||
+      resolvedCredentials.account
+  );
   if (!studentId) {
     throw new Error("BJTU 身份缺少学号，无法进入技匠");
   }

@@ -1,4 +1,4 @@
-import { request } from "@/api/request";
+﻿import { request } from "@/api/request";
 import type { LoginResult, MisCaptcha, MisLoginResult } from "@/types/domain";
 
 export function misAutoLogin(loginName: string, password: string) {
@@ -31,6 +31,8 @@ export function refreshToken() {
   return request<LoginResult>({
     url: "/api/auth/refresh",
     method: "POST",
+    skipToast: true,
+    disableAuthRecovery: true,
   });
 }
 

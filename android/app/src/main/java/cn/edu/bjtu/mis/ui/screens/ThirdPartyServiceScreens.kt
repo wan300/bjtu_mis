@@ -1,7 +1,8 @@
-package cn.edu.bjtu.mis.ui.screens
+﻿package cn.edu.bjtu.mis.ui.screens
 
 import android.annotation.SuppressLint
 import android.net.Uri
+import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.MimeTypeMap
 import android.webkit.WebResourceRequest
@@ -90,6 +91,8 @@ import java.io.File
 import java.util.Locale
 
 private const val MaxThirdPartyHttpResponseBytes = 5L * 1024L * 1024L
+private const val ThirdPartyBridgeLogTag = "ThirdPartyBridge"
+private val AUTH_EXPIRED_SERVICE_CODES = setOf(10001, 10002)
 private val ThirdPartyBridgeHttpClient = OkHttpClient()
 
 @Composable
@@ -360,6 +363,7 @@ fun ThirdPartyServiceRoute(
     repository: ThirdPartyServiceRepository,
     apiRegistry: ThirdPartyServiceApiRegistry,
     onBackToServices: () -> Unit,
+    onBackHandlerChanged: ((() -> Boolean)?) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(serviceId) { mutableStateOf<LoadState<ThirdPartyService>>(LoadState.Loading) }
@@ -401,6 +405,7 @@ fun ThirdPartyServiceRoute(
                     service = service,
                     apiRegistry = apiRegistry,
                     onCloseService = onBackToServices,
+                    onBackHandlerChanged = onBackHandlerChanged,
                 )
             }
         }
@@ -545,6 +550,7 @@ private fun ThirdPartyServiceWebViewScreen(
     service: ThirdPartyService,
     apiRegistry: ThirdPartyServiceApiRegistry,
     onCloseService: () -> Unit,
+    onBackHandlerChanged: ((() -> Boolean)?) -> Unit = {},
 ) {
     val composeScope = rememberCoroutineScope()
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -562,6 +568,18 @@ private fun ThirdPartyServiceWebViewScreen(
 
     DisposableEffect(bridgeScope) {
         onDispose { bridgeScope.cancel() }
+    }
+
+    DisposableEffect(service, onBackHandlerChanged) {
+        onBackHandlerChanged {
+            if (webViewRef?.canGoBack() == true) {
+                webViewRef?.goBack()
+                true
+            } else {
+                false
+            }
+        }
+        onDispose { onBackHandlerChanged(null) }
     }
 
     pendingConfirmation?.let { pending ->
@@ -644,13 +662,20 @@ private class ThirdPartyNativeBridge(
     @JavascriptInterface
     fun invoke(requestJson: String) {
         scope.launch {
+            val requestStart = System.currentTimeMillis()
             val parsedRequest = runCatching { AppJson.parseToJsonElement(requestJson).jsonObject }
             val request = parsedRequest.getOrNull()
             val requestId = request?.get("id")?.jsonPrimitive?.contentOrNull.orEmpty()
             val method = request?.get("method")?.jsonPrimitive?.contentOrNull.orEmpty()
             val params = request?.get("params") as? JsonObject ?: buildJsonObject { }
+            val traceRequestId = requestId.ifBlank { "unknown" }
+            val userIdentity = extractRequestUserIdentity(params)
 
             val response = if (request == null) {
+                Log.w(
+                    ThirdPartyBridgeLogTag,
+                    "Third-party bridge parse failure: serviceId=${service.serviceId}, requestId=$traceRequestId, method=$method, error=${parsedRequest.exceptionOrNull()?.message}",
+                )
                 requestId to bridgeErrorResponse(
                     code = "bridge_failed",
                     message = parsedRequest.exceptionOrNull()?.message ?: "第三方服务桥接请求格式错误",
@@ -660,6 +685,7 @@ private class ThirdPartyNativeBridge(
                     val currentPageUrl = withContext(Dispatchers.Main.immediate) {
                         webViewProvider()?.url.orEmpty()
                     }
+                    val trace = "serviceId=${service.serviceId}, requestId=$traceRequestId, userIdentity=$userIdentity, platform=android_webview"
                     if (!ThirdPartyWebViewAccessPolicy.isTrustedRuntimeUrl(
                             url = currentPageUrl,
                             serviceId = service.serviceId,
@@ -667,25 +693,54 @@ private class ThirdPartyNativeBridge(
                             allowedOrigins = service.allowedOrigins,
                         )
                     ) {
+                        Log.w(
+                            ThirdPartyBridgeLogTag,
+                            "Third-party bridge blocked by policy: $trace, url=$currentPageUrl",
+                        )
                         return@runCatching requestId to bridgeErrorResponse("bridge_failed", "当前页面不在第三方服务允许执行来源内")
                     }
                     if (method == "app.close_service") {
+                        Log.i(
+                            ThirdPartyBridgeLogTag,
+                            "Third-party bridge close_service: $trace, durationMs=${System.currentTimeMillis() - requestStart}",
+                        )
                         return@runCatching requestId to buildJsonObject {
                             put("ok", true)
                             put("data", buildJsonObject { })
                         }
                     }
                     if (method == "app.http_request") {
-                        return@runCatching requestId to httpRequest(params)
+                        val requestTargetUrl = params.string("url").orEmpty()
+                        Log.i(
+                            ThirdPartyBridgeLogTag,
+                            "Third-party bridge http_request start: $trace, requestUrl=${urlForLog(requestTargetUrl)}, durationMs=${System.currentTimeMillis() - requestStart}",
+                        )
+                        return@runCatching requestId to httpRequest(
+                            requestId = traceRequestId,
+                            params = params,
+                            requestUrl = currentPageUrl,
+                            userIdentity = userIdentity,
+                        )
                     }
-                    requestId to apiRegistry.invoke(
+                    val result = requestId to apiRegistry.invoke(
                         service = service,
                         method = method,
                         params = params,
                         confirmer = confirmer,
                         currentPageUrl = currentPageUrl,
                     )
+                    val ok = result.second["ok"]?.jsonPrimitive?.booleanOrNull == true
+                    Log.i(
+                        ThirdPartyBridgeLogTag,
+                        "Third-party bridge api invoke: $trace, method=$method, ok=$ok, durationMs=${System.currentTimeMillis() - requestStart}",
+                    )
+                    result
                 }.getOrElse { error ->
+                    Log.w(
+                        ThirdPartyBridgeLogTag,
+                        "Third-party bridge invoke failed: requestId=$traceRequestId serviceId=${service.serviceId} method=$method, error=${error.message}",
+                        error,
+                    )
                     requestId to bridgeErrorResponse("bridge_failed", error.message ?: "第三方服务桥接失败")
                 }
             }
@@ -693,6 +748,10 @@ private class ThirdPartyNativeBridge(
             val payload = response.second.toString()
             val shouldClose = method == "app.close_service" &&
                 response.second["ok"]?.jsonPrimitive?.booleanOrNull == true
+            Log.i(
+                ThirdPartyBridgeLogTag,
+                "Third-party bridge resolved: serviceId=${service.serviceId}, requestId=$traceRequestId, method=$method, ok=${response.second["ok"]?.jsonPrimitive?.booleanOrNull}",
+            )
             webViewProvider()?.post {
                 webViewProvider()?.evaluateJavascript(
                     "window.BjtuService && window.BjtuService.__resolve(${JSONObject.quote(callbackId)}, $payload);",
@@ -703,7 +762,12 @@ private class ThirdPartyNativeBridge(
         }
     }
 
-    private suspend fun httpRequest(params: JsonObject): JsonObject = withContext(Dispatchers.IO) {
+    private suspend fun httpRequest(
+        requestId: String,
+        params: JsonObject,
+        requestUrl: String,
+        userIdentity: String?,
+    ): JsonObject = withContext(Dispatchers.IO) {
         val url = params.string("url") ?: throw IllegalArgumentException("缺少请求 URL")
         val origin = ThirdPartyWebViewAccessPolicy.origin(url)
             ?: throw IllegalArgumentException("仅支持 HTTP/HTTPS 请求")
@@ -717,6 +781,11 @@ private class ThirdPartyNativeBridge(
         }
 
         val headers = params["headers"]?.jsonObject.orEmpty()
+        val trace = "serviceId=${service.serviceId}, requestId=$requestId, userIdentity=${userIdentity ?: "unknown"}, platform=android_webview"
+        Log.i(
+            ThirdPartyBridgeLogTag,
+            "Third-party HTTP request start: $trace, pageUrl=${urlForLog(requestUrl)}, requestUrl=${urlForLog(url)}, method=$method",
+        )
         val requestBuilder = OkHttpRequest.Builder().url(url)
         headers.forEach { (name, value) ->
             val headerValue = value.jsonPrimitive.contentOrNull.orEmpty()
@@ -742,12 +811,49 @@ private class ThirdPartyNativeBridge(
             }
             val responseData = runCatching { AppJson.parseToJsonElement(responseText) }
                 .getOrElse { JsonPrimitive(responseText) }
+            val responseStatusCode = response.code
+            val responseJson = responseData as? JsonObject
+            val responseBizCode = responseJson
+                ?.get("code")
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?.toIntOrNull()
+            val responseBizStatus = responseJson?.get("status")?.jsonPrimitive?.contentOrNull
+            val responseBizMessage = responseJson?.get("message")?.jsonPrimitive?.contentOrNull
+            val responseBizAttempts = responseJson?.get("attempts")?.jsonPrimitive?.contentOrNull
+            val responseCaptchaChallengeId = runCatching {
+                responseJson
+                    ?.get("captcha")
+                    ?.jsonObject
+                    ?.get("challengeId")
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+            }.getOrElse { null }
+            val responseTrace = if (
+                url.contains("/api/auth/mis/auto-login") ||
+                url.contains("/api/auth/mis/manual-login")
+            ) {
+                ", payloadStatus=$responseBizStatus, payloadMessage=$responseBizMessage, attempts=$responseBizAttempts, challengeId=${responseCaptchaChallengeId ?: "null"}"
+            } else {
+                ", payloadMessage=$responseBizMessage"
+            }
+            if (responseStatusCode in 401..403 || responseBizCode in AUTH_EXPIRED_SERVICE_CODES) {
+                Log.w(
+                    ThirdPartyBridgeLogTag,
+                    "Third-party HTTP auth-expired hint: $trace, requestUrl=${urlForLog(url)}, status=$responseStatusCode, appCode=$responseBizCode$responseTrace",
+                )
+            } else {
+                Log.i(
+                    ThirdPartyBridgeLogTag,
+                    "Third-party HTTP request done: $trace, requestUrl=${urlForLog(url)}, status=$responseStatusCode, appCode=$responseBizCode$responseTrace",
+                )
+            }
             buildJsonObject {
                 put("ok", true)
                 put(
                     "data",
                     buildJsonObject {
-                        put("statusCode", response.code)
+                        put("statusCode", responseStatusCode)
                         put("data", responseData)
                         put(
                             "header",
@@ -761,6 +867,19 @@ private class ThirdPartyNativeBridge(
                 )
             }
         }
+    }
+
+    private fun extractRequestUserIdentity(params: JsonObject): String {
+        val identityByParam = params.string("userIdentity")?.ifBlank { null }
+            ?: params.string("userId")?.ifBlank { null }
+            ?: params.string("user_id")?.ifBlank { null }
+        if (!identityByParam.isNullOrBlank()) return identityByParam
+
+        val token = params["headers"]?.jsonObject?.entries?.firstOrNull { (name) ->
+            name.equals("authorization", ignoreCase = true)
+        }?.value?.jsonPrimitive?.contentOrNull
+        if (!token.isNullOrBlank()) return "authorization_header"
+        return "unknown"
     }
 
     private fun JsonObject.string(name: String): String? =
@@ -778,6 +897,14 @@ private class ThirdPartyNativeBridge(
             "cookie",
             "origin",
         )
+    }
+
+    private fun urlForLog(value: String): String {
+        val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return value.take(256)
+        val scheme = uri.scheme ?: return value.take(256)
+        val authority = uri.encodedAuthority ?: return value.take(256)
+        val path = uri.encodedPath.orEmpty()
+        return "$scheme://$authority$path"
     }
 }
 

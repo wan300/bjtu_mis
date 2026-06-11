@@ -66,7 +66,7 @@ class ThirdPartyServiceRepositoryTest {
     }
 
     @Test
-    fun listServicesInstallsBundledDefaultServiceWithAllowedDefaultGrant() = runBlocking {
+    fun listServicesInstallsBundledDefaultServicePendingUserGrant() = runBlocking {
         MockWebServer().use { server ->
             val dao = FakeThirdPartyServiceDao()
             val installDir = temp.newFolder("jijiang-install").apply {
@@ -89,9 +89,9 @@ class ThirdPartyServiceRepositoryTest {
             val service = services.single()
             assertEquals("com.jijiang.campus-service", service.serviceId)
             assertEquals("asset://third-party-services/com.jijiang.campus-service", service.sourceUrl)
-            assertEquals(setOf("identity.profile.read"), service.grantedPermissions)
-            assertTrue(service.enabled)
-            assertFalse(service.needsReview)
+            assertTrue(service.grantedPermissions.isEmpty())
+            assertFalse(service.enabled)
+            assertTrue(service.needsReview)
             assertEquals(1, bundledProvider.calls)
 
             repository.listServices()
@@ -206,7 +206,7 @@ private class FakeBundledProvider(
                         icon = "static/logo.png",
                         author = "jijiang",
                         permissions = ThirdPartyServicePermissionDeclaration(
-                            required = listOf("identity.profile.read"),
+                            required = listOf("identity.profile.read", "identity.credentials.read"),
                         ),
                         allowedOrigins = listOf("http://47.95.238.140:8080"),
                     ),
@@ -222,7 +222,7 @@ private class FakeBundledProvider(
                     packageFileCount = 1,
                     installDir = installDir,
                 ),
-                defaultGrantedPermissions = setOf("identity.profile.read"),
+                defaultGrantedPermissions = emptySet(),
             )
         )
     }

@@ -8,6 +8,8 @@ import org.pytorch.IValue
 import org.pytorch.Module
 import org.pytorch.Tensor
 import java.io.File
+import java.io.FileNotFoundException
+import java.io.IOException
 
 class CaptchaSolveException(
     message: String,
@@ -48,10 +50,15 @@ class TorchScriptCaptchaSolver(
             val value = loadModule().forward(IValue.from(input))
             if (value.isTensor) value.toTensor() else value.toTuple().first().toTensor()
         }.getOrElse {
+            val isModelUnavailable = isModelMissing(it)
             throw CaptchaSolveException(
-                message = "验证码模型推理失败：${formatTorchRuntimeError(it)}",
+                message = if (isModelUnavailable) {
+                    "captcha auto recognition is unavailable, pt file missing: $assetName"
+                } else {
+                    "验证码模型推理失败：${formatTorchRuntimeError(it)}"
+                },
                 cause = it,
-                retryable = !isTorchRuntimeConfigurationError(it),
+                retryable = !isTorchRuntimeConfigurationError(it) && !isModelUnavailable,
             )
         }
 
@@ -66,20 +73,67 @@ class TorchScriptCaptchaSolver(
     private fun loadModule(): Module {
         module?.let { return it }
         return synchronized(this) {
-            module ?: Module.load(copyAssetToFiles().absolutePath).also { module = it }
+            module ?: run {
+                runCatching { Module.load(copyAssetToFiles(context.filesDir).absolutePath) }
+                    .getOrElse { cause ->
+                        if (!isModelMissing(cause)) {
+                            throw mapModuleLoadError(cause)
+                        }
+                        runCatching { Module.load(copyAssetToFiles(context.codeCacheDir).absolutePath) }
+                            .getOrElse { fallbackCause ->
+                                throw mapModuleLoadError(fallbackCause)
+                            }
+                    }
+                    .also { module = it }
+            }
         }
     }
 
-    private fun copyAssetToFiles(): File {
-        val target = File(context.filesDir, assetName)
-        context.assets.open(assetName).use { input ->
-            val assetSize = input.available().toLong()
-            if (target.exists() && target.length() == assetSize) return target
+    private fun copyAssetToFiles(baseDir: File): File {
+        val target = File(baseDir, assetName)
+        if (target.exists() && target.canRead() && target.length() > 0L) {
+            return target
         }
-        context.assets.open(assetName).use { input ->
-            target.outputStream().use { output -> input.copyTo(output) }
+
+        if (target.exists()) {
+            target.delete()
         }
-        return target
+        if (!baseDir.exists()) {
+            baseDir.mkdirs()
+        }
+
+        return runCatching {
+            context.assets.open(assetName).use { input ->
+                target.outputStream().use { output -> input.copyTo(output, bufferSize = 64 * 1024) }
+            }
+            if (!target.exists() || target.length() <= 0L) {
+                throw IOException("pt file missing: $assetName")
+            }
+            target
+        }.getOrElse { cause ->
+            val fallbackMessage = if (isModelMissing(cause)) {
+                "captcha auto recognition is unavailable, pt file missing: $assetName"
+            } else {
+                "captcha auto recognition is unavailable: ${formatTorchRuntimeError(cause)}"
+            }
+            throw CaptchaSolveException(
+                message = fallbackMessage,
+                cause = cause,
+                retryable = false,
+            )
+        }
+    }
+
+    private fun mapModuleLoadError(cause: Throwable): CaptchaSolveException {
+        return CaptchaSolveException(
+            message = if (isModelMissing(cause)) {
+                "captcha auto recognition is unavailable, pt file missing: $assetName"
+            } else {
+                "captcha auto recognition is unavailable: ${formatTorchRuntimeError(cause)}"
+            },
+            cause = cause,
+            retryable = !isTorchRuntimeConfigurationError(cause) && !isModelMissing(cause),
+        )
     }
 
     private fun preprocess(bitmap: Bitmap): Tensor {
@@ -183,6 +237,17 @@ private fun isMissingTorchRuntimeClass(chain: List<Throwable>): Boolean =
                 message.contains("org.pytorch") ||
                 message.contains("org/pytorch")
         }
+
+private fun isModelMissing(error: Throwable): Boolean {
+    val chain = error.causeChain()
+    return chain.any { it is FileNotFoundException } ||
+        chain.any {
+            val message = it.message.orEmpty()
+            message.contains("No such file", ignoreCase = true) ||
+                message.contains("not found", ignoreCase = true) ||
+                message.contains("pt file missing", ignoreCase = true)
+        }
+}
 
 private fun supportedAbis(): String =
     runCatching { Build.SUPPORTED_ABIS.joinToString(", ") }
