@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.edu.bjtu.mis.data.course.CourseSelectionForegroundService
 import cn.edu.bjtu.mis.data.course.CourseSelectionRunner
 import cn.edu.bjtu.mis.data.repository.CourseSelectionRepository
+import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.model.CourseSelectionCourse
 import cn.edu.bjtu.mis.model.CourseSelectionData
 import cn.edu.bjtu.mis.model.CourseSelectionReplaceRule
@@ -59,6 +60,7 @@ import kotlinx.coroutines.launch
 fun CourseSelectionScreen(
     repository: CourseSelectionRepository,
     runner: CourseSelectionRunner,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -88,10 +90,10 @@ fun CourseSelectionScreen(
         }
     }
 
-    fun load() {
+    fun load(strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst) {
         scope.launch {
             state = LoadState.Loading
-            runCatching { repository.listing() }
+            runCatching { repository.listing(strategy) }
                 .onSuccess { state = LoadState.Data(it) }
                 .onFailure { state = LoadState.Error(it.message ?: "课程列表加载失败") }
         }
@@ -121,7 +123,7 @@ fun CourseSelectionScreen(
             .onFailure { uiError = it.message ?: "抢课后台服务启动失败" }
     }
 
-    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) { load(initialLoadStrategy) }
     LaunchedEffect(runState.completed) {
         if (runState.completed) load()
     }

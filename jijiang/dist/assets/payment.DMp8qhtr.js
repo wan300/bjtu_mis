@@ -1,1 +1,0 @@
-import{R as t}from"./index-C84RB2NM.js";function r(r){return t({url:"/api/payment/create",method:"POST",data:{orderId:r}})}function a(r,a){return t({url:"/api/payment/sync",method:"POST",data:{orderId:r},skipToast:null==a?void 0:a.silent})}export{r as p,a as s};

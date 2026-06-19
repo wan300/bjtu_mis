@@ -54,6 +54,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cn.edu.bjtu.mis.data.provider.ProviderConstants
+import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.data.repository.ZhixingRepository
 import cn.edu.bjtu.mis.model.ModuleEnvelope
 import cn.edu.bjtu.mis.model.ZhixingAttachment
@@ -78,7 +79,10 @@ import cn.edu.bjtu.mis.ui.components.SectionTitle
 import kotlinx.coroutines.launch
 
 @Composable
-fun ZhixingScreen(repository: ZhixingRepository) {
+fun ZhixingScreen(
+    repository: ZhixingRepository,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+) {
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
     var authState by remember { mutableStateOf<LoadState<ZhixingAuthState>>(LoadState.Loading) }
@@ -93,10 +97,13 @@ fun ZhixingScreen(repository: ZhixingRepository) {
         runCatching { uriHandler.openUri(url) }
     }
 
-    fun loadHome(forceRefresh: Boolean = false) {
+    fun loadHome(
+        forceRefresh: Boolean = false,
+        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
+    ) {
         scope.launch {
             homeState = LoadState.Loading
-            runCatching { repository.home(forceRefresh = forceRefresh) }
+            runCatching { repository.home(forceRefresh = forceRefresh, strategy = strategy) }
                 .onSuccess {
                     authState = LoadState.Data(it.data.authState)
                     homeState = LoadState.Data(it)
@@ -105,15 +112,18 @@ fun ZhixingScreen(repository: ZhixingRepository) {
         }
     }
 
-    fun refreshAuthAndHome() {
+    fun refreshAuthAndHome(strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst) {
         scope.launch {
             authState = LoadState.Loading
             homeState = LoadState.Loading
-            runCatching { repository.authState() }
+            runCatching { repository.authState(strategy) }
                 .onSuccess { state ->
                     authState = LoadState.Data(state)
                     if (state.loggedIn) {
-                        loadHome(forceRefresh = true)
+                        loadHome(
+                            forceRefresh = strategy == ModuleLoadStrategy.NetworkFirst,
+                            strategy = strategy,
+                        )
                     }
                 }
                 .onFailure { authState = LoadState.Error(it.message ?: "知行登录状态校验失败") }
@@ -142,7 +152,7 @@ fun ZhixingScreen(repository: ZhixingRepository) {
     }
 
     LaunchedEffect(Unit) {
-        refreshAuthAndHome()
+        refreshAuthAndHome(initialLoadStrategy)
     }
 
     BackHandler(enabled = selectedThread != null) {

@@ -28,7 +28,7 @@ type LocalToolCall = {
 	type: 'function';
 	function: {
 		name: string;
-		arguments: string;
+		arguments: string | JsonRecord;
 	};
 };
 
@@ -293,7 +293,7 @@ const formatTurnContent = (turn: ProviderTurn, options: { final?: boolean } = {}
 				renderLocalToolCallDetails({
 					callId: toolCall.id,
 					name: toolCall.function.name,
-					argumentsText: toolCall.function.arguments ?? '',
+					argumentsText: stringifyToolArguments(toolCall.function.arguments),
 					done: false
 				})
 			);
@@ -462,18 +462,149 @@ const getLastUserQuery = (messages: JsonRecord[] = []) => {
 
 export const executeLocalTool = executeRegisteredLocalTool;
 
+const isPlainJsonRecord = (value: unknown): value is JsonRecord => {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+		return false;
+	}
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+};
+
+const stringifyToolArguments = (value: unknown) => {
+	if (typeof value === 'string') {
+		return value;
+	}
+	if (isPlainJsonRecord(value)) {
+		return jsonString(value);
+	}
+	return '';
+};
+
+const copyStringAlias = (args: JsonRecord, target: string, aliases: string[]) => {
+	let copied = false;
+	if (typeof args[target] === 'string' && args[target].trim()) {
+		copied = true;
+	} else {
+		for (const alias of aliases) {
+			if (typeof args[alias] === 'string' && args[alias].trim()) {
+				args[target] = args[alias];
+				copied = true;
+				break;
+			}
+		}
+	}
+
+	if (copied) {
+		aliases.forEach((alias) => {
+			delete args[alias];
+		});
+	}
+};
+
+const copyIntegerAlias = (args: JsonRecord, target: string, aliases: string[]) => {
+	let copied = false;
+	if (Number.isFinite(Number(args[target]))) {
+		copied = true;
+	} else {
+		for (const alias of aliases) {
+			const value = args[alias];
+			if (Number.isFinite(Number(value))) {
+				args[target] = Number(value);
+				copied = true;
+				break;
+			}
+		}
+	}
+
+	if (copied) {
+		aliases.forEach((alias) => {
+			delete args[alias];
+		});
+	}
+};
+
+const normalizeAgentToolArguments = (toolName: string, args: JsonRecord) => {
+	if (!toolName.startsWith('agent_')) {
+		return args;
+	}
+
+	const normalized = { ...args };
+	const fileAliases = ['filename', 'file'];
+
+	if (
+		toolName === 'agent_file_list' ||
+		toolName === 'agent_file_read' ||
+		toolName === 'agent_file_write' ||
+		toolName === 'agent_file_delete' ||
+		toolName === 'agent_document_extract_pdf' ||
+		toolName === 'agent_document_extract_docx'
+	) {
+		copyStringAlias(normalized, 'path', fileAliases);
+	}
+
+	if (toolName === 'agent_archive_extract') {
+		copyStringAlias(normalized, 'archivePath', ['archive_path', 'path', ...fileAliases]);
+		copyStringAlias(normalized, 'targetDir', ['target_dir']);
+	}
+
+	if (toolName === 'agent_archive_create_zip') {
+		copyStringAlias(normalized, 'sourceDir', ['source_dir', 'path']);
+		copyStringAlias(normalized, 'zipPath', ['zip_path', 'output_path', 'outputPath']);
+	}
+
+	if (
+		toolName === 'agent_document_extract_pdf' ||
+		toolName === 'agent_document_extract_docx' ||
+		toolName === 'agent_document_generate_pdf' ||
+		toolName === 'agent_document_generate_docx'
+	) {
+		copyStringAlias(normalized, 'outputPath', ['output_path']);
+	}
+
+	if (toolName === 'agent_document_generate_pdf' || toolName === 'agent_document_generate_docx') {
+		copyStringAlias(normalized, 'contentMarkdown', ['content_markdown', 'markdown', 'content']);
+	}
+
+	if (toolName === 'agent_run_javascript') {
+		copyIntegerAlias(normalized, 'timeoutSeconds', ['timeout_seconds']);
+		if (!Number.isFinite(Number(normalized.timeoutSeconds)) && Number.isFinite(Number(normalized.timeout_ms))) {
+			normalized.timeoutSeconds = Math.max(1, Math.ceil(Number(normalized.timeout_ms) / 1000));
+		}
+		delete normalized.timeout_ms;
+	}
+
+	if (toolName === 'agent_package_results') {
+		copyStringAlias(normalized, 'finalAnswer', ['final_answer', 'answer', 'content']);
+	}
+
+	return normalized;
+};
+
 const parseToolArguments = (toolCall: LocalToolCall) => {
-	const raw = toolCall.function.arguments?.trim?.();
+	const raw = toolCall.function.arguments;
 	if (!raw) {
 		return {};
 	}
 
+	if (isPlainJsonRecord(raw)) {
+		return normalizeAgentToolArguments(toolCall.function.name, raw);
+	}
+
+	if (typeof raw !== 'string') {
+		throw new Error('Tool call arguments must be a JSON object or a JSON object string.');
+	}
+
+	const trimmed = raw.trim();
+	if (!trimmed) {
+		return {};
+	}
+
 	try {
-		const parsed = JSON.parse(raw);
-		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		const parsed = JSON.parse(trimmed);
+		if (!isPlainJsonRecord(parsed)) {
 			throw new Error('Tool arguments must be a JSON object.');
 		}
-		return parsed as JsonRecord;
+		return normalizeAgentToolArguments(toolCall.function.name, parsed);
 	} catch (error) {
 		throw new Error(`Tool call arguments are invalid JSON: ${getErrorMessage(error)}`);
 	}
@@ -503,18 +634,71 @@ const decodeXmlText = (value: string) =>
 	});
 
 const normalizeInlineToolArguments = (toolName: string, args: JsonRecord) => {
-	const normalized = { ...args };
+	return normalizeAgentToolArguments(toolName, args);
+};
 
-	if (
-		toolName.startsWith('agent_') &&
-		typeof normalized.filename === 'string' &&
-		typeof normalized.path !== 'string'
-	) {
-		normalized.path = normalized.filename;
-		delete normalized.filename;
+const AGENT_TOOL_ARGUMENT_EXAMPLES: Record<string, JsonRecord> = {
+	agent_file_list: { path: 'inbox' },
+	agent_file_read: { path: 'inbox/example.txt' },
+	agent_file_write: { path: 'work/notes.md', content: 'Text to write.' },
+	agent_file_delete: { path: 'work/notes.md' },
+	agent_archive_extract: {
+		archivePath: 'inbox/homework.zip',
+		targetDir: 'work/attachments/homework'
+	},
+	agent_archive_create_zip: { sourceDir: 'output', zipPath: 'output/results.zip' },
+	agent_document_extract_pdf: { path: 'inbox/task.pdf', outputPath: 'work/task.md' },
+	agent_document_extract_docx: { path: 'inbox/task.docx', outputPath: 'work/task.md' },
+	agent_document_generate_pdf: {
+		title: 'Answer',
+		contentMarkdown: '# Answer\n\n...',
+		outputPath: 'output/answer.pdf'
+	},
+	agent_document_generate_docx: {
+		title: 'Answer',
+		contentMarkdown: '# Answer\n\n...',
+		outputPath: 'output/answer.docx'
+	},
+	agent_run_javascript: { code: 'return input.value + 1;', input: { value: 1 } },
+	agent_package_results: { finalAnswer: 'Final answer markdown.' }
+};
+
+const REQUIRED_AGENT_TOOL_ARGUMENTS: Record<string, string[]> = {
+	agent_file_list: ['path'],
+	agent_file_read: ['path'],
+	agent_file_write: ['path', 'content'],
+	agent_file_delete: ['path'],
+	agent_archive_extract: ['archivePath', 'targetDir'],
+	agent_archive_create_zip: ['sourceDir', 'zipPath'],
+	agent_document_extract_pdf: ['path', 'outputPath'],
+	agent_document_extract_docx: ['path', 'outputPath'],
+	agent_document_generate_pdf: ['title', 'contentMarkdown', 'outputPath'],
+	agent_document_generate_docx: ['title', 'contentMarkdown', 'outputPath'],
+	agent_run_javascript: ['code']
+};
+
+const missingAgentToolArguments = (toolName: string, args: JsonRecord) => {
+	const required = REQUIRED_AGENT_TOOL_ARGUMENTS[toolName] ?? [];
+	return required.filter((key) => {
+		const value = args[key];
+		return typeof value === 'string' ? !value.trim() : value === undefined || value === null;
+	});
+};
+
+const buildToolArgumentError = (toolName: string, error: unknown, args?: JsonRecord) => {
+	const missing = args ? missingAgentToolArguments(toolName, args) : [];
+	const example = AGENT_TOOL_ARGUMENT_EXAMPLES[toolName];
+	const output: JsonRecord = {
+		error: getErrorMessage(error),
+		tool: toolName
+	};
+	if (missing.length > 0) {
+		output.missing = missing;
 	}
-
-	return normalized;
+	if (example) {
+		output.expected_arguments_example = example;
+	}
+	return output;
 };
 
 const parseInlineXmlToolArguments = (toolName: string, body: string): JsonRecord => {
@@ -525,7 +709,7 @@ const parseInlineXmlToolArguments = (toolName: string, body: string): JsonRecord
 
 	if (trimmed.startsWith('{')) {
 		const parsed = JSON.parse(trimmed);
-		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		if (!isPlainJsonRecord(parsed)) {
 			throw new Error('Inline tool arguments must be a JSON object.');
 		}
 		return normalizeInlineToolArguments(toolName, parsed as JsonRecord);
@@ -705,7 +889,13 @@ const buildAssistantToolCallMessage = (turn: ProviderTurn): JsonRecord => {
 	const message: JsonRecord = {
 		role: 'assistant',
 		content: null,
-		tool_calls: turn.toolCalls
+		tool_calls: turn.toolCalls.map((toolCall) => ({
+			...toolCall,
+			function: {
+				...toolCall.function,
+				arguments: stringifyToolArguments(toolCall.function.arguments)
+			}
+		}))
 	};
 	const reasoning = turn.reasoning ?? '';
 
@@ -753,7 +943,11 @@ const mergeToolCallDelta = (toolCalls: Map<number, LocalToolCall>, deltaToolCall
 	}
 
 	if (typeof deltaToolCall?.function?.arguments === 'string') {
-		existing.function.arguments += deltaToolCall.function.arguments;
+		const existingArguments =
+			typeof existing.function.arguments === 'string'
+				? existing.function.arguments
+				: stringifyToolArguments(existing.function.arguments);
+		existing.function.arguments = existingArguments + deltaToolCall.function.arguments;
 	}
 
 	toolCalls.set(index, existing);
@@ -956,7 +1150,16 @@ const runToolCall = async (
 
 	try {
 		const args = parseToolArguments(toolCall);
-		if (
+		const missing = missingAgentToolArguments(toolCall.function.name, args);
+		if (missing.length > 0) {
+			content = jsonString(
+				buildToolArgumentError(
+					toolCall.function.name,
+					`Missing required argument(s): ${missing.join(', ')}`,
+					args
+				)
+			);
+		} else if (
 			context?.webSearchEnabled &&
 			(toolCall.function.name === 'search_web' || toolCall.function.name === 'fetch_url')
 		) {
@@ -975,10 +1178,7 @@ const runToolCall = async (
 			markWebSearchRetrying(context, error);
 		}
 
-		content = jsonString({
-			error: getErrorMessage(error),
-			tool: toolCall.function.name
-		});
+		content = jsonString(buildToolArgumentError(toolCall.function.name, error));
 	}
 
 	return {
@@ -1584,7 +1784,7 @@ export const requestLocalAgentChatCompletion = async ({
 						id: toolCall.id || outputId('fc'),
 						call_id: toolCall.id,
 						name: toolCall.function.name,
-						arguments: toolCall.function.arguments ?? '{}',
+						arguments: stringifyToolArguments(toolCall.function.arguments) || '{}',
 						status: 'in_progress'
 					});
 				}

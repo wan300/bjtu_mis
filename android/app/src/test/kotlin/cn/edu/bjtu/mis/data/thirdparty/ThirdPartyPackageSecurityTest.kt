@@ -143,8 +143,8 @@ class ThirdPartyPackageSecurityTest {
 
     @Test
     fun sandboxHostsAreIsolatedAndValidHostLabels() {
-        val first = ThirdPartyServiceSandbox.hostFor("com.jijiang.campus-service", "abcdef1234567890")
-        val sameServiceNewCommit = ThirdPartyServiceSandbox.hostFor("com.jijiang.campus-service", "1234567890abcdef")
+        val first = ThirdPartyServiceSandbox.hostFor("com.example.campus-service", "abcdef1234567890")
+        val sameServiceNewCommit = ThirdPartyServiceSandbox.hostFor("com.example.campus-service", "1234567890abcdef")
         val second = ThirdPartyServiceSandbox.hostFor("bjtu_other.service", "abcdef1234567890")
         val firstLabel = first.substringBefore('.')
 

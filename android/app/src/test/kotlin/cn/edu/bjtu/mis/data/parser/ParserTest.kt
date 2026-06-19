@@ -196,6 +196,27 @@ class ParserTest {
     }
 
     @Test
+    fun parseHomeworkKeepsFullRequirementBesideExcerpt() {
+        val course = parseCourses(json("course_list.json")).first()
+        val longBody = (1..80).joinToString(" ") { "第${it}段作业要求" }
+        val payload = AppJson.parseToJsonElement(
+            """
+            {
+              "courseNoteList": [
+                {"id": 1, "title": "Long homework", "content": "<p>$longBody</p>"}
+              ],
+              "STATUS": "0"
+            }
+            """.trimIndent()
+        ).jsonObject
+
+        val homework = parseHomeworkList(payload, course, 0).single()
+
+        assertEquals(longBody.take(160).trimEnd(), homework.contentExcerpt)
+        assertEquals(longBody, homework.requirementText)
+    }
+
+    @Test
     fun parseHomeworkAttachmentsFromPicList() {
         val payload = AppJson.parseToJsonElement(
             """

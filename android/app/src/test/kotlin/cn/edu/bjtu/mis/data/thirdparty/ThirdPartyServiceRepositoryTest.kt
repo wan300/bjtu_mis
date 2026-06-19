@@ -66,10 +66,69 @@ class ThirdPartyServiceRepositoryTest {
     }
 
     @Test
-    fun listServicesInstallsBundledDefaultServicePendingUserGrant() = runBlocking {
+    fun listServicesReturnsEmptyWhenNoImportedOrBundledServices() = runBlocking {
         MockWebServer().use { server ->
             val dao = FakeThirdPartyServiceDao()
-            val installDir = temp.newFolder("jijiang-install").apply {
+            val repository = repository(server, dao)
+
+            val services = repository.listServices()
+
+            assertTrue(services.isEmpty())
+        }
+    }
+
+    @Test
+    fun listServicesRemovesObsoleteBundledServicesThatAreNoLongerShipped() = runBlocking {
+        MockWebServer().use { server ->
+            val dao = FakeThirdPartyServiceDao()
+            val servicesRoot = temp.newFolder("services-${System.nanoTime()}")
+            val legacyInstallDir = File(servicesRoot, "installed/com.jijiang.campus-service/legacy").apply {
+                mkdirs()
+                resolve("index.html").writeText("<html></html>")
+            }
+            dao.saved["com.jijiang.campus-service"] = ThirdPartyServiceEntity(
+                serviceId = "com.jijiang.campus-service",
+                name = "Legacy bundled service",
+                description = "Legacy bundled service",
+                version = "1.0.0",
+                author = "bundled",
+                sourceUrl = "asset://third-party-services/com.jijiang.campus-service",
+                githubOwner = "bundled",
+                githubRepo = "legacy-bundled",
+                defaultBranch = "bundled",
+                commitSha = "legacy",
+                packageDigestSha256 = "b".repeat(64),
+                manifestJson = validManifest(),
+                grantedPermissionsJson = AppJson.encodeToString(emptyList<String>()),
+                allowedOriginsJson = AppJson.encodeToString(emptyList<String>()),
+                installDir = legacyInstallDir.absolutePath,
+                entrypoint = "index.html",
+                icon = "icon.svg",
+                enabled = false,
+                needsReview = true,
+                installedAt = "2026-06-01T00:00:00Z",
+                updatedAt = "2026-06-01T00:00:00Z",
+            )
+            val repository = repository(
+                server = server,
+                dao = dao,
+                servicesRoot = servicesRoot,
+                bundledProvider = EmptyBundledProvider,
+            )
+
+            val services = repository.listServices()
+
+            assertTrue(services.isEmpty())
+            assertNull(dao.saved["com.jijiang.campus-service"])
+            assertFalse(File(servicesRoot, "installed/com.jijiang.campus-service").exists())
+        }
+    }
+
+    @Test
+    fun listServicesInstallsBundledServiceFromProviderPendingUserGrant() = runBlocking {
+        MockWebServer().use { server ->
+            val dao = FakeThirdPartyServiceDao()
+            val installDir = temp.newFolder("bundled-demo-install").apply {
                 resolve("index.html").writeText("<html></html>")
             }
             val bundledProvider = FakeBundledProvider(installDir)
@@ -87,8 +146,8 @@ class ThirdPartyServiceRepositoryTest {
 
             assertEquals(1, services.size)
             val service = services.single()
-            assertEquals("com.jijiang.campus-service", service.serviceId)
-            assertEquals("asset://third-party-services/com.jijiang.campus-service", service.sourceUrl)
+            assertEquals("bjtu.bundled.demo", service.serviceId)
+            assertEquals("asset://third-party-services/bjtu.bundled.demo", service.sourceUrl)
             assertTrue(service.grantedPermissions.isEmpty())
             assertFalse(service.enabled)
             assertTrue(service.needsReview)
@@ -100,14 +159,20 @@ class ThirdPartyServiceRepositoryTest {
         }
     }
 
-    private fun repository(server: MockWebServer, dao: FakeThirdPartyServiceDao): ThirdPartyServiceRepository =
+    private fun repository(
+        server: MockWebServer,
+        dao: FakeThirdPartyServiceDao,
+        servicesRoot: File = temp.newFolder("services-${System.nanoTime()}"),
+        bundledProvider: ThirdPartyBundledServiceProvider? = null,
+    ): ThirdPartyServiceRepository =
         ThirdPartyServiceRepository(
             dao = dao,
             installer = ThirdPartyServiceInstaller(
                 client = BjtuHttpClient(AppCookieJar()),
-                servicesRoot = temp.newFolder("services-${System.nanoTime()}"),
+                servicesRoot = servicesRoot,
                 apiBaseUrl = server.url("/").toString().trimEnd('/'),
             ),
+            bundledProvider = bundledProvider,
         )
 
     private fun enqueueGithubPackage(server: MockWebServer) {
@@ -187,33 +252,34 @@ private class FakeBundledProvider(
     private val installDir: File,
 ) : ThirdPartyBundledServiceProvider {
     var calls = 0
+    override val bundledServiceIds: Set<String> = setOf("bjtu.bundled.demo")
 
     override suspend fun installMissingOrUpdated(
         existingServices: Map<String, ThirdPartyServiceEntity>,
     ): List<InstalledBundledThirdPartyService> {
         calls += 1
-        if (existingServices.containsKey("com.jijiang.campus-service")) return emptyList()
+        if (existingServices.containsKey("bjtu.bundled.demo")) return emptyList()
         return listOf(
             InstalledBundledThirdPartyService(
                 packageInfo = InstalledThirdPartyServicePackage(
                     manifest = ThirdPartyServiceManifest(
                         schemaVersion = 1,
-                        id = "com.jijiang.campus-service",
-                        name = "技匠",
-                        description = "高校技能交易与知识共享服务",
+                        id = "bjtu.bundled.demo",
+                        name = "Bundled Demo",
+                        description = "Bundled demo service",
                         version = "1.0.0",
                         entrypoint = "index.html",
-                        icon = "static/logo.png",
-                        author = "jijiang",
+                        icon = "icon.svg",
+                        author = "bundled-demo",
                         permissions = ThirdPartyServicePermissionDeclaration(
-                            required = listOf("identity.profile.read", "identity.credentials.read"),
+                            required = listOf("identity.profile.read"),
                         ),
-                        allowedOrigins = listOf("http://47.95.238.140:8080"),
+                        allowedOrigins = listOf("https://api.example.com"),
                     ),
                     source = GitHubRepositoryRef(
                         owner = "bundled",
-                        repo = "jijiang",
-                        canonicalUrl = "asset://third-party-services/com.jijiang.campus-service",
+                        repo = "bundled-demo",
+                        canonicalUrl = "asset://third-party-services/bjtu.bundled.demo",
                     ),
                     defaultBranch = "bundled",
                     commitSha = "abcdef1234567890abcdef1234567890abcdef12",
@@ -226,6 +292,14 @@ private class FakeBundledProvider(
             )
         )
     }
+}
+
+private object EmptyBundledProvider : ThirdPartyBundledServiceProvider {
+    override val bundledServiceIds: Set<String> = emptySet()
+
+    override suspend fun installMissingOrUpdated(
+        existingServices: Map<String, ThirdPartyServiceEntity>,
+    ): List<InstalledBundledThirdPartyService> = emptyList()
 }
 
 private class FakeThirdPartyServiceDao : ThirdPartyServiceDao {

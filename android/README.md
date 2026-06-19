@@ -4,6 +4,8 @@
 
 智能助手入口已经统一为嵌入式 Open WebUI Agent。旧的独立原生作业 Agent 任务系统、Agent Room 表、原生前台 Agent 服务、模型配置和 API Key 存储已移除。
 
+项目原则以仓库根目录 `.specify/memory/constitution.md` 为权威来源；本 README 只记录 Android 工程事实、命令和关键路径。
+
 ## 打开工程
 
 1. 用 Android Studio 打开 `android/`。

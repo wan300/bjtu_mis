@@ -474,7 +474,8 @@ export const LOCAL_CORE_TOOL_SPECS: LocalToolDefinition[] = [
 		category: 'files',
 		function: {
 			name: 'list_local_files',
-			description: 'List files stored in the local-first on-device file database.',
+			description:
+				'List files stored in the local-first on-device file database by file id. This is not the Agent workspace filesystem.',
 			parameters: objectSchema({
 				limit: intProp('Maximum number of files to return. Defaults to 20.')
 			})
@@ -485,7 +486,8 @@ export const LOCAL_CORE_TOOL_SPECS: LocalToolDefinition[] = [
 		category: 'files',
 		function: {
 			name: 'search_local_files',
-			description: 'Search local-first files by names, metadata, and extracted text.',
+			description:
+				'Search local-first on-device file database records by names, metadata, and extracted text. This is not the Agent workspace filesystem.',
 			parameters: objectSchema(
 				{
 					query: stringProp('Search text.'),
@@ -500,7 +502,8 @@ export const LOCAL_CORE_TOOL_SPECS: LocalToolDefinition[] = [
 		category: 'files',
 		function: {
 			name: 'view_local_file',
-			description: 'View a local-first file record and extracted text content when available.',
+			description:
+				'View a local-first file database record by id and extracted text content when available. For Agent workspace files, use agent_file_read with a path instead.',
 			parameters: objectSchema(
 				{
 					id: stringProp('Local file id.'),

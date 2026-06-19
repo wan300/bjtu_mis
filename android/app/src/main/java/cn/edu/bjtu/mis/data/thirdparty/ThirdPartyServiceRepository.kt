@@ -20,7 +20,21 @@ class ThirdPartyServiceRepository(
         val provider = bundledProvider ?: return
         bundledInstallMutex.withLock {
             if (!bundledInstallChecked) {
-                val existingById = dao.listServices().associateBy { it.serviceId }
+                val existingServices = dao.listServices()
+                val obsoleteBundledIds = existingServices
+                    .filter { service ->
+                        service.sourceUrl.startsWith(BundledThirdPartySourceUrlPrefix) &&
+                            service.serviceId !in provider.bundledServiceIds
+                    }
+                    .map { it.serviceId }
+                    .toSet()
+                obsoleteBundledIds.forEach { serviceId ->
+                    installer.deleteInstalledService(serviceId)
+                    dao.deleteService(serviceId)
+                }
+                val existingById = existingServices
+                    .filterNot { it.serviceId in obsoleteBundledIds }
+                    .associateBy { it.serviceId }
                 val installed = provider.installMissingOrUpdated(existingById)
                 installed.forEach { bundled ->
                     val existing = existingById[bundled.packageInfo.manifest.id]
@@ -198,6 +212,8 @@ class ThirdPartyServiceRepository(
         )
     }
 }
+
+private const val BundledThirdPartySourceUrlPrefix = "asset://third-party-services/"
 
 private fun nowIso(): String = OffsetDateTime.now(ZoneOffset.UTC).toString()
 

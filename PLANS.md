@@ -2,6 +2,8 @@
 
 `ExecPlan` 是复杂工作的自包含、持续更新的执行计划。它必须让新的 Codex 会话或工程师在没有聊天上下文的情况下继续工作，并聚焦于交付可运行、已验证的行为，而不是只列代码编辑清单。
 
+项目原则以 `.specify/memory/constitution.md` 为权威来源；本文件只定义 ExecPlan 写作和维护规范。如两者冲突，以 constitution 为准，并同步修正本文件。
+
 适用场景：复杂功能、风险重构、Room 数据迁移、构建或依赖升级、Open WebUI 与 Android 桥接变化、权限/安全敏感改动、架构边界变化，或需求仍有歧义的任务。
 
 使用规则：
@@ -11,6 +13,7 @@
 - 所有歧义必须在计划里明确解决；不能解决的写成 `TODO: confirm` 并说明阻塞影响。
 - 使用苏格拉底式提问来澄清目标、约束和设计；不要假设任何未明确说明的事实。
 - 每个里程碑都必须包含预期可观察行为和验证命令。
+- constitution 第 VI 条列出的高风险变更必须先有 ExecPlan，并在计划中写明验证和回滚。
 - 默认验证命令按改动范围选择：Android 改动跑 `Set-Location android; .\gradlew.bat test`；构建/资源/打包相关跑 `Set-Location android; .\gradlew.bat assembleDebug`；Open WebUI 改动跑 `Set-Location android\open-webui; npm run test:frontend -- --run`；类型检查可跑 `npm run check`，但当前 Open WebUI 存在既有类型诊断基线失败，需记录。
 - 不要把执行计划当作一次性草稿；实现过程中要维护它。
 
@@ -175,3 +178,52 @@
 - [ ] 已检查 `git status --short` 和 `git diff`。
 - [ ] 没有提交 secrets、本机配置、构建产物、APK/AAB、`node_modules`、Open WebUI build、Room schema 或缓存。
 - [ ] 最终汇报包含变更文件、主要行为、验证结果、已知失败和剩余 TODO。
+
+## ExecPlan: OpenWebUI Local Agent tool argument compatibility
+
+### 1. Purpose and user-visible outcome
+
+Fix local-first OpenWebUI Agent tool calls that fail because models or OpenAI-compatible providers send argument objects, snake_case aliases, or near-miss field names instead of the current camelCase Android tool schema. Users should see fewer failed Agent workspace actions such as listing files, reading files, extracting archives, extracting documents, running JavaScript, and packaging results.
+
+### 2. Constraints and non-goals
+
+- Keep existing Android native tool names and camelCase schemas compatible.
+- Do not rewrite the local-first tool loop or adopt OpenWebUI Default tool mode in this change.
+- Do not add production logging of tool arguments.
+- Do not change mail send confirmation, workspace path validation, write-directory limits, or homework submission safety.
+
+### 3. Proposed design
+
+- Normalize provider tool arguments in `android/open-webui/src/lib/local-first/agent.ts` before execution, accepting either JSON strings or plain JSON objects.
+- Add Agent-tool alias normalization for common model output variants such as `archive_path`, `target_dir`, `output_path`, `content_markdown`, `timeout_seconds`, `timeout_ms`, `final_answer`, `filename`, and `file`.
+- Return structured tool argument errors with the tool name, missing fields when inferable, and an example arguments object.
+- Improve homework handoff prompt examples in `NativeAgentToolsPlugin.kt` so models see valid JSON arguments instead of only prose-style field hints.
+- Clarify local file database tool descriptions in `registry.ts` so they are distinct from Agent workspace file tools.
+
+### 4. Validation plan
+
+- Run `Set-Location android\open-webui; npm run test:frontend -- --run`.
+- Run `Set-Location android; .\gradlew.bat test`.
+- Inspect `git diff` and `git status --short` to ensure no secrets, local config, APK/AAB, build output, `node_modules`, Room schema, or Open WebUI generated assets were included.
+
+### 5. Rollback
+
+Revert only the changes to this ExecPlan section, local-first Agent argument normalization/tests, native homework prompt text, and affected Android Agent parsing tests. No database migration or persisted data rollback is required.
+
+### 6. Progress log
+
+- Implemented local-first Agent argument parsing for JSON strings and plain objects.
+- Implemented Agent tool argument alias normalization for native tool calls and inline XML fallback.
+- Implemented structured missing-argument errors with `tool`, `missing`, and `expected_arguments_example`.
+- Updated homework handoff examples and local-first file database tool descriptions.
+- Added Open WebUI Vitest coverage and an Android JVM test for existing camelCase argument compatibility.
+- Validation: `npm.cmd run test:frontend -- --run` passed, 9 files and 84 tests.
+- Validation: Android Gradle target test and full `test` could not complete in this environment. Gradle wrapper initially hit network sandbox restrictions when downloading Gradle 9.0.0; after escalation, the target test still timed out without output. Gradle daemons were stopped after the timeout.
+- Diff check: `git diff --check` passed with only CRLF conversion warnings.
+
+### 7. Completion status
+
+- Scope complete for the compatibility fix.
+- No production logging added.
+- No native tool names or public camelCase schemas removed.
+- No mail send, homework submit, workspace path, or write-boundary safety rules changed.

@@ -1,1 +1,0 @@
-import{R as r}from"./index-C84RB2NM.js";function e(e,s){return r({url:"/api/message/send",method:"POST",data:{orderId:e,content:s}})}function s(e){return r({url:"/api/message/list",params:{orderId:e}})}function a(){return r({url:"/api/message/conversations"})}export{a as g,s as l,e as s};

@@ -345,7 +345,12 @@ class NativeAgentToolsPlugin : Plugin() {
         if (attachments.isNotEmpty()) {
             appendLine()
             appendLine("已自动下载并导入的附件，可通过 agent_file_list、agent_file_read、agent_document_extract_pdf/docx、agent_archive_extract 等工具访问。")
-            appendLine("请先用 agent_file_list 并传入 path=\"inbox\" 查看附件；如果附件是 zip/jar/tar/tar.gz/tgz/tar.bz2/tbz2/gz/bz2，请调用 agent_archive_extract 解压到 work/attachments/ 下；PDF/DOCX 请先用对应提取工具转成文本后再分析：")
+            appendLine("工具调用必须使用模型的 native tool_calls JSON 参数，不要在正文输出 XML、DSML、<tool_calls> 或 <agent_...> 标签。")
+            appendLine("建议流程和参数示例：")
+            appendLine("- agent_file_list: {\"path\":\"inbox\"}")
+            appendLine("- agent_archive_extract: {\"archivePath\":\"inbox/example.zip\",\"targetDir\":\"work/attachments/example\"}")
+            appendLine("- agent_document_extract_pdf: {\"path\":\"inbox/example.pdf\",\"outputPath\":\"work/example.md\"}")
+            appendLine("- agent_document_extract_docx: {\"path\":\"inbox/example.docx\",\"outputPath\":\"work/example.md\"}")
             attachments.forEach { attachment ->
                 appendLine("- ${attachment.displayName}: 原始附件 ${attachment.relativePath}")
                 appendLine("  - 如需解压，建议 targetDir：work/attachments/${safeAttachmentDirName(attachment)}")

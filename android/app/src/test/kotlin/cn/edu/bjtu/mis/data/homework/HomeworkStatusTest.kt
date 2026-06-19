@@ -65,18 +65,58 @@ class HomeworkStatusTest {
         assertFalse(homeworkMatchesStatusFilter(open, "expired", now))
     }
 
+    @Test
+    fun findHomeworkByIdentityPrefersHomeworkId() {
+        val target = homework(homeworkId = 7, title = "旧标题", dueAt = "2026-05-11 08:00")
+        val fallbackCollision = homework(homeworkId = 8, title = "旧标题", dueAt = "2026-05-11 08:00")
+        val sameId = homework(homeworkId = 7, title = "新标题", dueAt = "2026-05-12 08:00")
+
+        val matched = findHomeworkByIdentity(listOf(fallbackCollision, sameId), homeworkIdentityKey(target))
+
+        assertEquals(sameId, matched)
+    }
+
+    @Test
+    fun findHomeworkByIdentityFallsBackWhenIdMissing() {
+        val target = homework(
+            homeworkId = null,
+            title = " 课程报告 ",
+            openedAt = "2026-05-01 00:00",
+            dueAt = "2026-05-11 08:00",
+        )
+        val wrongDueAt = homework(
+            homeworkId = 10,
+            title = "课程报告",
+            openedAt = "2026-05-01 00:00",
+            dueAt = "2026-05-12 08:00",
+        )
+        val fallbackMatch = homework(
+            homeworkId = 11,
+            title = "课程报告",
+            openedAt = "2026-05-01 00:00",
+            dueAt = "2026-05-11 08:00",
+        )
+
+        val matched = findHomeworkByIdentity(listOf(wrongDueAt, fallbackMatch), homeworkIdentityKey(target))
+
+        assertEquals(fallbackMatch, matched)
+    }
+
     private fun homework(
         title: String = "作业",
+        homeworkId: Int? = title.hashCode(),
+        openedAt: String? = null,
         dueAt: String,
         canSubmit: Boolean = true,
         canSubmitExplicit: Boolean = false,
         submittedAt: String? = null,
     ): HomeworkItem =
         HomeworkItem(
-            homeworkId = title.hashCode(),
+            homeworkId = homeworkId,
             course = "软件工程",
             courseId = 1,
             title = title,
+            openedAt = openedAt,
             dueAt = dueAt,
             submittedAt = submittedAt,
             status = if (submittedAt == null) "open" else "done",

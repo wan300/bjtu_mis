@@ -1,5 +1,92 @@
 (function () {
-  const repoApi = "https://api.github.com/repos/wan300/bjtu_mis_Android/releases/latest";
+  const repoApi = "https://api.github.com/repos/wan300/bjtu_mis_Android/releases?per_page=100";
+  const releaseListingUrl = "https://github.com/wan300/bjtu_mis_Android/releases";
+  const fallbackReleases = [
+    {
+      tag_name: "v1.3.0-beta.1",
+      html_url: "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.3.0-beta.1",
+      prerelease: true,
+      published_at: "2026-06-11T07:24:58Z",
+      assets: [
+        {
+          name: "app-release.apk",
+          size: 212933899,
+          browser_download_url:
+            "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.3.0-beta.1/app-release.apk"
+        }
+      ]
+    },
+    {
+      tag_name: "v1.2.1",
+      html_url: "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.2.1",
+      prerelease: false,
+      published_at: "2026-06-06T03:53:14Z",
+      assets: [
+        {
+          name: "app-release.apk",
+          size: 212634249,
+          browser_download_url:
+            "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.2.1/app-release.apk"
+        }
+      ]
+    },
+    {
+      tag_name: "v1.2.0",
+      html_url: "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.2.0",
+      prerelease: false,
+      published_at: "2026-06-03T05:37:49Z",
+      assets: [
+        {
+          name: "app-release.apk",
+          size: 212601385,
+          browser_download_url:
+            "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.2.0/app-release.apk"
+        }
+      ]
+    },
+    {
+      tag_name: "v1.1.1",
+      html_url: "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.1.1",
+      prerelease: false,
+      published_at: "2026-05-30T17:00:38Z",
+      assets: [
+        {
+          name: "app-release.apk",
+          size: 212255877,
+          browser_download_url:
+            "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.1.1/app-release.apk"
+        }
+      ]
+    },
+    {
+      tag_name: "v1.1.0",
+      html_url: "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.1.0",
+      prerelease: false,
+      published_at: "2026-05-21T14:09:21Z",
+      assets: [
+        {
+          name: "app-release.apk",
+          size: 212222513,
+          browser_download_url:
+            "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.1.0/app-release.apk"
+        }
+      ]
+    },
+    {
+      tag_name: "v1.0.0",
+      html_url: "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.0.0",
+      prerelease: false,
+      published_at: "2026-05-18T16:51:57Z",
+      assets: [
+        {
+          name: "app-release.apk",
+          size: 223256028,
+          browser_download_url:
+            "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.0.0/app-release.apk"
+        }
+      ]
+    }
+  ];
   const fallbackApk = "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.2.1/app-release.apk";
   const fallbackRelease = "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.2.1";
   const fallbackTag = "v1.2.1";
@@ -39,6 +126,13 @@
       unit += 1;
     }
     return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+  }
+
+  function formatDate(value) {
+    if (!value) return "--";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "--";
+    return date.toISOString().slice(0, 10);
   }
 
   function categoryGroups() {
@@ -182,14 +276,22 @@
 
   function initDownload() {
     const buttons = Array.from(document.querySelectorAll("[data-download-button]"));
+    const buttonLabels = Array.from(document.querySelectorAll("[data-download-label]"));
     const releaseLinks = Array.from(document.querySelectorAll("[data-release-link]"));
+    const releaseSelects = Array.from(document.querySelectorAll("[data-release-select]"));
     const versions = Array.from(document.querySelectorAll("[data-release-version]"));
     const sizes = Array.from(document.querySelectorAll("[data-release-size]"));
+    const channels = Array.from(document.querySelectorAll("[data-release-channel]"));
+    const published = Array.from(document.querySelectorAll("[data-release-published]"));
+    const availability = Array.from(document.querySelectorAll("[data-release-availability]"));
     let lastReleaseFetch = 0;
     let releaseFetchInFlight = null;
+    let selectedTag = fallbackTag;
+    let releases = normalizeReleases(fallbackReleases);
 
     buttons.forEach((button) => {
       button.href = fallbackApk;
+      button.dataset.version = fallbackTag;
     });
     releaseLinks.forEach((link) => {
       link.href = fallbackRelease;
@@ -200,8 +302,18 @@
     sizes.forEach((node) => {
       node.textContent = fallbackSizeText;
     });
+    channels.forEach((node) => {
+      node.textContent = "正式版";
+    });
+    published.forEach((node) => {
+      node.textContent = "2026-06-06";
+    });
+    availability.forEach((node) => {
+      node.textContent = "可下载";
+      node.classList.remove("is-unavailable");
+    });
 
-    if (!buttons.length && !releaseLinks.length) return;
+    if (!buttons.length && !releaseLinks.length && !releaseSelects.length) return;
 
     function findApkAsset(assets) {
       if (!Array.isArray(assets)) return null;
@@ -211,27 +323,105 @@
       );
     }
 
-    function applyRelease(release) {
+    function normalizeRelease(release) {
+      const tag = typeof release.tag_name === "string" ? release.tag_name.trim() : "";
+      if (!tag) return null;
       const apk = findApkAsset(release.assets);
-      const apkUrl = apk && apk.browser_download_url ? apk.browser_download_url : fallbackApk;
-      const releaseUrl = release.html_url || fallbackRelease;
-      const tag = release.tag_name || fallbackTag;
-      const sizeText = apk && apk.size ? formatBytes(apk.size) : fallbackSizeText;
+      return {
+        tag,
+        htmlUrl: release.html_url || `${releaseListingUrl}/tag/${tag}`,
+        prerelease: Boolean(release.prerelease),
+        publishedAt: release.published_at || release.created_at || "",
+        apkUrl: apk && apk.browser_download_url ? apk.browser_download_url : "",
+        apkSize: apk && Number.isFinite(apk.size) ? apk.size : 0,
+        hasApk: Boolean(apk && apk.browser_download_url)
+      };
+    }
 
-      buttons.forEach((button) => {
-        button.href = apkUrl;
-        button.dataset.version = tag;
+    function normalizeReleases(source) {
+      if (!Array.isArray(source)) return [];
+      const seen = new Set();
+      return source
+        .map(normalizeRelease)
+        .filter((release) => release && !seen.has(release.tag) && seen.add(release.tag))
+        .sort((left, right) => {
+          const leftTime = new Date(left.publishedAt || 0).getTime();
+          const rightTime = new Date(right.publishedAt || 0).getTime();
+          return rightTime - leftTime;
+        });
+    }
+
+    function defaultRelease(source) {
+      return source.find((release) => !release.prerelease) || source[0] || null;
+    }
+
+    function currentRelease(source, preferredTag) {
+      return source.find((release) => release.tag === preferredTag) || defaultRelease(source);
+    }
+
+    function optionLabel(release) {
+      return `${release.tag} · ${release.prerelease ? "预发布" : "正式版"} · ${formatDate(release.publishedAt)}`;
+    }
+
+    function syncSelects(source, currentTag) {
+      releaseSelects.forEach((select) => {
+        select.innerHTML = source
+          .map(
+            (release) =>
+              `<option value="${escapeHtml(release.tag)}">${escapeHtml(optionLabel(release))}</option>`
+          )
+          .join("");
+        select.value = currentTag;
       });
+    }
+
+    function setButtons(release) {
+      const downloadUrl = release.hasApk ? release.apkUrl : release.htmlUrl || releaseListingUrl;
+      buttons.forEach((button) => {
+        button.href = downloadUrl;
+        button.dataset.version = release.tag;
+        button.setAttribute("aria-disabled", String(!release.hasApk));
+        button.classList.toggle("is-disabled", !release.hasApk);
+      });
+      buttonLabels.forEach((label) => {
+        label.textContent = release.hasApk ? "下载所选 APK" : "当前版本无 APK";
+      });
+      availability.forEach((node) => {
+        node.textContent = release.hasApk ? "可下载" : "未提供 APK";
+        node.classList.toggle("is-unavailable", !release.hasApk);
+      });
+    }
+
+    function applyRelease(release, fallbackMode) {
+      if (!release) return;
+      const releaseUrl = release.htmlUrl || fallbackRelease;
+      const sizeText = release.apkSize ? formatBytes(release.apkSize) : fallbackSizeText;
+
+      setButtons(release);
       releaseLinks.forEach((link) => {
         link.href = releaseUrl;
       });
       versions.forEach((node) => {
-        node.textContent = tag;
+        node.textContent = release.tag;
       });
       sizes.forEach((node) => {
         node.textContent = sizeText;
       });
-      document.body.classList.remove("release-fallback");
+      channels.forEach((node) => {
+        node.textContent = release.prerelease ? "预发布" : "正式版";
+      });
+      published.forEach((node) => {
+        node.textContent = formatDate(release.publishedAt);
+      });
+      syncSelects(releases, release.tag);
+      document.body.classList.toggle("release-fallback", Boolean(fallbackMode));
+    }
+
+    function applyReleaseSet(source, preferredTag, fallbackMode) {
+      const release = currentRelease(source, preferredTag);
+      if (!release) return;
+      selectedTag = release.tag;
+      applyRelease(release, fallbackMode);
     }
 
     function syncRelease(force) {
@@ -248,9 +438,15 @@
           if (!response.ok) throw new Error(`GitHub API ${response.status}`);
           return response.json();
         })
-        .then(applyRelease)
+        .then((payload) => {
+          const liveReleases = normalizeReleases(payload);
+          if (!liveReleases.length) throw new Error("GitHub API returned no releases");
+          releases = liveReleases;
+          applyReleaseSet(releases, selectedTag, false);
+        })
         .catch(() => {
-          document.body.classList.add("release-fallback");
+          releases = normalizeReleases(fallbackReleases);
+          applyReleaseSet(releases, selectedTag, true);
         })
         .finally(() => {
           releaseFetchInFlight = null;
@@ -259,6 +455,18 @@
       return releaseFetchInFlight;
     }
 
+    syncSelects(releases, selectedTag);
+    applyReleaseSet(releases, selectedTag, false);
+    releaseSelects.forEach((select) => {
+      select.addEventListener("change", (event) => {
+        selectedTag = event.target.value || selectedTag;
+        applyReleaseSet(releases, selectedTag, document.body.classList.contains("release-fallback"));
+      });
+    });
+    document.addEventListener("click", (event) => {
+      const disabledButton = event.target.closest("[data-download-button][aria-disabled='true']");
+      if (disabledButton) event.preventDefault();
+    });
     syncRelease(true);
 
     document.addEventListener("visibilitychange", () => {

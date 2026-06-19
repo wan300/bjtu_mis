@@ -63,6 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cn.edu.bjtu.mis.R
+import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.data.repository.OverviewDashboard
 import cn.edu.bjtu.mis.data.repository.OverviewRepository
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
@@ -191,6 +192,7 @@ fun OverviewScreen(
     overviewRepository: OverviewRepository,
     syncRepository: SyncRepository,
     sessionDetail: String,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     onNavigate: (String) -> Unit,
     onOpenServices: () -> Unit,
     extendIntoStatusBar: Boolean = false,
@@ -236,12 +238,18 @@ fun OverviewScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(initialLoadStrategy) {
         val cached = runCatching { overviewRepository.loadCached() }.getOrNull()
         if (cached?.hasCache == true) {
             state = LoadState.Data(cached)
         }
-        refreshQuick()
+        if (initialLoadStrategy == ModuleLoadStrategy.CacheOnly) {
+            if (cached?.hasCache != true) {
+                state = LoadState.Error("暂无本地缓存，请手动同步。")
+            }
+        } else {
+            refreshQuick()
+        }
     }
 
     LazyColumn(

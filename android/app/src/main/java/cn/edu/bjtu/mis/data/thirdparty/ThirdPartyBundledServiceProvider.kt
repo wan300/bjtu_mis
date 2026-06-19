@@ -9,9 +9,6 @@ import kotlinx.serialization.encodeToString
 import java.io.File
 import java.util.UUID
 
-private const val JijiangServiceId = "com.jijiang.campus-service"
-private const val JijiangAssetPath = "third-party-services/$JijiangServiceId"
-
 data class BundledThirdPartyServiceSpec(
     val serviceId: String,
     val assetPath: String,
@@ -26,6 +23,8 @@ data class InstalledBundledThirdPartyService(
 )
 
 interface ThirdPartyBundledServiceProvider {
+    val bundledServiceIds: Set<String>
+
     suspend fun installMissingOrUpdated(
         existingServices: Map<String, ThirdPartyServiceEntity>,
     ): List<InstalledBundledThirdPartyService>
@@ -39,6 +38,7 @@ class AssetThirdPartyBundledServiceProvider(
 ) : ThirdPartyBundledServiceProvider {
     private val assets = context.applicationContext.assets
     private val tempRoot = File(servicesRoot, "bundled-tmp").canonicalFile
+    override val bundledServiceIds: Set<String> = specs.map { it.serviceId }.toSet()
 
     override suspend fun installMissingOrUpdated(
         existingServices: Map<String, ThirdPartyServiceEntity>,
@@ -122,16 +122,4 @@ class AssetThirdPartyBundledServiceProvider(
         }
 }
 
-private val DefaultBundledThirdPartyServices = listOf(
-    BundledThirdPartyServiceSpec(
-        serviceId = JijiangServiceId,
-        assetPath = JijiangAssetPath,
-        source = GitHubRepositoryRef(
-            owner = "bundled",
-            repo = "jijiang",
-            canonicalUrl = "asset://$JijiangAssetPath",
-        ),
-        defaultBranch = "bundled",
-        defaultGrantedPermissions = emptySet(),
-    )
-)
+private val DefaultBundledThirdPartyServices: List<BundledThirdPartyServiceSpec> = emptyList()

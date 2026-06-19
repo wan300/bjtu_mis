@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cn.edu.bjtu.mis.data.employment.EmploymentCalendarSyncStore
 import cn.edu.bjtu.mis.data.provider.ProviderConstants
+import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.data.repository.EmploymentConsultationRepository
 import cn.edu.bjtu.mis.model.EmploymentArticleDetail
 import cn.edu.bjtu.mis.model.EmploymentArticleSummary
@@ -68,6 +69,7 @@ private const val EmploymentPageSize = 15
 fun EmploymentConsultationScreen(
     repository: EmploymentConsultationRepository,
     employmentCalendarSyncStore: EmploymentCalendarSyncStore,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
 ) {
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
@@ -83,6 +85,8 @@ fun EmploymentConsultationScreen(
     var detailState by remember { mutableStateOf<LoadState<ModuleEnvelope<EmploymentInfoDetail>>?>(null) }
     var selectedArticle by remember { mutableStateOf<EmploymentArticleSummary?>(null) }
     var articleState by remember { mutableStateOf<LoadState<ModuleEnvelope<EmploymentArticleDetail>>?>(null) }
+    var pageInitialLoadConsumed by remember { mutableStateOf(false) }
+    var calendarInitialLoadConsumed by remember { mutableStateOf(false) }
 
     fun openUri(url: String) {
         runCatching { uriHandler.openUri(url) }
@@ -106,6 +110,7 @@ fun EmploymentConsultationScreen(
         type: EmploymentSectionType,
         reset: Boolean,
         queryOverride: EmploymentInfoQuery? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ) {
         val current = pageStates[type] ?: EmploymentPageUiState(defaultEmploymentQuery(type))
         val baseQuery = queryOverride ?: current.query
@@ -118,7 +123,13 @@ fun EmploymentConsultationScreen(
             error = null,
         ))
         scope.launch {
-            runCatching { repository.infoPage(nextQuery, forceRefresh = reset) }
+            runCatching {
+                repository.infoPage(
+                    nextQuery,
+                    forceRefresh = reset && strategy == ModuleLoadStrategy.NetworkFirst,
+                    strategy = strategy,
+                )
+            }
                 .onSuccess { envelope ->
                     val existing = if (reset) emptyList() else pageStates[type]?.page?.items.orEmpty()
                     val merged = (existing + envelope.data.items).distinctBy { it.id }
@@ -143,19 +154,25 @@ fun EmploymentConsultationScreen(
         }
     }
 
-    fun loadHome(forceRefresh: Boolean = false) {
+    fun loadHome(
+        forceRefresh: Boolean = false,
+        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
+    ) {
         scope.launch {
             homeState = LoadState.Loading
-            runCatching { repository.home(forceRefresh = forceRefresh) }
+            runCatching { repository.home(forceRefresh = forceRefresh, strategy = strategy) }
                 .onSuccess { homeState = LoadState.Data(it) }
                 .onFailure { homeState = LoadState.Error(it.message ?: "加载就业咨询失败") }
         }
     }
 
-    fun loadFilters(forceRefresh: Boolean = false) {
+    fun loadFilters(
+        forceRefresh: Boolean = false,
+        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
+    ) {
         scope.launch {
             filterState = LoadState.Loading
-            runCatching { repository.filterOptions(forceRefresh = forceRefresh) }
+            runCatching { repository.filterOptions(forceRefresh = forceRefresh, strategy = strategy) }
                 .onSuccess { filterState = LoadState.Data(it) }
                 .onFailure { filterState = LoadState.Error(it.message ?: "加载筛选项失败") }
         }
@@ -200,15 +217,24 @@ fun EmploymentConsultationScreen(
     }
 
     LaunchedEffect(Unit) {
-        loadHome(forceRefresh = true)
-        loadFilters(forceRefresh = true)
-        loadPage(EmploymentSectionType.CareerTalk, reset = true)
+        pageInitialLoadConsumed = true
+        loadHome(
+            forceRefresh = initialLoadStrategy == ModuleLoadStrategy.NetworkFirst,
+            strategy = initialLoadStrategy,
+        )
+        loadFilters(
+            forceRefresh = initialLoadStrategy == ModuleLoadStrategy.NetworkFirst,
+            strategy = initialLoadStrategy,
+        )
+        loadPage(EmploymentSectionType.CareerTalk, reset = true, strategy = initialLoadStrategy)
     }
 
     LaunchedEffect(calendarSyncEnabled) {
+        val strategy = if (calendarInitialLoadConsumed) ModuleLoadStrategy.NetworkFirst else initialLoadStrategy
+        calendarInitialLoadConsumed = true
         if (calendarSyncEnabled) {
             calendarSyncState = LoadState.Loading
-            runCatching { repository.calendarEvents().size }
+            runCatching { repository.calendarEvents(strategy = strategy).size }
                 .onSuccess { calendarSyncState = LoadState.Data(it) }
                 .onFailure {
                     calendarSyncState = LoadState.Error(it.message ?: "就业活动同步预热失败")
@@ -221,7 +247,9 @@ fun EmploymentConsultationScreen(
     LaunchedEffect(selectedType) {
         val state = pageStates[selectedType]
         if (state == null || (state.page == null && !state.loading)) {
-            loadPage(selectedType, reset = true)
+            val strategy = if (pageInitialLoadConsumed) ModuleLoadStrategy.NetworkFirst else initialLoadStrategy
+            pageInitialLoadConsumed = true
+            loadPage(selectedType, reset = true, strategy = strategy)
         }
     }
 

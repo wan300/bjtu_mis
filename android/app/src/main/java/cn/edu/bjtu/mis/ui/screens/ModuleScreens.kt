@@ -100,14 +100,17 @@ import cn.edu.bjtu.mis.data.exporting.ScheduleExportDocument
 import cn.edu.bjtu.mis.data.exporting.ScheduleExportFormat
 import cn.edu.bjtu.mis.data.exporting.ScheduleExportStorage
 import cn.edu.bjtu.mis.data.homework.HomeworkStatusKind
+import cn.edu.bjtu.mis.data.homework.findHomeworkByIdentity
 import cn.edu.bjtu.mis.data.homework.homeworkCalendarStatusLabel
 import cn.edu.bjtu.mis.data.homework.homeworkDueDate
+import cn.edu.bjtu.mis.data.homework.homeworkIdentityKey
 import cn.edu.bjtu.mis.data.homework.homeworkMatchesStatusFilter
 import cn.edu.bjtu.mis.data.homework.homeworkStatusKind
 import cn.edu.bjtu.mis.data.repository.DocumentPreview
 import cn.edu.bjtu.mis.data.repository.EmploymentConsultationRepository
 import cn.edu.bjtu.mis.data.repository.HomeworkAttachmentPreview
 import cn.edu.bjtu.mis.data.repository.HomeworkAttachmentRepository
+import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
 import cn.edu.bjtu.mis.data.update.AppUpdateCheckResult
 import cn.edu.bjtu.mis.data.update.AppUpdateChecker
@@ -277,6 +280,7 @@ fun ProfileScreen(
     appUpdateChecker: AppUpdateChecker,
     appUpdatePreferenceStore: AppUpdatePreferenceStore,
     selectedTheme: AppThemeOption = AppThemeOption.Default,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     onLogout: () -> Unit,
     onOpenPersonalInfo: () -> Unit,
     onOpenTrainingInfo: () -> Unit,
@@ -373,7 +377,8 @@ fun ProfileScreen(
 
     DataScreen(
         title = "我的",
-        loader = { repository.profile() },
+        initialLoadStrategy = initialLoadStrategy,
+        loader = { strategy -> repository.profile(strategy) },
     ) { envelope ->
         val profile = envelope.data
         item { ProfileHeaderCard(profile) }
@@ -547,20 +552,28 @@ private fun AppUpdateStatusDialog(
 }
 
 @Composable
-fun ProfilePersonalInfoScreen(repository: ModuleRepository) {
+fun ProfilePersonalInfoScreen(
+    repository: ModuleRepository,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+) {
     ProfileInfoDetailScreen(
         title = "人员信息",
         repository = repository,
+        initialLoadStrategy = initialLoadStrategy,
         kind = ProfileInfoKind.Personal,
         emptyMessage = "暂无人员信息",
     )
 }
 
 @Composable
-fun ProfileTrainingInfoScreen(repository: ModuleRepository) {
+fun ProfileTrainingInfoScreen(
+    repository: ModuleRepository,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+) {
     ProfileInfoDetailScreen(
         title = "培养信息",
         repository = repository,
+        initialLoadStrategy = initialLoadStrategy,
         kind = ProfileInfoKind.Training,
         emptyMessage = "暂无培养信息",
     )
@@ -614,8 +627,13 @@ private fun ProfileInfoDetailScreen(
     repository: ModuleRepository,
     kind: ProfileInfoKind,
     emptyMessage: String,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
 ) {
-    DataScreen(title = title, loader = { repository.profile() }) { envelope ->
+    DataScreen(
+        title = title,
+        initialLoadStrategy = initialLoadStrategy,
+        loader = { strategy -> repository.profile(strategy) },
+    ) { envelope ->
         val sections = profileDetailSections(envelope.data, kind)
         if (sections.isEmpty()) {
             item {
@@ -945,8 +963,15 @@ private fun ProfileChip(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun AcademicProgressScreen(repository: ModuleRepository) {
-    DataScreen(title = "学业进度", loader = { repository.academicProgress() }) { envelope ->
+fun AcademicProgressScreen(
+    repository: ModuleRepository,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+) {
+    DataScreen(
+        title = "学业进度",
+        initialLoadStrategy = initialLoadStrategy,
+        loader = { strategy -> repository.academicProgress(strategy) },
+    ) { envelope ->
         val data = envelope.data
         item {
             InfoCard("学分概览", subtitle = "完成率 ${data.summary.completionRate}%") {
@@ -984,6 +1009,8 @@ fun TimetableScreen(
     repository: ModuleRepository,
     courseResourceRepository: CourseResourceRepository,
     homeworkAttachmentRepository: HomeworkAttachmentRepository,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    onOpenHomeworkDetail: (HomeworkItem) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -1002,13 +1029,15 @@ fun TimetableScreen(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val editorSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    fun loadTimetable() {
+    fun loadTimetable(strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst) {
         scope.launch {
             state = LoadState.Loading
-            runCatching { repository.timetable() }
+            runCatching { repository.timetable(strategy) }
                 .onSuccess {
                     state = LoadState.Data(it)
-                    TimetableWidgetProvider.refreshAll(context)
+                    if (strategy != ModuleLoadStrategy.CacheOnly) {
+                        TimetableWidgetProvider.refreshAll(context)
+                    }
                 }
                 .onFailure { state = LoadState.Error(it.message ?: "加载失败") }
         }
@@ -1129,8 +1158,8 @@ fun TimetableScreen(
     }
 
     LaunchedEffect(Unit) {
-        loadTimetable()
-        runCatching { repository.calendar() }
+        loadTimetable(initialLoadStrategy)
+        runCatching { repository.calendar(strategy = initialLoadStrategy) }
             .onSuccess { currentWeek = parseWeekNumber(it.data.currentWeek) }
     }
 
@@ -1179,6 +1208,7 @@ fun TimetableScreen(
                                 resourceStates = resourceStates,
                                 courseResourceRepository = courseResourceRepository,
                                 homeworkAttachmentRepository = homeworkAttachmentRepository,
+                                onOpenHomeworkDetail = onOpenHomeworkDetail,
                                 onEditUserCourse = {
                                     courseEditorError = null
                                     selectedCourses = emptyList()
@@ -1225,6 +1255,7 @@ fun TimetableScreen(
                             resourceStates = resourceStates,
                             courseResourceRepository = courseResourceRepository,
                             homeworkAttachmentRepository = homeworkAttachmentRepository,
+                            onOpenHomeworkDetail = onOpenHomeworkDetail,
                             onEditUserCourse = {
                                 courseEditorError = null
                                 selectedCourses = emptyList()
@@ -1300,9 +1331,14 @@ fun TimetableScreen(
 @Composable
 fun ExamsScreen(
     repository: ModuleRepository,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     onNavigate: (String) -> Unit,
 ) {
-    DataScreen(title = "考务", loader = { repository.exams() }) { envelope ->
+    DataScreen(
+        title = "考务",
+        initialLoadStrategy = initialLoadStrategy,
+        loader = { strategy -> repository.exams(strategy = strategy) },
+    ) { envelope ->
         val data = envelope.data
         val currentTerm = data.currentTerm
         item {
@@ -1335,7 +1371,11 @@ fun ExamsScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScoresScreen(repository: ModuleRepository, history: Boolean = false) {
+fun ScoresScreen(
+    repository: ModuleRepository,
+    history: Boolean = false,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+) {
     val scope = rememberCoroutineScope()
     var requestedTerm by remember(history) { mutableStateOf(if (history) HISTORY_ALL_TERMS else "") }
     var requestedScoreType by remember(history) { mutableStateOf("lr") }
@@ -1439,16 +1479,18 @@ fun ScoresScreen(repository: ModuleRepository, history: Boolean = false) {
     if (history) {
         ProgressiveDataScreen(
             title = title,
+            initialLoadStrategy = initialLoadStrategy,
             refreshKey = requestedTerm,
-            loader = { repository.historyScoresProgressive(selectedHistoryTerm) },
+            loader = { strategy -> repository.historyScoresProgressive(selectedHistoryTerm, strategy) },
         ) { progressiveState, envelope ->
             scoreContent(envelope, progressiveState.loading)
         }
     } else {
         DataScreen(
             title = title,
+            initialLoadStrategy = initialLoadStrategy,
             refreshKey = listOf(requestedTerm, requestedScoreType, refreshNonce),
-            loader = { repository.scores(term = selectedScoreTerm, ctype = requestedScoreType) },
+            loader = { strategy -> repository.scores(term = selectedScoreTerm, ctype = requestedScoreType, strategy = strategy) },
         ) { envelope ->
             scoreContent(envelope, loading = false)
         }
@@ -1685,6 +1727,8 @@ fun CalendarScreen(
     repository: ModuleRepository,
     employmentRepository: EmploymentConsultationRepository,
     employmentCalendarSyncStore: EmploymentCalendarSyncStore,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    onOpenHomework: (HomeworkItem) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -1705,16 +1749,17 @@ fun CalendarScreen(
     var employmentEventsState by remember {
         mutableStateOf<LoadState<List<EmploymentCalendarEvent>>>(LoadState.Data(emptyList()))
     }
+    var employmentInitialLoadConsumed by remember { mutableStateOf(false) }
 
-    fun loadDashboard() {
+    fun loadDashboard(strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst) {
         scope.launch {
             state = LoadState.Loading
             runCatching {
-                val calendar = repository.calendar()
+                val calendar = repository.calendar(strategy = strategy)
                 CalendarDashboard(
                     calendarEnvelope = calendar,
-                    homework = runCatching { repository.homework("all").data.items }.getOrDefault(emptyList()),
-                    exams = runCatching { repository.exams().data.items }.getOrDefault(emptyList()),
+                    homework = runCatching { repository.homework("all", strategy).data.items }.getOrDefault(emptyList()),
+                    exams = runCatching { repository.exams(strategy = strategy).data.items }.getOrDefault(emptyList()),
                     todos = repository.userTodos(),
                 )
             }.onSuccess {
@@ -1794,13 +1839,15 @@ fun CalendarScreen(
     }
 
     LaunchedEffect(Unit) {
-        loadDashboard()
+        loadDashboard(initialLoadStrategy)
     }
 
     LaunchedEffect(employmentSyncEnabled) {
+        val strategy = if (employmentInitialLoadConsumed) ModuleLoadStrategy.NetworkFirst else initialLoadStrategy
+        employmentInitialLoadConsumed = true
         if (employmentSyncEnabled) {
             employmentEventsState = LoadState.Loading
-            runCatching { employmentRepository.calendarEvents() }
+            runCatching { employmentRepository.calendarEvents(strategy = strategy) }
                 .onSuccess { employmentEventsState = LoadState.Data(it) }
                 .onFailure {
                     employmentEventsState = LoadState.Error(it.message ?: "就业活动同步失败")
@@ -2026,6 +2073,10 @@ fun CalendarScreen(
                             onToggleTodo = ::setTodoDone,
                             onDeleteTodo = ::deleteTodo,
                             onOpenEmploymentUrl = ::openUri,
+                            onOpenHomework = { item ->
+                                selectedDate = null
+                                onOpenHomework(item)
+                            },
                         )
                     }
                 }
@@ -2605,6 +2656,7 @@ private fun CalendarDayDetail(
     onToggleTodo: (UserTodoItem, Boolean) -> Unit,
     onDeleteTodo: (UserTodoItem) -> Unit,
     onOpenEmploymentUrl: (String) -> Unit,
+    onOpenHomework: (HomeworkItem) -> Unit,
 ) {
     val homeworkStarts = buckets.homeworkStarts
     val homework = buckets.homeworkDues
@@ -2659,6 +2711,7 @@ private fun CalendarDayDetail(
             homeworkStarts.forEach { item ->
                 InfoCard(
                     title = item.title,
+                    modifier = Modifier.clickable { onOpenHomework(item) },
                     subtitle = item.course,
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
@@ -2703,6 +2756,7 @@ private fun CalendarDayDetail(
             homework.forEach { item ->
                 InfoCard(
                     title = item.title,
+                    modifier = Modifier.clickable { onOpenHomework(item) },
                     subtitle = item.course,
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -3147,13 +3201,135 @@ private fun academicCalendarDateLabel(week: AcademicCalendarWeek, date: LocalDat
 @Composable
 fun HomeworkScreen(
     repository: ModuleRepository,
-    attachmentRepository: HomeworkAttachmentRepository,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     onNavigate: (String) -> Unit,
-    onOpenAgent: () -> Unit,
+    onOpenHomeworkDetail: (HomeworkItem) -> Unit,
 ) {
     var status by remember { mutableStateOf("all") }
     var expiredStatus by remember { mutableStateOf("expired") }
-    var refreshNonce by remember { mutableStateOf(0) }
+    val realNow = LocalDateTime.now()
+
+    ProgressiveDataScreen(
+        title = "作业",
+        initialLoadStrategy = initialLoadStrategy,
+        loader = { strategy -> repository.homeworkProgressive("all", strategy) },
+    ) { progressiveState, envelope ->
+        val data = envelope.data
+        val currentTerm = data.currentTerm
+        val activeFilter = if (status == "expired") expiredStatus else status
+        val displayItems = if (activeFilter != "all") {
+            data.items.filter { homeworkMatchesStatusFilter(it, activeFilter, realNow) }
+        } else {
+            data.items
+        }
+        val groups = groupHomeworkItems(displayItems, realNow)
+        item {
+            SecondaryModuleLinks(
+                title = "作业相关",
+                links = listOf(ModuleKeys.OpenWebUiAgent to "作业助手"),
+                onNavigate = onNavigate,
+            )
+        }
+        if (!currentTerm.isNullOrBlank()) {
+            item {
+                AssistChip(onClick = {}, label = { Text(currentTerm) })
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("all" to "全部", "open" to "待完成", "done" to "已完成").forEach { (key, label) ->
+                    FilterChip(selected = status == key, onClick = { status = key }, label = { Text(label) })
+                }
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = status == "expired",
+                    onClick = { status = "expired" },
+                    label = { Text("已过期") },
+                )
+                if (status == "expired") {
+                    listOf(
+                        "expired" to "全部过期",
+                        HomeworkStatusKind.ExpiredCanSubmit.code to "可补交",
+                        HomeworkStatusKind.ExpiredClosed.code to "不可补交",
+                    ).forEach { (key, label) ->
+                        FilterChip(
+                            selected = expiredStatus == key,
+                            onClick = { expiredStatus = key },
+                            label = { Text(label) },
+                        )
+                    }
+                }
+            }
+        }
+        if (groups.isEmpty() && !progressiveState.loading) {
+            item {
+                InfoCard("暂无作业") {
+                    Text("当前没有可展示的作业记录。", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        } else {
+            groups.forEach { group ->
+                item(key = "homework-group-${group.courseId}-${group.courseName}") {
+                    SectionTitle(
+                        title = group.courseName,
+                        subtitle = buildHomeworkGroupSubtitle(group),
+                    )
+                }
+                items(group.items, key = { it.homeworkId ?: (it.title + it.courseId).hashCode() }) { item ->
+                    HomeworkSummaryCard(
+                        item = item,
+                        now = realNow,
+                        onClick = { onOpenHomeworkDetail(item) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeworkSummaryCard(
+    item: HomeworkItem,
+    now: LocalDateTime,
+    onClick: () -> Unit,
+) {
+    InfoCard(
+        title = item.title,
+        modifier = Modifier.clickable(onClick = onClick),
+        subtitle = item.course,
+        trailing = {
+            if (item.attachments.isNotEmpty()) {
+                AssistChip(onClick = {}, label = { Text("${item.attachments.size} 个附件") })
+            }
+        },
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+            KeyValue("开始", item.openedAt, Modifier.weight(1f))
+            KeyValue("截止", item.dueAt, Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+            KeyValue("状态", homeworkStatusLabel(item, now), Modifier.weight(1f))
+            KeyValue("提交时间", item.submittedAt ?: "未提交", Modifier.weight(1f))
+        }
+        KeyValue("内容", item.contentExcerpt)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeworkDetailScreen(
+    initialHomework: HomeworkItem,
+    repository: ModuleRepository,
+    attachmentRepository: HomeworkAttachmentRepository,
+    onOpenAgent: () -> Unit,
+) {
+    val identity = remember(initialHomework) { homeworkIdentityKey(initialHomework) }
+    var homework by remember(identity) { mutableStateOf(initialHomework) }
+    var refreshNonce by remember(identity) { mutableStateOf(0) }
+    var refreshError by remember(identity) { mutableStateOf<String?>(null) }
     var submitTarget by remember { mutableStateOf<HomeworkItem?>(null) }
     var resubmitConfirmTarget by remember { mutableStateOf<HomeworkItem?>(null) }
     var submitContent by remember { mutableStateOf("") }
@@ -3211,6 +3387,17 @@ fun HomeworkScreen(
             }
             attachmentBusyKey = null
         }
+    }
+
+    LaunchedEffect(identity, refreshNonce) {
+        refreshError = null
+        runCatching { repository.homework("all").data.items }
+            .onSuccess { items ->
+                homework = findHomeworkByIdentity(items, identity) ?: homework
+            }
+            .onFailure { error ->
+                refreshError = error.message ?: "作业刷新失败"
+            }
     }
 
     previewTarget?.let { target ->
@@ -3281,11 +3468,15 @@ fun HomeworkScreen(
                             content = submitContent,
                             files = uploads,
                         )
-                    }.onSuccess {
+                    }.onSuccess { response ->
                         submitting = false
                         submitTarget = null
                         pickedFiles = emptyList()
                         submitContent = ""
+                        homework = homework.copy(
+                            submittedAt = response.submittedAt ?: homework.submittedAt,
+                            status = "done",
+                        )
                         refreshNonce += 1
                     }.onFailure { error ->
                         submitting = false
@@ -3296,59 +3487,18 @@ fun HomeworkScreen(
         )
     }
 
-    ProgressiveDataScreen(
-        title = "作业",
-        refreshKey = refreshNonce,
-        loader = { repository.homeworkProgressive("all") },
-    ) { progressiveState, envelope ->
-        val data = envelope.data
-        val currentTerm = data.currentTerm
-        val activeFilter = if (status == "expired") expiredStatus else status
-        val displayItems = if (activeFilter != "all") {
-            data.items.filter { homeworkMatchesStatusFilter(it, activeFilter, realNow) }
-        } else {
-            data.items
-        }
-        val groups = groupHomeworkItems(displayItems, realNow)
-        item {
-            SecondaryModuleLinks(
-                title = "作业相关",
-                links = listOf(ModuleKeys.OpenWebUiAgent to "作业助手"),
-                onNavigate = onNavigate,
-            )
-        }
-        if (!currentTerm.isNullOrBlank()) {
+    val itemStatus = homeworkStatusKind(homework, realNow)
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(bottom = 24.dp),
+    ) {
+        if (!refreshError.isNullOrBlank()) {
             item {
-                AssistChip(onClick = {}, label = { Text(currentTerm) })
-            }
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("all" to "全部", "open" to "待完成", "done" to "已完成").forEach { (key, label) ->
-                    FilterChip(selected = status == key, onClick = { status = key }, label = { Text(label) })
-                }
-            }
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = status == "expired",
-                    onClick = { status = "expired" },
-                    label = { Text("已过期") },
+                Text(
+                    refreshError.orEmpty(),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
-                if (status == "expired") {
-                    listOf(
-                        "expired" to "全部过期",
-                        HomeworkStatusKind.ExpiredCanSubmit.code to "可补交",
-                        HomeworkStatusKind.ExpiredClosed.code to "不可补交",
-                    ).forEach { (key, label) ->
-                        FilterChip(
-                            selected = expiredStatus == key,
-                            onClick = { expiredStatus = key },
-                            label = { Text(label) },
-                        )
-                    }
-                }
             }
         }
         if (!attachmentError.isNullOrBlank()) {
@@ -3360,69 +3510,81 @@ fun HomeworkScreen(
                 )
             }
         }
-        if (groups.isEmpty() && !progressiveState.loading) {
-            item {
-                InfoCard("暂无作业") {
-                    Text("当前没有可展示的作业记录。", style = MaterialTheme.typography.bodyMedium)
+        item {
+            InfoCard("作业信息", subtitle = homework.course) {
+                Text(
+                    homework.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    CalendarStatusPill(
+                        text = homeworkStatusLabel(homework, realNow),
+                        color = homeworkStatusColor(itemStatus),
+                    )
+                    homework.submissionStatus?.takeIf { it.isNotBlank() }?.let {
+                        CalendarStatusPill(text = it, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+                    KeyValue("开始", homework.openedAt, Modifier.weight(1f))
+                    KeyValue("截止", homework.dueAt, Modifier.weight(1f))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+                    KeyValue("提交时间", homework.submittedAt ?: "未提交", Modifier.weight(1f))
+                    KeyValue("类型", homeworkTypeLabel(homework), Modifier.weight(1f))
                 }
             }
-        } else {
-            groups.forEach { group ->
-                item(key = "homework-group-${group.courseId}-${group.courseName}") {
-                    SectionTitle(
-                        title = group.courseName,
-                        subtitle = buildHomeworkGroupSubtitle(group),
-                    )
+        }
+        item {
+            InfoCard("内容") {
+                Text(
+                    homeworkDetailRequirement(homework),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+        item {
+            InfoCard("附件", subtitle = "${homework.attachments.size} 个") {
+                HomeworkAttachmentsSection(
+                    attachments = homework.attachments,
+                    busyKey = attachmentBusyKey,
+                    showHeader = false,
+                    onPreview = { previewAttachment(homework, it) },
+                    onDownload = { downloadAttachment(homework, it) },
+                )
+            }
+        }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(
+                    enabled = homework.homeworkId != null,
+                    onClick = {
+                        NativeAgentHomeworkHandoffStore.set(NativeAgentHomeworkHandoff(homework))
+                        onOpenAgent()
+                    },
+                ) {
+                    Text("Agent 协助")
                 }
-                items(group.items, key = { it.homeworkId ?: (it.title + it.courseId).hashCode() }) { item ->
-                    val itemStatus = homeworkStatusKind(item, realNow)
-                    InfoCard(item.title, subtitle = item.course) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
-                            KeyValue("开始", item.openedAt, Modifier.weight(1f))
-                            KeyValue("截止", item.dueAt, Modifier.weight(1f))
+                Button(
+                    enabled = homework.homeworkId != null &&
+                        homework.canSubmit &&
+                        itemStatus != HomeworkStatusKind.ExpiredClosed &&
+                        !submitting,
+                    onClick = {
+                        if (itemStatus == HomeworkStatusKind.Done) {
+                            resubmitConfirmTarget = homework
+                        } else {
+                            openSubmitDialog(homework)
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
-                            KeyValue("状态", homeworkStatusLabel(item, realNow), Modifier.weight(1f))
-                            KeyValue("提交时间", item.submittedAt ?: "未提交", Modifier.weight(1f))
-                        }
-                        KeyValue("内容", item.contentExcerpt)
-                        HomeworkAttachmentsSection(
-                            attachments = item.attachments,
-                            busyKey = attachmentBusyKey,
-                            onPreview = { previewAttachment(item, it) },
-                            onDownload = { downloadAttachment(item, it) },
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            OutlinedButton(
-                                enabled = item.homeworkId != null,
-                                onClick = {
-                                    NativeAgentHomeworkHandoffStore.set(NativeAgentHomeworkHandoff(item))
-                                    onOpenAgent()
-                                },
-                            ) {
-                                Text("Agent 协助")
-                            }
-                            OutlinedButton(
-                                enabled = item.homeworkId != null &&
-                                    item.canSubmit &&
-                                    itemStatus != HomeworkStatusKind.ExpiredClosed &&
-                                    !submitting,
-                                onClick = {
-                                    if (itemStatus == HomeworkStatusKind.Done) {
-                                        resubmitConfirmTarget = item
-                                    } else {
-                                        openSubmitDialog(item)
-                                    }
-                                },
-                            ) {
-                                Text(homeworkSubmitButtonLabel(itemStatus))
-                            }
-                        }
-                    }
+                    },
+                ) {
+                    Text(homeworkSubmitButtonLabel(itemStatus))
                 }
             }
         }
@@ -3430,26 +3592,49 @@ fun HomeworkScreen(
 }
 
 @Composable
+private fun homeworkStatusColor(status: HomeworkStatusKind): Color =
+    when (status) {
+        HomeworkStatusKind.Done -> Color(0xFF2AA876)
+        HomeworkStatusKind.Open -> MaterialTheme.colorScheme.primary
+        HomeworkStatusKind.ExpiredCanSubmit -> Color(0xFFFF8A00)
+        HomeworkStatusKind.ExpiredClosed -> MaterialTheme.colorScheme.error
+    }
+
+private fun homeworkDetailRequirement(item: HomeworkItem): String =
+    item.requirementText?.takeIf { it.isNotBlank() }
+        ?: item.contentExcerpt?.takeIf { it.isNotBlank() }
+        ?: "暂无内容"
+
+private fun homeworkTypeLabel(item: HomeworkItem): String =
+    buildList {
+        if (item.isGroup) add("小组作业")
+        if (item.returnNum > 0) add("已退回 ${item.returnNum} 次")
+    }.joinToString(" · ").ifBlank { "普通作业" }
+
+@Composable
 private fun HomeworkAttachmentsSection(
     attachments: List<HomeworkAttachment>,
     busyKey: String?,
+    showHeader: Boolean = true,
     onPreview: (HomeworkAttachment) -> Unit,
     onDownload: (HomeworkAttachment) -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp),
+            .padding(top = if (showHeader) 8.dp else 0.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        HorizontalDivider()
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("附件", style = MaterialTheme.typography.titleSmall)
-            AssistChip(onClick = {}, label = { Text("${attachments.size} 个") })
+        if (showHeader) {
+            HorizontalDivider()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("附件", style = MaterialTheme.typography.titleSmall)
+                AssistChip(onClick = {}, label = { Text("${attachments.size} 个") })
+            }
         }
         if (attachments.isEmpty()) {
             Text(
@@ -3715,7 +3900,10 @@ private fun formatHomeworkFileSize(bytes: Long): String =
     }
 
 @Composable
-fun EmptyRoomsScreen(repository: ModuleRepository) {
+fun EmptyRoomsScreen(
+    repository: ModuleRepository,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+) {
     val scope = rememberCoroutineScope()
     var term by remember { mutableStateOf("") }
     var week by remember { mutableStateOf("") }
@@ -3724,7 +3912,10 @@ fun EmptyRoomsScreen(repository: ModuleRepository) {
     var page by remember { mutableStateOf(0) }
     var state by remember { mutableStateOf<LoadState<ModuleEnvelope<EmptyRoomData>>>(LoadState.Loading) }
 
-    fun load(targetWeek: String = week) {
+    fun load(
+        targetWeek: String = week,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ) {
         scope.launch {
             state = LoadState.Loading
             runCatching {
@@ -3733,6 +3924,7 @@ fun EmptyRoomsScreen(repository: ModuleRepository) {
                     week = targetWeek.ifBlank { null },
                     building = building.ifBlank { null },
                     room = room.ifBlank { null },
+                    strategy = strategy,
                 )
             }
                 .onSuccess {
@@ -3749,11 +3941,11 @@ fun EmptyRoomsScreen(repository: ModuleRepository) {
     }
 
     LaunchedEffect(Unit) {
-        val defaultWeek = runCatching { repository.calendar().data.currentWeek.orEmpty() }.getOrDefault("")
+        val defaultWeek = runCatching { repository.calendar(strategy = initialLoadStrategy).data.currentWeek.orEmpty() }.getOrDefault("")
         if (week.isBlank() && defaultWeek.isNotBlank()) {
             week = defaultWeek
         }
-        load(defaultWeek.ifBlank { week })
+        load(defaultWeek.ifBlank { week }, initialLoadStrategy)
     }
 
     val queryData = when (val current = state) {
@@ -5138,6 +5330,7 @@ private fun CourseDetailPanel(
     resourceStates: Map<String, LoadState<ModuleEnvelope<CourseResourcesData>>>,
     courseResourceRepository: CourseResourceRepository,
     homeworkAttachmentRepository: HomeworkAttachmentRepository,
+    onOpenHomeworkDetail: (HomeworkItem) -> Unit,
     onEditUserCourse: (CourseEntry) -> Unit,
     onDeleteUserCourse: (CourseEntry) -> Unit,
     modifier: Modifier = Modifier,
@@ -5319,7 +5512,11 @@ private fun CourseDetailPanel(
                             current.value,
                             key = { "${entryKey}-homework-${it.homeworkId ?: "${it.courseId}-${it.title}".hashCode()}" },
                         ) { homework ->
-                            InfoCard(homework.title, subtitle = homework.course) {
+                            InfoCard(
+                                title = homework.title,
+                                modifier = Modifier.clickable { onOpenHomeworkDetail(homework) },
+                                subtitle = homework.course,
+                            ) {
                                 KeyValue("开始", homework.openedAt)
                                 KeyValue("截止", homework.dueAt)
                                 KeyValue("状态", homework.status)
@@ -5640,15 +5837,19 @@ private fun String?.normalizedCourseText(): String =
 @Composable
 private fun <T> DataScreen(
     title: String,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     refreshKey: Any? = Unit,
-    loader: suspend () -> ModuleEnvelope<T>,
+    loader: suspend (ModuleLoadStrategy) -> ModuleEnvelope<T>,
     leadingContent: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {},
     content: androidx.compose.foundation.lazy.LazyListScope.(ModuleEnvelope<T>) -> Unit,
 ) {
     var state by remember(refreshKey) { mutableStateOf<LoadState<ModuleEnvelope<T>>>(LoadState.Loading) }
+    var initialLoadConsumed by remember { mutableStateOf(false) }
     LaunchedEffect(refreshKey) {
+        val strategy = if (initialLoadConsumed) ModuleLoadStrategy.NetworkFirst else initialLoadStrategy
+        initialLoadConsumed = true
         state = LoadState.Loading
-        runCatching { loader() }
+        runCatching { loader(strategy) }
             .onSuccess { state = LoadState.Data(it) }
             .onFailure { state = LoadState.Error(it.message ?: "加载失败") }
     }
@@ -5665,16 +5866,20 @@ private fun <T> DataScreen(
 @Composable
 private fun <T> ProgressiveDataScreen(
     title: String,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     refreshKey: Any? = Unit,
-    loader: () -> Flow<ProgressiveModuleState<T>>,
+    loader: (ModuleLoadStrategy) -> Flow<ProgressiveModuleState<T>>,
     leadingContent: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {},
     content: androidx.compose.foundation.lazy.LazyListScope.(ProgressiveModuleState<T>, ModuleEnvelope<T>) -> Unit,
 ) {
     var state by remember(refreshKey) { mutableStateOf(ProgressiveModuleState<T>()) }
+    var initialLoadConsumed by remember { mutableStateOf(false) }
     LaunchedEffect(refreshKey) {
+        val strategy = if (initialLoadConsumed) ModuleLoadStrategy.NetworkFirst else initialLoadStrategy
+        initialLoadConsumed = true
         state = ProgressiveModuleState<T>()
         runCatching {
-            loader().collect { state = it }
+            loader(strategy).collect { state = it }
         }.onFailure { error ->
             state = state.copy(
                 loading = false,

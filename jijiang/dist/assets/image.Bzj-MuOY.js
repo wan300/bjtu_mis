@@ -1,1 +1,0 @@
-const t=/^(https?:\/\/|wxfile:\/\/|cloud:\/\/|data:image\/|\/static\/|\/assets\/)/i,s=new Set(["https://jijiang-1325125602.cos.ap-beijing.myqcloud.com/service/covers/python-spider.png"]);function e(e){const i=String(e||"").trim();return i?s.has(i)?"":t.test(i)?i:"":""}export{e as n};

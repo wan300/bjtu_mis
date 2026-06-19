@@ -36,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,12 +55,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.data.provider.SessionValidationPolicy
+import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.data.sync.SessionKeepAliveForegroundService
 import cn.edu.bjtu.mis.data.thirdparty.THIRD_PARTY_SERVICES_ROUTE
 import cn.edu.bjtu.mis.data.thirdparty.thirdPartyServiceIdFromRoute
 import cn.edu.bjtu.mis.data.update.AppUpdateInfo
 import cn.edu.bjtu.mis.di.AppContainer
 import cn.edu.bjtu.mis.model.AutoLoginStatus
+import cn.edu.bjtu.mis.model.HomeworkItem
 import cn.edu.bjtu.mis.model.ModuleKeys
 import cn.edu.bjtu.mis.model.SessionState
 import cn.edu.bjtu.mis.ui.screens.AcademicProgressScreen
@@ -70,6 +73,7 @@ import cn.edu.bjtu.mis.ui.screens.CourseSelectionScreen
 import cn.edu.bjtu.mis.ui.screens.EmptyRoomsScreen
 import cn.edu.bjtu.mis.ui.screens.EmploymentConsultationScreen
 import cn.edu.bjtu.mis.ui.screens.ExamsScreen
+import cn.edu.bjtu.mis.ui.screens.HomeworkDetailScreen
 import cn.edu.bjtu.mis.ui.screens.HomeworkReminderSettingsScreen
 import cn.edu.bjtu.mis.ui.screens.HomeworkScreen
 import cn.edu.bjtu.mis.ui.screens.LoginScreen
@@ -102,6 +106,7 @@ private const val RouteProfilePersonalInfo = "profile_personal_info"
 private const val RouteProfileTrainingInfo = "profile_training_info"
 private const val RouteProfileTheme = "profile_theme"
 private const val RouteProfileHomeworkReminder = "profile_homework_reminder"
+private const val RouteHomeworkDetail = "homework_detail"
 private val MainRoutes = setOf(RouteHome, RouteServices, ModuleKeys.OpenWebUiAgent, ModuleKeys.Profile)
 private val ProfileDetailRouteTitles = mapOf(
     RouteProfilePersonalInfo to "人员信息",
@@ -137,26 +142,30 @@ private val BottomTabs = listOf(
 fun BjtuMisApp(
     container: AppContainer,
     themeOption: AppThemeOption = AppThemeOption.Default,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     requestedRoute: String? = null,
     onRouteHandled: () -> Unit = {},
     onExit: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var current by remember { mutableStateOf(RouteHome) }
-    var mainTab by remember { mutableStateOf(RouteHome) }
-    var ready by remember { mutableStateOf<Boolean?>(null) }
-    var sessionDetail by remember { mutableStateOf("") }
+    var current by rememberSaveable { mutableStateOf(RouteHome) }
+    var mainTab by rememberSaveable { mutableStateOf(RouteHome) }
+    var ready by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    var sessionDetail by rememberSaveable { mutableStateOf("") }
     var showExitDialog by remember { mutableStateOf(false) }
     var showAutoLoginFailedDialog by remember { mutableStateOf(false) }
     var autoLoginFailedMessage by remember { mutableStateOf("") }
     var autoLoginRetrying by remember { mutableStateOf(false) }
     var openWebUiBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
     var thirdPartyServiceBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
-    var hasOpenedOpenWebUiAgent by remember { mutableStateOf(false) }
+    var hasOpenedOpenWebUiAgent by rememberSaveable { mutableStateOf(false) }
     var updateCheckStarted by remember { mutableStateOf(false) }
     var pendingUpdate by remember { mutableStateOf<AppUpdateInfo?>(null) }
     var thirdPartyServiceTitle by remember { mutableStateOf<String?>(null) }
+    var homeworkDetailTarget by remember { mutableStateOf<HomeworkItem?>(null) }
+    var homeworkDetailReturnRoute by rememberSaveable { mutableStateOf(ModuleKeys.Homework) }
+    var initialLoadStrategyConsumed by rememberSaveable { mutableStateOf(false) }
 
     fun startBackgroundQuickSync() {
         scope.launch {
@@ -194,13 +203,36 @@ fun BjtuMisApp(
         showExitDialog = false
     }
 
-    fun refreshSession() {
+    fun closeHomeworkDetail() {
+        val target = homeworkDetailReturnRoute
+        homeworkDetailTarget = null
+        current = target
+        if (target in MainRoutes) {
+            mainTab = target
+        } else if (target in ProfileDetailRouteTitles) {
+            mainTab = ModuleKeys.Profile
+        }
+        showExitDialog = false
+    }
+
+    fun openHomeworkDetail(item: HomeworkItem, returnRoute: String) {
+        homeworkDetailTarget = item
+        homeworkDetailReturnRoute = normalizeRoute(returnRoute)
+        current = RouteHomeworkDetail
+        showExitDialog = false
+    }
+
+    fun refreshSession(strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst) {
         scope.launch {
             val cached = runCatching { container.sessionRepository.cachedStatus() }.getOrNull()
             val hadCachedSession = cached?.state == SessionState.Ready
             if (hadCachedSession) {
                 sessionDetail = cached?.detail.orEmpty()
                 ready = true
+            }
+            if (strategy == ModuleLoadStrategy.CacheOnly) {
+                if (!hadCachedSession) ready = false
+                return@launch
             }
 
             try {
@@ -271,9 +303,9 @@ fun BjtuMisApp(
         }
     }
 
-    LaunchedEffect(Unit) { refreshSession() }
+    LaunchedEffect(Unit) { refreshSession(initialLoadStrategy) }
     LaunchedEffect(ready) {
-        if (!updateCheckStarted && ready != null) {
+        if (initialLoadStrategy != ModuleLoadStrategy.CacheOnly && !updateCheckStarted && ready != null) {
             updateCheckStarted = true
             pendingUpdate = try {
                 val update = container.appUpdateChecker.checkForUpdate()
@@ -382,12 +414,24 @@ fun BjtuMisApp(
             refreshSession()
         }
         true -> {
+            val routeInitialLoadStrategy = if (initialLoadStrategyConsumed) {
+                ModuleLoadStrategy.NetworkFirst
+            } else {
+                initialLoadStrategy
+            }
+            LaunchedEffect(current) {
+                if (!initialLoadStrategyConsumed) {
+                    initialLoadStrategyConsumed = true
+                }
+            }
+
             BackHandler {
                 when {
                     current == ModuleKeys.OpenWebUiAgent && openWebUiBackHandler?.invoke() == true -> Unit
                     thirdPartyServiceIdFromRoute(current) != null &&
                         thirdPartyServiceBackHandler?.invoke() == true -> Unit
                     thirdPartyServiceIdFromRoute(current) != null -> current = THIRD_PARTY_SERVICES_ROUTE
+                    current == RouteHomeworkDetail -> closeHomeworkDetail()
                     current !in MainRoutes -> current = mainTab
                     current != RouteHome -> navigateMain(RouteHome)
                     else -> showExitDialog = true
@@ -444,6 +488,10 @@ fun BjtuMisApp(
                     when {
                         current == RouteServices -> MainTitleBar("服务")
                         current == ModuleKeys.Profile -> MainTitleBar("我的")
+                        current == RouteHomeworkDetail -> DetailTitleBar(
+                            title = "作业详情",
+                            onBack = ::closeHomeworkDetail,
+                        )
                         current == THIRD_PARTY_SERVICES_ROUTE -> DetailTitleBar(
                             title = "第三方服务",
                             onBack = { current = RouteServices },
@@ -487,6 +535,7 @@ fun BjtuMisApp(
                             overviewRepository = container.overviewRepository,
                             syncRepository = container.syncRepository,
                             sessionDetail = sessionDetail,
+                            initialLoadStrategy = routeInitialLoadStrategy,
                             onNavigate = ::navigateModule,
                             onOpenServices = { navigateMain(RouteServices) },
                             extendIntoStatusBar = extendHomeIntoStatusBar,
@@ -507,6 +556,7 @@ fun BjtuMisApp(
                                 appUpdateChecker = container.appUpdateChecker,
                                 appUpdatePreferenceStore = container.appUpdatePreferenceStore,
                                 selectedTheme = themeOption,
+                                initialLoadStrategy = routeInitialLoadStrategy,
                                 onLogout = {
                                     container.sessionRepository.logout()
                                     SessionKeepAliveForegroundService.stop(context)
@@ -521,10 +571,10 @@ fun BjtuMisApp(
                             )
                         }
                         RouteProfilePersonalInfo -> MainScreenPadding {
-                            ProfilePersonalInfoScreen(container.moduleRepository)
+                            ProfilePersonalInfoScreen(container.moduleRepository, routeInitialLoadStrategy)
                         }
                         RouteProfileTrainingInfo -> MainScreenPadding {
-                            ProfileTrainingInfoScreen(container.moduleRepository)
+                            ProfileTrainingInfoScreen(container.moduleRepository, routeInitialLoadStrategy)
                         }
                         RouteProfileTheme -> MainScreenPadding {
                             ProfileThemeScreen(
@@ -536,6 +586,16 @@ fun BjtuMisApp(
                         }
                         RouteProfileHomeworkReminder -> MainScreenPadding {
                             HomeworkReminderSettingsScreen(container.homeworkReminderPreferenceStore)
+                        }
+                        RouteHomeworkDetail -> MainScreenPadding {
+                            homeworkDetailTarget?.let { homework ->
+                                HomeworkDetailScreen(
+                                    initialHomework = homework,
+                                    repository = container.moduleRepository,
+                                    attachmentRepository = container.homeworkAttachmentRepository,
+                                    onOpenAgent = { navigateModule(ModuleKeys.OpenWebUiAgent) },
+                                )
+                            } ?: Text("作业详情不可用")
                         }
                         else -> {
                             val thirdPartyServiceId = thirdPartyServiceIdFromRoute(current)
@@ -552,7 +612,9 @@ fun BjtuMisApp(
                                     ModuleRoute(
                                         route = current,
                                         container = container,
+                                        initialLoadStrategy = routeInitialLoadStrategy,
                                         onNavigate = ::navigateModule,
+                                        onOpenHomeworkDetail = ::openHomeworkDetail,
                                     )
                                 }
                             }
@@ -593,46 +655,55 @@ private fun MainScreenPadding(content: @Composable () -> Unit) {
 private fun ModuleRoute(
     route: String,
     container: AppContainer,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     onNavigate: (String) -> Unit,
+    onOpenHomeworkDetail: (HomeworkItem, String) -> Unit,
 ) {
     when (route) {
-        ModuleKeys.AcademicProgress -> AcademicProgressScreen(container.moduleRepository)
-        ModuleKeys.HistoryScores -> ScoresScreen(container.moduleRepository, history = true)
+        ModuleKeys.AcademicProgress -> AcademicProgressScreen(container.moduleRepository, initialLoadStrategy)
+        ModuleKeys.HistoryScores -> ScoresScreen(container.moduleRepository, history = true, initialLoadStrategy = initialLoadStrategy)
         ModuleKeys.Timetable -> TimetableScreen(
             container.moduleRepository,
             container.courseResourceRepository,
             container.homeworkAttachmentRepository,
+            initialLoadStrategy = initialLoadStrategy,
+            onOpenHomeworkDetail = { onOpenHomeworkDetail(it, ModuleKeys.Timetable) },
         )
         ModuleKeys.CourseSelection -> CourseSelectionScreen(
             repository = container.courseSelectionRepository,
             runner = container.courseSelectionRunner,
+            initialLoadStrategy = initialLoadStrategy,
         )
         ModuleKeys.Exams -> ExamsScreen(
             repository = container.moduleRepository,
+            initialLoadStrategy = initialLoadStrategy,
             onNavigate = onNavigate,
         )
-        ModuleKeys.Scores -> ScoresScreen(container.moduleRepository)
+        ModuleKeys.Scores -> ScoresScreen(container.moduleRepository, initialLoadStrategy = initialLoadStrategy)
         ModuleKeys.Calendar -> CalendarScreen(
             repository = container.moduleRepository,
             employmentRepository = container.employmentConsultationRepository,
             employmentCalendarSyncStore = container.employmentCalendarSyncStore,
+            initialLoadStrategy = initialLoadStrategy,
+            onOpenHomework = { onOpenHomeworkDetail(it, ModuleKeys.Calendar) },
         )
         ModuleKeys.Homework -> HomeworkScreen(
             repository = container.moduleRepository,
-            attachmentRepository = container.homeworkAttachmentRepository,
+            initialLoadStrategy = initialLoadStrategy,
             onNavigate = onNavigate,
-            onOpenAgent = { onNavigate(ModuleKeys.OpenWebUiAgent) },
+            onOpenHomeworkDetail = { onOpenHomeworkDetail(it, ModuleKeys.Homework) },
         )
-        ModuleKeys.Mail -> MailScreen(container.mailRepository)
-        ModuleKeys.Zhixing -> ZhixingScreen(container.zhixingRepository)
+        ModuleKeys.Mail -> MailScreen(container.mailRepository, initialLoadStrategy)
+        ModuleKeys.Zhixing -> ZhixingScreen(container.zhixingRepository, initialLoadStrategy)
         ModuleKeys.EmploymentConsultation -> EmploymentConsultationScreen(
             repository = container.employmentConsultationRepository,
             employmentCalendarSyncStore = container.employmentCalendarSyncStore,
+            initialLoadStrategy = initialLoadStrategy,
         )
-        ModuleKeys.CourseResources -> CourseResourcesScreen(container.courseResourceRepository)
-        ModuleKeys.CourseReplay -> CourseReplayScreen(container.courseReplayRepository, container.httpClient.client)
-        ModuleKeys.TeachingAssessment -> TeachingAssessmentScreen(container.moduleRepository)
-        ModuleKeys.EmptyRooms -> EmptyRoomsScreen(container.moduleRepository)
+        ModuleKeys.CourseResources -> CourseResourcesScreen(container.courseResourceRepository, initialLoadStrategy)
+        ModuleKeys.CourseReplay -> CourseReplayScreen(container.courseReplayRepository, container.httpClient.client, initialLoadStrategy)
+        ModuleKeys.TeachingAssessment -> TeachingAssessmentScreen(container.moduleRepository, initialLoadStrategy)
+        ModuleKeys.EmptyRooms -> EmptyRoomsScreen(container.moduleRepository, initialLoadStrategy)
     }
 }
 

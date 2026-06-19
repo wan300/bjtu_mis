@@ -138,7 +138,7 @@ class AppContainer(context: Context) {
     )
     val courseSelectionRepository: CourseSelectionRepository by lazy {
         PerfTrace.measure("AppContainer.courseSelectionRepository") {
-            CourseSelectionRepository(sessionManager)
+            CourseSelectionRepository(sessionManager, syncRepository)
         }
     }
     val courseSelectionRunner: CourseSelectionRunner by lazy {

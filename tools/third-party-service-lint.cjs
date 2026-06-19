@@ -4,24 +4,6 @@
 const fs = require('fs');
 const path = require('path');
 
-const KNOWN_PERMISSIONS = [
-  'identity.profile.read',
-  'academic.timetable.read',
-  'academic.user_courses.write',
-  'academic.scores.read',
-  'academic.history_scores.read',
-  'academic.exams.read',
-  'academic.calendar.read',
-  'academic.progress.read',
-  'academic.homework.read',
-  'academic.homework.submit',
-  'academic.course_resources.read',
-  'mail.folders.read',
-  'mail.messages.read',
-  'mail.message_detail.read',
-  'mail.send'
-];
-
 const TEXT_EXTENSIONS = new Set(['.html', '.js', '.mjs', '.css', '.json', '.txt']);
 const IGNORED_REFERENCE_ORIGINS = new Set(['http://www.w3.org']);
 
@@ -34,8 +16,9 @@ function main() {
 
   const root = path.resolve(process.cwd(), target);
   const repoRoot = path.resolve(__dirname, '..');
-  const result = lintPlugin(root);
-  lintSchemaSync(repoRoot, result);
+  const result = { errors: [], warnings: [] };
+  const manifestSchema = loadManifestSchema(repoRoot, result);
+  lintPlugin(root, result, manifestSchema.permissions);
 
   result.warnings.forEach((warning) => console.warn(`WARN  ${warning}`));
   result.errors.forEach((error) => console.error(`ERROR ${error}`));
@@ -46,8 +29,7 @@ function main() {
   console.log(`BJTU service lint passed: ${result.warnings.length} warning(s).`);
 }
 
-function lintPlugin(root) {
-  const result = { errors: [], warnings: [] };
+function lintPlugin(root, result, knownPermissions) {
   const manifestPath = path.join(root, 'bjtu-service.json');
   if (!fs.existsSync(manifestPath)) {
     result.errors.push('Missing bjtu-service.json at plugin root.');
@@ -79,9 +61,11 @@ function lintPlugin(root) {
   const optional = normalizeStringArray(permissions.optional, 'permissions.optional', result);
   const duplicated = required.filter((id) => optional.includes(id));
   if (duplicated.length) result.errors.push(`Permissions cannot be both required and optional: ${[...new Set(duplicated)].join(', ')}`);
-  required.concat(optional).forEach((id) => {
-    if (!KNOWN_PERMISSIONS.includes(id)) result.errors.push(`Unknown permission: ${id}`);
-  });
+  if (knownPermissions.length) {
+    required.concat(optional).forEach((id) => {
+      if (!knownPermissions.includes(id)) result.errors.push(`Unknown permission: ${id}`);
+    });
+  }
 
   const allowedOrigins = normalizeStringArray(manifest.allowed_origins, 'allowed_origins', result).map((origin) =>
     normalizeOrigin(origin, result)
@@ -95,22 +79,34 @@ function lintPlugin(root) {
   return result;
 }
 
-function lintSchemaSync(repoRoot, result) {
+function loadManifestSchema(repoRoot, result) {
   const docsSchema = path.join(repoRoot, 'docs', 'third-party-service-manifest.schema.json');
   const webSchema = path.join(repoRoot, 'web', 'assets', 'schemas', 'third-party-service-manifest.schema.json');
   if (!fs.existsSync(docsSchema) || !fs.existsSync(webSchema)) {
     result.errors.push('Missing docs/ or web/assets/schemas/ manifest schema.');
-    return;
+    return { permissions: [] };
   }
   const docsText = fs.readFileSync(docsSchema, 'utf8');
   const webText = fs.readFileSync(webSchema, 'utf8');
   if (docsText !== webText) result.errors.push('docs/ and web/assets/schemas/ manifest schemas are not identical.');
   const schema = readJson(docsSchema, result);
-  const schemaPermissions = schema?.$defs?.permission_array?.items?.enum || [];
-  const missing = KNOWN_PERMISSIONS.filter((id) => !schemaPermissions.includes(id));
-  const extra = schemaPermissions.filter((id) => !KNOWN_PERMISSIONS.includes(id));
-  if (missing.length) result.errors.push(`Manifest schema is missing permissions: ${missing.join(', ')}`);
-  if (extra.length) result.errors.push(`Manifest schema has unknown permissions: ${extra.join(', ')}`);
+  const schemaPermissions = schema?.$defs?.permission_array?.items?.enum;
+  if (!Array.isArray(schemaPermissions)) {
+    result.errors.push('Manifest schema is missing permission enum.');
+    return { permissions: [] };
+  }
+
+  const permissions = schemaPermissions
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+  if (permissions.length !== schemaPermissions.length) {
+    result.errors.push('Manifest schema permission enum must contain only non-empty strings.');
+  }
+  if (permissions.length !== new Set(permissions).size) {
+    result.errors.push('Manifest schema permission enum contains duplicates.');
+  }
+
+  return { permissions };
 }
 
 function readJson(file, result) {

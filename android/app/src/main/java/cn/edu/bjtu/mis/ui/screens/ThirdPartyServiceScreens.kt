@@ -622,6 +622,12 @@ private fun ThirdPartyServiceWebViewScreen(
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                settings.useWideViewPort = true
+                settings.loadWithOverviewMode = false
+                settings.setSupportZoom(false)
+                settings.builtInZoomControls = false
+                settings.displayZoomControls = false
+                settings.textZoom = 100
                 settings.allowFileAccess = false
                 settings.allowContentAccess = false
                 settings.allowFileAccessFromFileURLs = false
@@ -1021,6 +1027,27 @@ private class ThirdPartyWebViewClient(
 
 private val BjtuServiceBridgeScript = """
     (function () {
+      var doc = document.documentElement;
+      var updateHostViewport = function () {
+        var viewport = window.visualViewport;
+        var width = viewport && viewport.width ? viewport.width : (window.innerWidth || doc.clientWidth || 0);
+        var height = viewport && viewport.height ? viewport.height : (window.innerHeight || doc.clientHeight || 0);
+        if (width > 0) {
+          doc.style.setProperty('--bjtu-host-vw', String(Math.round(width)) + 'px');
+        }
+        if (height > 0) {
+          doc.style.setProperty('--bjtu-host-vh', String(Math.round(height)) + 'px');
+        }
+      };
+      if (!window.__BjtuHostViewportPatched) {
+        window.__BjtuHostViewportPatched = true;
+        window.addEventListener('resize', updateHostViewport);
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', updateHostViewport);
+          window.visualViewport.addEventListener('scroll', updateHostViewport);
+        }
+      }
+      updateHostViewport();
       if (window.BjtuService && window.BjtuService.invoke) return;
       var callbacks = {};
       window.BjtuService = {

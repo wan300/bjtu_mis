@@ -14,6 +14,13 @@ class AgentToolParsingTest {
     }
 
     @Test
+    fun preservesCamelCaseAgentToolArguments() {
+        val args = parseToolArguments("""{"archivePath":"inbox/homework.zip","targetDir":"work/attachments/homework"}""")
+        assertEquals("inbox/homework.zip", args.requiredString("archivePath"))
+        assertEquals("work/attachments/homework", args.requiredString("targetDir"))
+    }
+
+    @Test
     fun rejectsMissingRequiredString() {
         val args = parseToolArguments("""{"append":true}""")
         assertThrows(IllegalArgumentException::class.java) {

@@ -78,6 +78,38 @@ fun homeworkMatchesStatusFilter(
     }
 }
 
+data class HomeworkIdentityKey(
+    val homeworkId: Int?,
+    val courseId: Int,
+    val title: String,
+    val openedAt: String?,
+    val dueAt: String?,
+)
+
+fun homeworkIdentityKey(item: HomeworkItem): HomeworkIdentityKey =
+    HomeworkIdentityKey(
+        homeworkId = item.homeworkId,
+        courseId = item.courseId,
+        title = item.title.normalizedHomeworkIdentityText(),
+        openedAt = item.openedAt.normalizedHomeworkIdentityText().ifBlank { null },
+        dueAt = item.dueAt.normalizedHomeworkIdentityText().ifBlank { null },
+    )
+
+fun findHomeworkByIdentity(items: List<HomeworkItem>, key: HomeworkIdentityKey): HomeworkItem? =
+    items.firstOrNull { candidate ->
+        if (key.homeworkId != null) {
+            candidate.homeworkId == key.homeworkId
+        } else {
+            candidate.courseId == key.courseId &&
+                candidate.title.normalizedHomeworkIdentityText() == key.title &&
+                candidate.openedAt.normalizedHomeworkIdentityText().ifBlank { null } == key.openedAt &&
+                candidate.dueAt.normalizedHomeworkIdentityText().ifBlank { null } == key.dueAt
+        }
+    }
+
+private fun String?.normalizedHomeworkIdentityText(): String =
+    this?.trim().orEmpty()
+
 private val HomeworkDueAtFormatters: List<DateTimeFormatter> = listOf(
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"),

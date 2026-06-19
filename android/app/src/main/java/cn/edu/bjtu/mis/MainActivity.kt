@@ -9,6 +9,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.withFrameNanos
+import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.ui.BjtuMisApp
 import cn.edu.bjtu.mis.ui.theme.AppThemeOption
 import cn.edu.bjtu.mis.ui.theme.BjtuMisTheme
@@ -20,6 +21,11 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         requestedRoute.value = intent.openRoute()
         val app = application as BjtuMisApplication
+        val initialLoadStrategy = if (savedInstanceState == null) {
+            ModuleLoadStrategy.NetworkFirst
+        } else {
+            ModuleLoadStrategy.CacheOnly
+        }
         setContent {
             val themeOption by app.container.themeStore.theme.collectAsState(initial = AppThemeOption.Default)
             LaunchedEffect(Unit) {
@@ -30,6 +36,7 @@ class MainActivity : AppCompatActivity() {
                 BjtuMisApp(
                     container = app.container,
                     themeOption = themeOption,
+                    initialLoadStrategy = initialLoadStrategy,
                     requestedRoute = requestedRoute.value,
                     onRouteHandled = { requestedRoute.value = null },
                     onExit = { finish() },

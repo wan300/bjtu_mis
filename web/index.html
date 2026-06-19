@@ -31,7 +31,7 @@
           <a href="#modules">模块</a>
           <a href="developers.html">开发者文档</a>
           <a href="#download">下载</a>
-          <a data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases/latest" target="_blank" rel="noreferrer">GitHub</a>
+          <a data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases" target="_blank" rel="noreferrer">GitHub</a>
         </nav>
       </div>
     </header>
@@ -49,8 +49,8 @@
               <a class="btn btn--signal" data-download-button href="https://github.com/wan300/bjtu_mis_Android/releases/download/v1.2.1/app-release.apk">
                 <span class="btn__icon">↓</span>
                 <span class="btn__text">
-                  <span>下载最新 APK</span>
-                  <small class="btn__subtext">最新版本 <span data-release-version>v1.2.1</span></small>
+                  <span data-download-label>下载所选 APK</span>
+                  <small class="btn__subtext">当前选择 <span data-release-version>v1.2.1</span></small>
                 </span>
               </a>
               <a class="btn btn--ghost" href="#modules">查看功能模块</a>
@@ -134,35 +134,52 @@
         <div class="download-panel reveal">
           <div>
             <p class="eyebrow">Release ticket</p>
-            <h2>下载最新 Android APK</h2>
+            <h2>下载 Android APK</h2>
             <p>
-              按钮会默认指向 GitHub 最新 release 中的 APK 文件。若 GitHub API 暂时不可用，仍会使用当前版本 APK 兜底链接。
+              默认选择最新稳定版，也可以切换到历史版本或预发布版本。若 GitHub API 暂时不可用，页面会回退到内置版本快照。
+            </p>
+            <label class="release-selector" for="release-select">
+              <span>版本选择</span>
+              <select id="release-select" data-release-select aria-describedby="release-select-help">
+                <option value="v1.2.1">v1.2.1 · 正式版 · 2026-06-06</option>
+              </select>
+            </label>
+            <p class="download-panel__hint" id="release-select-help">
+              当前选择会同时更新下载链接、文件大小和对应发布页。
             </p>
             <div class="download-panel__actions">
               <a class="btn btn--signal" data-download-button href="https://github.com/wan300/bjtu_mis_Android/releases/download/v1.2.1/app-release.apk">
                 <span class="btn__icon">↓</span>
-                下载 APK
+                <span data-download-label>下载所选 APK</span>
               </a>
-              <a class="btn btn--ghost" data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases/latest" target="_blank" rel="noreferrer">查看发布页</a>
+              <a class="btn btn--ghost" data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases" target="_blank" rel="noreferrer">查看发布页</a>
             </div>
-            <p class="release-note">当前正在使用当前版本兜底下载链接。</p>
+            <p class="release-note">GitHub API 暂时不可用，当前显示内置版本快照。</p>
           </div>
           <div class="download-panel__status" aria-label="发布信息">
             <div class="ticket-row">
-              <span>最新版本</span>
+              <span>当前选择</span>
               <strong data-release-version>v1.2.1</strong>
             </div>
             <div class="ticket-row">
-              <span>文件类型</span>
-              <strong>Android APK</strong>
+              <span>发布类型</span>
+              <strong data-release-channel>正式版</strong>
+            </div>
+            <div class="ticket-row">
+              <span>发布日期</span>
+              <strong data-release-published>2026-06-06</strong>
             </div>
             <div class="ticket-row">
               <span>文件大小</span>
               <strong data-release-size>--</strong>
             </div>
             <div class="ticket-row">
+              <span>下载状态</span>
+              <strong data-release-availability>可下载</strong>
+            </div>
+            <div class="ticket-row">
               <span>源代码</span>
-              <strong><a data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases/latest" target="_blank" rel="noreferrer">GitHub Releases</a></strong>
+              <strong><a data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases" target="_blank" rel="noreferrer">GitHub Releases</a></strong>
             </div>
           </div>
         </div>
@@ -172,7 +189,7 @@
     <footer class="site-footer">
       <div class="footer__inner">
         <span>© <span data-current-year></span> BJTU MIS Android</span>
-        <a data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases/latest" target="_blank" rel="noreferrer">GitHub Releases</a>
+        <a data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases" target="_blank" rel="noreferrer">GitHub Releases</a>
       </div>
     </footer>
 

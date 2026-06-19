@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
 import cn.edu.bjtu.mis.model.ModuleEnvelope
 import cn.edu.bjtu.mis.model.TeachingAssessmentCourse
@@ -55,7 +56,10 @@ private data class TeachingAssessmentDraft(
 )
 
 @Composable
-fun TeachingAssessmentScreen(repository: ModuleRepository) {
+fun TeachingAssessmentScreen(
+    repository: ModuleRepository,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+) {
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<LoadState<ModuleEnvelope<TeachingAssessmentData>>>(LoadState.Loading) }
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
@@ -65,10 +69,10 @@ fun TeachingAssessmentScreen(repository: ModuleRepository) {
     var submitRunning by remember { mutableStateOf(false) }
     var showConfirm by remember { mutableStateOf(false) }
 
-    fun load() {
+    fun load(strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst) {
         scope.launch {
             state = LoadState.Loading
-            runCatching { repository.teachingAssessments() }
+            runCatching { repository.teachingAssessments(strategy) }
                 .onSuccess {
                     state = LoadState.Data(it)
                     val evaluableIds = it.data.courses.filter { course -> course.canEvaluate }.map { course -> course.id }.toSet()
@@ -170,7 +174,7 @@ fun TeachingAssessmentScreen(repository: ModuleRepository) {
         }
     }
 
-    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) { load(initialLoadStrategy) }
 
     val envelope = (state as? LoadState.Data)?.value
     val evaluableCourses = envelope?.data?.courses.orEmpty().filter { it.canEvaluate }

@@ -2,6 +2,11 @@
 
 本文件给后续 Codex 会话使用。内容只基于当前仓库中可见的 README、Gradle/npm 配置、源码目录和测试结构；不确定的信息必须标为 `TODO: confirm`。
 
+## 0. 项目原则权威
+
+- 项目原则以 `.specify/memory/constitution.md` 为权威来源；本文件提供代理执行细则和仓库事实。
+- 如本文件与 constitution 冲突，以 constitution 为准，并同步修正文档。
+
 ## 1. 项目概览
 
 BJTU MIS Android 是面向北京交通大学学生的校园学习服务 Android App。应用直接访问 BJTU CAS、MIS、AA、VE、Coremail、知行论坛、就业服务等系统，并在设备本地保存加密凭据、Cookie 与 Room 数据快照。应用内的智能助手入口是嵌入式 Open WebUI Agent。
@@ -179,4 +184,4 @@ Open WebUI：
 
 ## 10. When to use `PLANS.md`
 
-复杂功能、风险重构、数据迁移、架构边界变化、构建/依赖升级、权限或安全敏感改动，以及需求不清的任务，应先根据 `PLANS.md` 写一个可执行、可恢复、持续更新的 `ExecPlan`。计划应先解决目标、范围、验证和回滚，再开始修改代码。
+复杂功能、风险重构、数据迁移、架构边界变化、构建/依赖升级、权限或安全敏感改动，以及需求不清的任务，应先根据 `PLANS.md` 写一个可执行、可恢复、持续更新的 `ExecPlan`。constitution 第 VI 条列出的高风险变更必须先有 ExecPlan。计划应先解决目标、范围、验证和回滚，再开始修改代码。

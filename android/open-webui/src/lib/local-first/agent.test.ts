@@ -1175,6 +1175,219 @@ describe('requestLocalAgentChatCompletion', () => {
 		);
 	});
 
+	it('normalizes object native Agent tool arguments before execution', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		vi.mocked(listNativeAgentTools).mockResolvedValue([
+			{
+				type: 'function',
+				requiresWorkspace: true,
+				function: {
+					name: 'agent_archive_extract',
+					description: 'Extract a supported archive in the native Agent workspace.',
+					parameters: {
+						type: 'object',
+						properties: {
+							archivePath: { type: 'string' },
+							targetDir: { type: 'string' }
+						},
+						required: ['archivePath', 'targetDir'],
+						additionalProperties: false
+					}
+				}
+			}
+		]);
+		vi.mocked(executeNativeAgentTool).mockResolvedValue({
+			output: { ok: true, files: [{ path: 'work/attachments/homework/task.md' }] }
+		});
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+
+			if (requests.length === 1) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content: null,
+						tool_calls: [
+							{
+								id: 'call_extract',
+								type: 'function',
+								function: {
+									name: 'agent_archive_extract',
+									arguments: {
+										archive_path: 'inbox/homework.zip',
+										target_dir: 'work/attachments/homework'
+									}
+								}
+							}
+						]
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: 'Extracted.'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		await requestLocalAgentChatCompletion({
+			body: reviewDisabledBody({ params: { agent_workspace_id: 'workspace-1' } }),
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+
+		expect(executeNativeAgentTool).toHaveBeenCalledWith({
+			workspaceId: 'workspace-1',
+			toolName: 'agent_archive_extract',
+			arguments: {
+				archivePath: 'inbox/homework.zip',
+				targetDir: 'work/attachments/homework'
+			}
+		});
+		const replayedToolCall = requests[1].messages.at(-2).tool_calls[0];
+		expect(typeof replayedToolCall.function.arguments).toBe('string');
+		expect(JSON.parse(replayedToolCall.function.arguments).archive_path).toBe(
+			'inbox/homework.zip'
+		);
+	});
+
+	it('normalizes common native Agent argument aliases across tools', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		vi.mocked(listNativeAgentTools).mockResolvedValue([
+			{
+				type: 'function',
+				function: {
+					name: 'agent_document_extract_pdf',
+					description: 'Extract a PDF.',
+					parameters: {
+						type: 'object',
+						properties: {
+							path: { type: 'string' },
+							outputPath: { type: 'string' }
+						},
+						required: ['path', 'outputPath'],
+						additionalProperties: false
+					}
+				}
+			},
+			{
+				type: 'function',
+				function: {
+					name: 'agent_run_javascript',
+					description: 'Run JavaScript.',
+					parameters: {
+						type: 'object',
+						properties: {
+							code: { type: 'string' },
+							timeoutSeconds: { type: 'integer' }
+						},
+						required: ['code'],
+						additionalProperties: false
+					}
+				}
+			},
+			{
+				type: 'function',
+				function: {
+					name: 'agent_package_results',
+					description: 'Package results.',
+					parameters: {
+						type: 'object',
+						properties: {
+							finalAnswer: { type: 'string' }
+						},
+						additionalProperties: false
+					}
+				}
+			}
+		]);
+		vi.mocked(executeNativeAgentTool).mockResolvedValue({ output: { ok: true } });
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+			if (requests.length === 1) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content: null,
+						tool_calls: [
+							{
+								id: 'call_pdf',
+								type: 'function',
+								function: {
+									name: 'agent_document_extract_pdf',
+									arguments: '{"filename":"inbox/task.pdf","output_path":"work/task.md"}'
+								}
+							},
+							{
+								id: 'call_js',
+								type: 'function',
+								function: {
+									name: 'agent_run_javascript',
+									arguments: '{"code":"return input.value + 1;","timeout_ms":5000}'
+								}
+							},
+							{
+								id: 'call_package',
+								type: 'function',
+								function: {
+									name: 'agent_package_results',
+									arguments: '{"final_answer":"Done."}'
+								}
+							}
+						]
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: 'Done.'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		await requestLocalAgentChatCompletion({
+			body: reviewDisabledBody({ params: { agent_workspace_id: 'workspace-1' } }),
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+
+		expect(executeNativeAgentTool).toHaveBeenCalledWith({
+			workspaceId: 'workspace-1',
+			toolName: 'agent_document_extract_pdf',
+			arguments: {
+				outputPath: 'work/task.md',
+				path: 'inbox/task.pdf'
+			}
+		});
+		expect(executeNativeAgentTool).toHaveBeenCalledWith({
+			workspaceId: 'workspace-1',
+			toolName: 'agent_run_javascript',
+			arguments: {
+				code: 'return input.value + 1;',
+				timeoutSeconds: 5
+			}
+		});
+		expect(executeNativeAgentTool).toHaveBeenCalledWith({
+			workspaceId: 'workspace-1',
+			toolName: 'agent_package_results',
+			arguments: {
+				finalAnswer: 'Done.'
+			}
+		});
+	});
+
 	it('injects only non-workspace native Agent mail tools without a workspace id', async () => {
 		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
 		vi.mocked(listNativeAgentTools).mockResolvedValue([
@@ -1370,6 +1583,69 @@ describe('requestLocalAgentChatCompletion', () => {
 		expect(finalContent).not.toContain('<filename>inbox/makefile_example</filename>');
 	});
 
+	it('normalizes inline XML native Agent archive aliases', async () => {
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		vi.mocked(listNativeAgentTools).mockResolvedValue([
+			{
+				type: 'function',
+				function: {
+					name: 'agent_archive_extract',
+					description: 'Extract archives in the native Agent workspace.',
+					parameters: {
+						type: 'object',
+						properties: {
+							archivePath: { type: 'string' },
+							targetDir: { type: 'string' }
+						},
+						required: ['archivePath', 'targetDir'],
+						additionalProperties: false
+					}
+				}
+			}
+		]);
+		vi.mocked(executeNativeAgentTool).mockResolvedValue({
+			output: { ok: true, files: [{ path: 'work/attachments/homework/task.md' }] }
+		});
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+			if (requests.length === 1) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content:
+							'<agent_archive_extract>\n<file>inbox/homework.zip</file>\n<target_dir>work/attachments/homework</target_dir>\n</agent_archive_extract>'
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerJsonResponse({
+					role: 'assistant',
+					content: 'Extracted.'
+				}),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		await requestLocalAgentChatCompletion({
+			body: reviewDisabledBody({ params: { agent_workspace_id: 'workspace-1' } }),
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+
+		expect(executeNativeAgentTool).toHaveBeenCalledWith({
+			workspaceId: 'workspace-1',
+			toolName: 'agent_archive_extract',
+			arguments: {
+				archivePath: 'inbox/homework.zip',
+				targetDir: 'work/attachments/homework'
+			}
+		});
+	});
+
 	it('executes bare inline XML native Agent tool tags instead of finalizing as text', async () => {
 		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
 		vi.mocked(listNativeAgentTools).mockResolvedValue([
@@ -1390,10 +1666,6 @@ describe('requestLocalAgentChatCompletion', () => {
 				}
 			}
 		]);
-		vi.mocked(executeNativeAgentTool).mockRejectedValueOnce(
-			new Error('Missing required parameter path')
-		);
-
 		const requests: Record<string, any>[] = [];
 		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
 			requests.push(providerBody);
@@ -1427,12 +1699,13 @@ describe('requestLocalAgentChatCompletion', () => {
 		const finalContent = final.choices[0].message.content;
 
 		expect(requestProvider).toHaveBeenCalledTimes(2);
-		expect(executeNativeAgentTool).toHaveBeenCalledWith({
-			workspaceId: 'workspace-1',
-			toolName: 'agent_file_list',
-			arguments: {}
+		expect(executeNativeAgentTool).not.toHaveBeenCalled();
+		expect(toolResult).toMatchObject({
+			tool: 'agent_file_list',
+			missing: ['path'],
+			expected_arguments_example: { path: 'inbox' }
 		});
-		expect(toolResult.error).toBe('Missing required parameter path');
+		expect(toolResult.error).toContain('Missing required argument');
 		expect(finalContent).toContain('<details type="tool_calls" done="true"');
 		expect(finalContent).toContain('name="agent_file_list"');
 		expect(finalContent).toContain('需要带上 path 参数，例如 inbox。');
@@ -1523,10 +1796,6 @@ describe('requestLocalAgentChatCompletion', () => {
 				}
 			}
 		]);
-		vi.mocked(executeNativeAgentTool).mockRejectedValueOnce(
-			new Error('Missing required parameter path')
-		);
-
 		const requests: Record<string, any>[] = [];
 		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
 			requests.push(providerBody);
@@ -1579,11 +1848,9 @@ describe('requestLocalAgentChatCompletion', () => {
 			.join('');
 
 		expect(requestProvider).toHaveBeenCalledTimes(2);
-		expect(executeNativeAgentTool).toHaveBeenCalledWith({
-			workspaceId: 'workspace-1',
-			toolName: 'agent_file_list',
-			arguments: {}
-		});
+		expect(executeNativeAgentTool).not.toHaveBeenCalled();
+		expect(streamText).toContain('expected_arguments_example');
+		expect(streamText).toContain('missing');
 		expect(streamText).not.toContain('<agent_file_list');
 		expect(streamText).not.toContain('我先查看附件列表。');
 		expect(contentEvents.some((event) => event.content.includes('name="agent_file_list"'))).toBe(

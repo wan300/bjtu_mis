@@ -105,6 +105,10 @@ enum class ModuleLoadStrategy {
     NetworkFirst,
 }
 
+class LocalSnapshotMissingException(moduleKey: String) : IllegalStateException(
+    "暂无本地缓存，请手动刷新：$moduleKey"
+)
+
 class SessionRepository(
     private val sessionManager: SessionManager,
 ) {
@@ -358,6 +362,8 @@ class SyncRepository(
         is EmptyRoomData -> data.rooms.size
         is MailMessagesData -> data.messages.size
         is MailFoldersData -> data.folders.size
+        is CourseSelectionData -> data.availableCourses.size
+        is TeachingAssessmentData -> data.courses.size
         is StudentProfileData -> data.fields.size
         is ZhixingHomeData -> data.latestPosts.size + data.rankItems.size
         is AcademicProgressData -> if (data.buckets.isNotEmpty()) data.buckets.size else data.courses.size
@@ -400,46 +406,71 @@ class ModuleRepository(
     private val sessionManager: SessionManager,
     private val singleFlight: SingleFlight = SingleFlight(),
 ) {
-    suspend fun profile(): ModuleEnvelope<StudentProfileData> =
-        snapshotOrFetch(ModuleKeys.Profile) { AaProvider(it).fetchStudentProfile() }
+    suspend fun profile(
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ModuleEnvelope<StudentProfileData> =
+        fetchWithStrategy(ModuleKeys.Profile, strategy = strategy) { AaProvider(it).fetchStudentProfile() }
 
-    suspend fun academicProgress(): ModuleEnvelope<AcademicProgressData> =
-        snapshotOrFetch(ModuleKeys.AcademicProgress) { AaProvider(it).fetchAcademicProgress() }
+    suspend fun academicProgress(
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ModuleEnvelope<AcademicProgressData> =
+        fetchWithStrategy(ModuleKeys.AcademicProgress, strategy = strategy) { AaProvider(it).fetchAcademicProgress() }
 
-    suspend fun historyScores(term: String? = null): ModuleEnvelope<ScoreData> =
-        fetchLiveOrSnapshot(ModuleKeys.HistoryScores, requestKey(ModuleKeys.HistoryScores, "term" to term)) {
+    suspend fun historyScores(
+        term: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ModuleEnvelope<ScoreData> =
+        fetchWithStrategy(ModuleKeys.HistoryScores, requestKey(ModuleKeys.HistoryScores, "term" to term), strategy) {
             AaProvider(it).fetchHistoryScores(term)
         }
 
-    fun historyScoresProgressive(term: String? = null): Flow<ProgressiveModuleState<ScoreData>> =
-        progressiveLiveOrSnapshot(ModuleKeys.HistoryScores) { client ->
+    fun historyScoresProgressive(
+        term: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): Flow<ProgressiveModuleState<ScoreData>> =
+        progressiveLiveOrSnapshot(ModuleKeys.HistoryScores, strategy = strategy) { client ->
             AaProvider(client).fetchHistoryScoresProgressive(term)
         }
 
-    suspend fun timetable(): ModuleEnvelope<TimetableData> =
-        snapshotOrFetch(ModuleKeys.Timetable) { AaProvider(it).fetchTimetable() }
+    suspend fun timetable(
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ModuleEnvelope<TimetableData> =
+        fetchWithStrategy(ModuleKeys.Timetable, strategy = strategy) { AaProvider(it).fetchTimetable() }
             .withUserCourses()
 
-    suspend fun exams(term: String? = null): ModuleEnvelope<ExamData> =
-        fetchLiveOrSnapshot(ModuleKeys.Exams, requestKey(ModuleKeys.Exams, "term" to term)) {
+    suspend fun exams(
+        term: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ModuleEnvelope<ExamData> =
+        fetchWithStrategy(ModuleKeys.Exams, requestKey(ModuleKeys.Exams, "term" to term), strategy) {
             AaProvider(it).fetchExams(term)
         }
 
-    suspend fun scores(term: String? = null, ctype: String? = null): ModuleEnvelope<ScoreData> =
-        fetchLiveOrSnapshot(ModuleKeys.Scores, requestKey(ModuleKeys.Scores, "term" to term, "ctype" to ctype)) {
+    suspend fun scores(
+        term: String? = null,
+        ctype: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ModuleEnvelope<ScoreData> =
+        fetchWithStrategy(ModuleKeys.Scores, requestKey(ModuleKeys.Scores, "term" to term, "ctype" to ctype), strategy) {
             AaProvider(it).fetchScores(term, ctype)
         }
 
     suspend fun scoreDetail(detailPath: String): ModuleEnvelope<ScoreDetailData> =
         sessionManager.withAuthenticatedClient { AaProvider(it).fetchScoreDetail(detailPath) }.copy(syncedAt = nowIso())
 
-    suspend fun calendar(month: String? = null): ModuleEnvelope<CalendarData> =
-        fetchLiveOrSnapshot(ModuleKeys.Calendar, requestKey(ModuleKeys.Calendar, "month" to month)) {
+    suspend fun calendar(
+        month: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ModuleEnvelope<CalendarData> =
+        fetchWithStrategy(ModuleKeys.Calendar, requestKey(ModuleKeys.Calendar, "month" to month), strategy) {
             VeProvider(it).fetchCalendar(month)
         }
 
-    suspend fun homework(status: String = "all"): ModuleEnvelope<HomeworkData> {
-        val envelope = fetchLiveOrSnapshot(ModuleKeys.Homework, requestKey(ModuleKeys.Homework, "status" to "all")) {
+    suspend fun homework(
+        status: String = "all",
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ModuleEnvelope<HomeworkData> {
+        val envelope = fetchWithStrategy(ModuleKeys.Homework, requestKey(ModuleKeys.Homework, "status" to "all"), strategy) {
             VeProvider(it).fetchHomework()
         }
         if (status == "all") return envelope
@@ -448,10 +479,14 @@ class ModuleRepository(
         }))
     }
 
-    fun homeworkProgressive(status: String = "all"): Flow<ProgressiveModuleState<HomeworkData>> =
+    fun homeworkProgressive(
+        status: String = "all",
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): Flow<ProgressiveModuleState<HomeworkData>> =
         progressiveLiveOrSnapshot(
             moduleKey = ModuleKeys.Homework,
             transform = { it.filteredHomework(status) },
+            strategy = strategy,
         ) { client ->
             VeProvider(client).fetchHomeworkProgressive()
         }
@@ -469,17 +504,22 @@ class ModuleRepository(
         week: String? = null,
         building: String? = null,
         room: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): ModuleEnvelope<EmptyRoomData> =
-        fetchLiveOrSnapshot(
+        fetchWithStrategy(
             ModuleKeys.EmptyRooms,
             requestKey(ModuleKeys.EmptyRooms, "term" to term, "week" to week, "building" to building, "room" to room),
+            strategy,
         ) {
             AaProvider(it).fetchEmptyRooms(term, week, building, room)
         }
 
-    suspend fun teachingAssessments(): ModuleEnvelope<TeachingAssessmentData> =
-        sessionManager.withAuthenticatedClient { AaProvider(it).fetchTeachingAssessmentList() }
-            .copy(syncedAt = nowIso())
+    suspend fun teachingAssessments(
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ModuleEnvelope<TeachingAssessmentData> =
+        fetchWithStrategy(ModuleKeys.TeachingAssessment, strategy = strategy) {
+            AaProvider(it).fetchTeachingAssessmentList()
+        }
 
     suspend fun teachingAssessmentForm(courseId: String): TeachingAssessmentForm =
         sessionManager.withAuthenticatedClient { AaProvider(it).fetchTeachingAssessmentForm(courseId) }
@@ -497,8 +537,9 @@ class ModuleRepository(
         folderId: String = "0",
         search: String? = null,
         categoryKey: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): ModuleEnvelope<CourseResourcesData> =
-        fetchLiveOrSnapshot(
+        fetchWithStrategy(
             ModuleKeys.CourseResources,
             requestKey(
                 ModuleKeys.CourseResources,
@@ -508,6 +549,7 @@ class ModuleRepository(
                 "search" to search,
                 "categoryKey" to categoryKey,
             ),
+            strategy,
         ) {
             VeProvider(it).fetchCourseResources(term, courseId, folderId, search, categoryKey)
         }
@@ -518,16 +560,18 @@ class ModuleRepository(
         folderId: String = "0",
         search: String? = null,
         categoryKey: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): Flow<ProgressiveModuleState<CourseResourcesData>> =
-        progressiveLiveOrSnapshot(ModuleKeys.CourseResources) { client ->
+        progressiveLiveOrSnapshot(ModuleKeys.CourseResources, strategy = strategy) { client ->
             VeProvider(client).fetchCourseResourcesProgressive(term, courseId, folderId, search, categoryKey)
         }
 
     fun courseReplayProgressive(
         term: String? = null,
         courseId: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): Flow<ProgressiveModuleState<CourseReplayData>> =
-        progressiveLiveOrSnapshot(ModuleKeys.CourseReplay) { client ->
+        progressiveLiveOrSnapshot(ModuleKeys.CourseReplay, strategy = strategy) { client ->
             VeProvider(client).fetchCourseReplaysProgressive(term, courseId)
         }
 
@@ -560,11 +604,18 @@ class ModuleRepository(
         return copy(data = data.copy(entries = data.entries + localEntries))
     }
 
-    private suspend inline fun <reified T> snapshotOrFetch(
+    private suspend inline fun <reified T> fetchWithStrategy(
         moduleKey: String,
+        requestKey: String = moduleKey,
+        strategy: ModuleLoadStrategy,
         crossinline fetcher: suspend (cn.edu.bjtu.mis.data.network.BjtuHttpClient) -> ModuleEnvelope<T>,
     ): ModuleEnvelope<T> =
-        syncRepository.snapshot<T>(moduleKey) ?: fetchLiveOrSnapshot(moduleKey, fetcher = fetcher)
+        when (strategy) {
+            ModuleLoadStrategy.CacheOnly -> syncRepository.snapshot<T>(moduleKey) ?: throw LocalSnapshotMissingException(moduleKey)
+            ModuleLoadStrategy.CacheFirst -> syncRepository.snapshot<T>(moduleKey)
+                ?: fetchLiveOrSnapshot(moduleKey, requestKey, fetcher)
+            ModuleLoadStrategy.NetworkFirst -> fetchLiveOrSnapshot(moduleKey, requestKey, fetcher)
+        }
 
     private suspend inline fun <reified T> fetchLiveOrSnapshot(
         moduleKey: String,
@@ -591,10 +642,24 @@ class ModuleRepository(
     private inline fun <reified T> progressiveLiveOrSnapshot(
         moduleKey: String,
         noinline transform: (ModuleEnvelope<T>) -> ModuleEnvelope<T> = { it },
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
         crossinline fetcher: (BjtuHttpClient) -> Flow<ProgressiveModuleState<T>>,
     ): Flow<ProgressiveModuleState<T>> = flow {
         val cached = syncRepository.snapshot<T>(moduleKey)?.let(transform)
         var latestNetworkEnvelope: ModuleEnvelope<T>? = null
+        if (strategy == ModuleLoadStrategy.CacheOnly || (strategy == ModuleLoadStrategy.CacheFirst && cached != null)) {
+            emit(
+                ProgressiveModuleState(
+                    envelope = cached,
+                    loading = false,
+                    complete = true,
+                    fromCache = cached != null,
+                    loadedCount = cached?.data?.let { itemCount(it).takeIf { count -> count >= 0 } },
+                    errors = if (cached == null) listOf(LocalSnapshotMissingException(moduleKey).message.orEmpty()) else emptyList(),
+                )
+            )
+            return@flow
+        }
         if (cached != null) {
             emit(
                 ProgressiveModuleState(
@@ -655,6 +720,8 @@ class ModuleRepository(
         is EmptyRoomData -> data.rooms.size
         is MailMessagesData -> data.messages.size
         is MailFoldersData -> data.folders.size
+        is CourseSelectionData -> data.availableCourses.size
+        is TeachingAssessmentData -> data.courses.size
         is StudentProfileData -> data.fields.size
         is ZhixingHomeData -> data.latestPosts.size + data.rankItems.size
         is EmploymentConsultationData -> data.articles.size
@@ -674,8 +741,9 @@ class CourseResourceRepository(
         folderId: String = "0",
         search: String? = null,
         categoryKey: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): ModuleEnvelope<CourseResourcesData> =
-        moduleRepository.courseResources(term, courseId, folderId, search, categoryKey)
+        moduleRepository.courseResources(term, courseId, folderId, search, categoryKey, strategy)
 
     fun listingProgressive(
         term: String? = null,
@@ -683,8 +751,9 @@ class CourseResourceRepository(
         folderId: String = "0",
         search: String? = null,
         categoryKey: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): Flow<ProgressiveModuleState<CourseResourcesData>> =
-        moduleRepository.courseResourcesProgressive(term, courseId, folderId, search, categoryKey)
+        moduleRepository.courseResourcesProgressive(term, courseId, folderId, search, categoryKey, strategy)
 
     suspend fun download(rpId: String, filename: String, extension: String? = null): File =
         singleFlight.run("course_resource:download:${rpId.trim()}") {
@@ -841,23 +910,31 @@ class CourseReplayRepository(
     suspend fun listing(
         term: String? = null,
         courseId: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): ModuleEnvelope<CourseReplayData> =
-        runCatching {
-            val envelope = sessionManager.withAuthenticatedClient {
-                VeProvider(it).fetchCourseReplays(term, courseId)
-            }.copy(syncedAt = nowIso())
-            syncRepository.saveSnapshot(ModuleKeys.CourseReplay, envelope)
-            envelope
-        }.getOrElse {
-            syncRepository.snapshot<CourseReplayData>(ModuleKeys.CourseReplay)
-                ?: throw it
+        when (strategy) {
+            ModuleLoadStrategy.CacheOnly -> syncRepository.snapshot<CourseReplayData>(ModuleKeys.CourseReplay)
+                ?: throw LocalSnapshotMissingException(ModuleKeys.CourseReplay)
+            ModuleLoadStrategy.CacheFirst -> syncRepository.snapshot<CourseReplayData>(ModuleKeys.CourseReplay)
+                ?: listing(term = term, courseId = courseId, strategy = ModuleLoadStrategy.NetworkFirst)
+            ModuleLoadStrategy.NetworkFirst -> runCatching {
+                val envelope = sessionManager.withAuthenticatedClient {
+                    VeProvider(it).fetchCourseReplays(term, courseId)
+                }.copy(syncedAt = nowIso())
+                syncRepository.saveSnapshot(ModuleKeys.CourseReplay, envelope)
+                envelope
+            }.getOrElse {
+                syncRepository.snapshot<CourseReplayData>(ModuleKeys.CourseReplay)
+                    ?: throw it
+            }
         }
 
     fun listingProgressive(
         term: String? = null,
         courseId: String? = null,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): Flow<ProgressiveModuleState<CourseReplayData>> =
-        moduleRepository.courseReplayProgressive(term, courseId)
+        moduleRepository.courseReplayProgressive(term, courseId, strategy)
 
     suspend fun playback(
         term: String? = null,
@@ -893,8 +970,15 @@ class EmploymentConsultationRepository(
     private val syncRepository: SyncRepository,
     private val client: BjtuHttpClient,
 ) {
-    suspend fun home(forceRefresh: Boolean = false): ModuleEnvelope<EmploymentConsultationData> {
-        if (!forceRefresh) {
+    suspend fun home(
+        forceRefresh: Boolean = false,
+        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
+    ): ModuleEnvelope<EmploymentConsultationData> {
+        if (strategy == ModuleLoadStrategy.CacheOnly) {
+            return syncRepository.snapshot<EmploymentConsultationData>(ModuleKeys.EmploymentConsultation)
+                ?: throw LocalSnapshotMissingException(ModuleKeys.EmploymentConsultation)
+        }
+        if (!forceRefresh && strategy == ModuleLoadStrategy.CacheFirst) {
             syncRepository.snapshot<EmploymentConsultationData>(ModuleKeys.EmploymentConsultation)?.let { return it }
         }
         return runCatching {
@@ -921,6 +1005,7 @@ class EmploymentConsultationRepository(
     suspend fun infoPage(
         query: EmploymentInfoQuery,
         forceRefresh: Boolean = false,
+        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
     ): ModuleEnvelope<EmploymentInfoPage> {
         val normalizedQuery = query.copy(
             pageNo = query.pageNo.coerceAtLeast(1),
@@ -934,7 +1019,10 @@ class EmploymentConsultationRepository(
             industryLabel = query.industryLabel.trim(),
         )
         val key = infoPageSnapshotKey(normalizedQuery)
-        if (!forceRefresh) {
+        if (strategy == ModuleLoadStrategy.CacheOnly) {
+            return syncRepository.snapshot<EmploymentInfoPage>(key) ?: throw LocalSnapshotMissingException(key)
+        }
+        if (!forceRefresh && strategy == ModuleLoadStrategy.CacheFirst) {
             syncRepository.snapshot<EmploymentInfoPage>(key)?.let { return it }
         }
         return runCatching {
@@ -946,9 +1034,15 @@ class EmploymentConsultationRepository(
         }
     }
 
-    suspend fun filterOptions(forceRefresh: Boolean = false): ModuleEnvelope<EmploymentFilterOptions> {
+    suspend fun filterOptions(
+        forceRefresh: Boolean = false,
+        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
+    ): ModuleEnvelope<EmploymentFilterOptions> {
         val key = "${ModuleKeys.EmploymentConsultation}:filters"
-        if (!forceRefresh) {
+        if (strategy == ModuleLoadStrategy.CacheOnly) {
+            return syncRepository.snapshot<EmploymentFilterOptions>(key) ?: throw LocalSnapshotMissingException(key)
+        }
+        if (!forceRefresh && strategy == ModuleLoadStrategy.CacheFirst) {
             syncRepository.snapshot<EmploymentFilterOptions>(key)?.let { return it }
         }
         return runCatching {
@@ -966,6 +1060,7 @@ class EmploymentConsultationRepository(
     suspend fun calendarEvents(
         pageSize: Int = 50,
         forceRefresh: Boolean = false,
+        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
     ): List<EmploymentCalendarEvent> {
         val normalizedPageSize = pageSize.coerceAtLeast(1)
         val items = listOf(
@@ -979,6 +1074,7 @@ class EmploymentConsultationRepository(
                     pageSize = normalizedPageSize,
                 ),
                 forceRefresh = forceRefresh,
+                strategy = strategy,
             ).data.items
         }
         return employmentCalendarEvents(items)
@@ -1031,8 +1127,15 @@ class ZhixingRepository(
 
     private var pendingLogin: PendingLogin? = null
 
-    suspend fun home(forceRefresh: Boolean = false): ModuleEnvelope<ZhixingHomeData> {
-        if (!forceRefresh) {
+    suspend fun home(
+        forceRefresh: Boolean = false,
+        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
+    ): ModuleEnvelope<ZhixingHomeData> {
+        if (strategy == ModuleLoadStrategy.CacheOnly) {
+            return syncRepository.snapshot<ZhixingHomeData>(ModuleKeys.Zhixing)
+                ?: throw LocalSnapshotMissingException(ModuleKeys.Zhixing)
+        }
+        if (!forceRefresh && strategy == ModuleLoadStrategy.CacheFirst) {
             syncRepository.snapshot<ZhixingHomeData>(ModuleKeys.Zhixing)?.let { return it }
         }
         return runCatching {
@@ -1085,11 +1188,19 @@ class ZhixingRepository(
             ZhixingProvider(client).search(keyword, page).copy(syncedAt = nowIso())
         }
 
-    suspend fun authState(): ZhixingAuthState =
-        sessionManager.withAuthenticatedClient { client ->
-            val provider = ZhixingProvider(client)
-            val state = provider.authState()
-            if (state.loggedIn) state else tryAutoLogin(provider) ?: state
+    suspend fun authState(
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ZhixingAuthState =
+        when (strategy) {
+            ModuleLoadStrategy.CacheOnly -> syncRepository.snapshot<ZhixingHomeData>(ModuleKeys.Zhixing)?.data?.authState
+                ?: throw LocalSnapshotMissingException(ModuleKeys.Zhixing)
+            ModuleLoadStrategy.CacheFirst -> syncRepository.snapshot<ZhixingHomeData>(ModuleKeys.Zhixing)?.data?.authState
+                ?: authState(ModuleLoadStrategy.NetworkFirst)
+            ModuleLoadStrategy.NetworkFirst -> sessionManager.withAuthenticatedClient { client ->
+                val provider = ZhixingProvider(client)
+                val state = provider.authState()
+                if (state.loggedIn) state else tryAutoLogin(provider) ?: state
+            }
         }
 
     suspend fun login(username: String, password: String): ZhixingLoginOutcome =
@@ -1177,26 +1288,42 @@ class MailRepository(
     private val dao: BjtuMisDao,
     private val sessionManager: SessionManager,
 ) {
-    suspend fun folders(): ModuleEnvelope<MailFoldersData> =
-        runCatching {
-            val envelope = sessionManager.withAuthenticatedClient { CoremailProvider(it).fetchFolders() }.copy(syncedAt = nowIso())
-            dao.clearMailFolders()
-            dao.saveMailFolders(envelope.data.folders.map { it.toEntity(envelope.syncedAt ?: nowIso()) })
-            envelope
-        }.getOrElse { error ->
-            cachedFolders() ?: throw error
+    suspend fun folders(
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ModuleEnvelope<MailFoldersData> =
+        when (strategy) {
+            ModuleLoadStrategy.CacheOnly -> cachedFolders() ?: throw LocalSnapshotMissingException(ModuleKeys.Mail)
+            ModuleLoadStrategy.CacheFirst -> cachedFolders() ?: folders(ModuleLoadStrategy.NetworkFirst)
+            ModuleLoadStrategy.NetworkFirst -> runCatching {
+                val envelope = sessionManager.withAuthenticatedClient { CoremailProvider(it).fetchFolders() }.copy(syncedAt = nowIso())
+                dao.clearMailFolders()
+                dao.saveMailFolders(envelope.data.folders.map { it.toEntity(envelope.syncedAt ?: nowIso()) })
+                envelope
+            }.getOrElse { error ->
+                cachedFolders() ?: throw error
+            }
         }
 
-    suspend fun messages(folderId: String = "1", start: Int = 0, limit: Int = 20): ModuleEnvelope<MailMessagesData> =
-        runCatching {
-            val envelope = sessionManager.withAuthenticatedClient {
-                CoremailProvider(it).fetchMessages(folderId = folderId, start = start, limit = limit)
-            }.copy(syncedAt = nowIso())
-            if (start == 0) dao.clearMailMessageSummaries(folderId)
-            dao.saveMailMessageSummaries(envelope.data.messages.map { it.toEntity(envelope.syncedAt ?: nowIso()) })
-            envelope
-        }.getOrElse { error ->
-            cachedMessages(folderId, start, limit) ?: throw error
+    suspend fun messages(
+        folderId: String = "1",
+        start: Int = 0,
+        limit: Int = 20,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ModuleEnvelope<MailMessagesData> =
+        when (strategy) {
+            ModuleLoadStrategy.CacheOnly -> cachedMessages(folderId, start, limit) ?: throw LocalSnapshotMissingException(ModuleKeys.Mail)
+            ModuleLoadStrategy.CacheFirst -> cachedMessages(folderId, start, limit)
+                ?: messages(folderId = folderId, start = start, limit = limit, strategy = ModuleLoadStrategy.NetworkFirst)
+            ModuleLoadStrategy.NetworkFirst -> runCatching {
+                val envelope = sessionManager.withAuthenticatedClient {
+                    CoremailProvider(it).fetchMessages(folderId = folderId, start = start, limit = limit)
+                }.copy(syncedAt = nowIso())
+                if (start == 0) dao.clearMailMessageSummaries(folderId)
+                dao.saveMailMessageSummaries(envelope.data.messages.map { it.toEntity(envelope.syncedAt ?: nowIso()) })
+                envelope
+            }.getOrElse { error ->
+                cachedMessages(folderId, start, limit) ?: throw error
+            }
         }
 
     suspend fun detail(messageId: String, mboxa: String = ""): ModuleEnvelope<MailMessageDetail> =
@@ -1310,9 +1437,24 @@ class MailRepository(
 
 class CourseSelectionRepository(
     private val sessionManager: SessionManager,
+    private val syncRepository: SyncRepository,
 ) {
-    suspend fun listing(): ModuleEnvelope<CourseSelectionData> =
-        sessionManager.withAuthenticatedClient { AaProvider(it).fetchCourseSelection() }.copy(syncedAt = nowIso())
+    suspend fun listing(
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ): ModuleEnvelope<CourseSelectionData> =
+        when (strategy) {
+            ModuleLoadStrategy.CacheOnly -> syncRepository.snapshot<CourseSelectionData>(ModuleKeys.CourseSelection)
+                ?: throw LocalSnapshotMissingException(ModuleKeys.CourseSelection)
+            ModuleLoadStrategy.CacheFirst -> syncRepository.snapshot<CourseSelectionData>(ModuleKeys.CourseSelection)
+                ?: listing(ModuleLoadStrategy.NetworkFirst)
+            ModuleLoadStrategy.NetworkFirst -> runCatching {
+                val envelope = sessionManager.withAuthenticatedClient { AaProvider(it).fetchCourseSelection() }.copy(syncedAt = nowIso())
+                syncRepository.saveSnapshot(ModuleKeys.CourseSelection, envelope)
+                envelope
+            }.getOrElse { error ->
+                syncRepository.snapshot<CourseSelectionData>(ModuleKeys.CourseSelection) ?: throw error
+            }
+        }
 
     suspend fun select(courseKey: String, courseName: String? = null): CourseSelectionAttemptResult =
         sessionManager.withAuthenticatedClient { AaProvider(it).attemptCourseSelection(courseKey, courseName) }

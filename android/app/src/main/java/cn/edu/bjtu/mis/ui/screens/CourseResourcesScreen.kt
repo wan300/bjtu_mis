@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import cn.edu.bjtu.mis.data.repository.CourseResourceRepository
 import cn.edu.bjtu.mis.data.repository.DocumentPreview
+import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.model.CourseResourceCategory
 import cn.edu.bjtu.mis.model.CourseResourceItem
 import cn.edu.bjtu.mis.model.CourseResourcesData
@@ -49,7 +50,10 @@ import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CourseResourcesScreen(repository: CourseResourceRepository) {
+fun CourseResourcesScreen(
+    repository: CourseResourceRepository,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var selectedCourseId by remember { mutableStateOf("") }
@@ -66,6 +70,7 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
         nextFolder: String = folderId,
         nextCourse: String = selectedCourseId,
         nextCategory: String = selectedCategoryKey,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ) {
         scope.launch {
             state = ProgressiveModuleState()
@@ -76,6 +81,7 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
                     folderId = nextFolder,
                     search = search.ifBlank { null },
                     categoryKey = nextCategory,
+                    strategy = strategy,
                 ).collect { next ->
                     next.envelope?.data?.let { data ->
                         selectedCourseId = data.selectedCourseId?.toString().orEmpty()
@@ -119,7 +125,7 @@ fun CourseResourcesScreen(repository: CourseResourceRepository) {
             previewing = null
         }
     }
-    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) { load(strategy = initialLoadStrategy) }
 
     previewTarget?.let { target ->
         DocumentPreviewScreen(

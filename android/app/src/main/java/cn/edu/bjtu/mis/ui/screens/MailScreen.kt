@@ -1,20 +1,30 @@
 package cn.edu.bjtu.mis.ui.screens
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -24,10 +34,12 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,10 +51,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import cn.edu.bjtu.mis.data.repository.MailRepository
 import cn.edu.bjtu.mis.data.repository.MailUploadFile
+import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.model.MailAttachment
 import cn.edu.bjtu.mis.model.MailComposeAttachment
 import cn.edu.bjtu.mis.model.MailComposeRequest
@@ -67,7 +83,10 @@ private const val PAGE_SIZE = 20
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MailScreen(repository: MailRepository) {
+fun MailScreen(
+    repository: MailRepository,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var foldersState by remember { mutableStateOf<LoadState<ModuleEnvelope<MailFoldersData>>>(LoadState.Loading) }
@@ -80,10 +99,10 @@ fun MailScreen(repository: MailRepository) {
     var busyMessage by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    fun loadFolders() {
+    fun loadFolders(strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst) {
         scope.launch {
             foldersState = LoadState.Loading
-            runCatching { repository.folders() }
+            runCatching { repository.folders(strategy) }
                 .onSuccess { envelope ->
                     foldersState = LoadState.Data(envelope)
                     val ids = envelope.data.folders.map { it.folderId }
@@ -95,11 +114,15 @@ fun MailScreen(repository: MailRepository) {
         }
     }
 
-    fun loadMessages(nextStart: Int = start, folderId: String = selectedFolderId) {
+    fun loadMessages(
+        nextStart: Int = start,
+        folderId: String = selectedFolderId,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    ) {
         scope.launch {
             messagesState = LoadState.Loading
             error = null
-            runCatching { repository.messages(folderId = folderId, start = nextStart, limit = PAGE_SIZE) }
+            runCatching { repository.messages(folderId = folderId, start = nextStart, limit = PAGE_SIZE, strategy = strategy) }
                 .onSuccess {
                     start = it.data.start
                     messagesState = LoadState.Data(it)
@@ -119,8 +142,8 @@ fun MailScreen(repository: MailRepository) {
     }
 
     LaunchedEffect(Unit) {
-        loadFolders()
-        loadMessages()
+        loadFolders(initialLoadStrategy)
+        loadMessages(strategy = initialLoadStrategy)
     }
 
     if (showCompose) {
@@ -299,6 +322,222 @@ private fun FolderSelector(
 
 @Composable
 private fun MailDetailDialog(
+    state: LoadState<ModuleEnvelope<MailMessageDetail>>,
+    busyMessage: String?,
+    error: String?,
+    onDismiss: () -> Unit,
+    onDelete: (MailMessageDetail) -> Unit,
+    onDownload: (MailMessageDetail, MailAttachment) -> Unit,
+) {
+    val detail = (state as? LoadState.Data)?.value?.data
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = detail?.subject?.ifBlank { "(无主题)" } ?: "邮件详情",
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (detail != null) {
+                        TextButton(enabled = busyMessage == null, onClick = { onDelete(detail) }) {
+                            Text("删除")
+                        }
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text("关闭")
+                    }
+                }
+                HorizontalDivider()
+                when (state) {
+                    LoadState.Loading, is LoadState.Error -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            LoadingOrError(state)
+                            if (!busyMessage.isNullOrBlank()) {
+                                Text(busyMessage)
+                            }
+                            if (!error.isNullOrBlank()) {
+                                Text(error, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+
+                    is LoadState.Data -> {
+                        MailDetailContent(
+                            detail = state.value.data,
+                            busyMessage = busyMessage,
+                            error = error,
+                            onDownload = onDownload,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MailDetailContent(
+    detail: MailMessageDetail,
+    busyMessage: String?,
+    error: String?,
+    onDownload: (MailMessageDetail, MailAttachment) -> Unit,
+) {
+    val context = LocalContext.current
+    var bodyRenderMode by remember(detail.messageId) { mutableStateOf(MailBodyRenderMode.Mobile) }
+    val bodyHtml = remember(detail.htmlContent, bodyRenderMode) {
+        mailBodyHtml(detail.htmlContent, bodyRenderMode)
+    }
+    Column(
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 260.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = bodyRenderMode == MailBodyRenderMode.Mobile,
+                    onClick = { bodyRenderMode = MailBodyRenderMode.Mobile },
+                    label = { Text("移动版") },
+                )
+                FilterChip(
+                    selected = bodyRenderMode == MailBodyRenderMode.Original,
+                    onClick = { bodyRenderMode = MailBodyRenderMode.Original },
+                    label = { Text("原始版") },
+                )
+            }
+            KeyValue("发件人", detail.fromList.joinToString(", ").ifBlank { detail.fromText })
+            KeyValue("收件人", detail.toList.joinToString(", ").ifBlank { detail.toText })
+            KeyValue("抄送", detail.ccList.joinToString(", "))
+            KeyValue("时间", detail.receivedAt ?: detail.sentAt)
+            if (detail.attachments.isNotEmpty()) {
+                MailAttachmentsSection(
+                    detail = detail,
+                    busyMessage = busyMessage,
+                    onDownload = onDownload,
+                )
+            } else if (detail.attached) {
+                HorizontalDivider()
+                Text("附件", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "邮件标记包含附件，但详情接口未返回可下载的附件列表。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (!busyMessage.isNullOrBlank()) {
+                Text(busyMessage)
+            }
+            if (!error.isNullOrBlank()) {
+                Text(error, color = MaterialTheme.colorScheme.error)
+            }
+        }
+        HorizontalDivider()
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) {
+            MailBodyWebView(
+                html = bodyHtml,
+                modifier = Modifier.fillMaxSize(),
+                onOpenExternalUrl = { url -> openMailExternalUrl(context, url) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun MailBodyWebView(
+    html: String,
+    modifier: Modifier = Modifier,
+    onOpenExternalUrl: (String) -> Unit,
+) {
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            WebView(context).apply {
+                settings.javaScriptEnabled = false
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
+                settings.domStorageEnabled = false
+                settings.useWideViewPort = true
+                settings.loadWithOverviewMode = true
+                settings.builtInZoomControls = true
+                settings.displayZoomControls = false
+                settings.setSupportZoom(true)
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = WebView.OVER_SCROLL_NEVER
+                webViewClient = MailBodyWebViewClient(onOpenExternalUrl)
+            }
+        },
+        update = { webView ->
+            val previousHtml = webView.tag as? String
+            if (previousHtml != html) {
+                webView.tag = html
+                webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+            }
+        },
+    )
+}
+
+private class MailBodyWebViewClient(
+    private val onOpenExternalUrl: (String) -> Unit,
+) : WebViewClient() {
+    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+        handleUri(request.url)
+
+    private fun handleUri(uri: Uri): Boolean {
+        val scheme = uri.scheme?.lowercase() ?: return true
+        return when (scheme) {
+            "http", "https" -> {
+                onOpenExternalUrl(uri.toString())
+                true
+            }
+
+            "about", "data" -> false
+            else -> true
+        }
+    }
+}
+
+@Composable
+private fun MailDetailDialogLegacy(
     state: LoadState<ModuleEnvelope<MailMessageDetail>>,
     busyMessage: String?,
     error: String?,
@@ -595,6 +834,11 @@ private fun replaceLastRecipientToken(value: String, replacement: String): Strin
     } else {
         value.take(delimiter.range.first + 1) + " $replacement, "
     }
+}
+
+private fun openMailExternalUrl(context: Context, url: String): Boolean {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+    return runCatching { context.startActivity(Intent.createChooser(intent, "打开链接")) }.isSuccess
 }
 
 private fun readUploadFile(context: Context, uri: Uri): MailUploadFile? {
