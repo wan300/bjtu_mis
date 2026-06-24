@@ -73,7 +73,7 @@ import cn.edu.bjtu.mis.ui.components.InfoCard
 import cn.edu.bjtu.mis.ui.components.KeyValue
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
-import cn.edu.bjtu.mis.ui.components.SectionTitle
+import cn.edu.bjtu.mis.ui.components.PageActionRow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -208,19 +208,13 @@ fun MailScreen(
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            SectionTitle(
-                title = "邮箱",
-                subtitle = "文件夹和邮件摘要会缓存到本地；正文与附件仅实时读取。",
-                trailing = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = {
-                            loadFolders()
-                            loadMessages(0)
-                        }) { Text("刷新") }
-                        Button(onClick = { showCompose = true }) { Text("写信") }
-                    }
-                },
-            )
+            PageActionRow {
+                OutlinedButton(onClick = {
+                    loadFolders()
+                    loadMessages(0)
+                }) { Text("刷新") }
+                Button(onClick = { showCompose = true }) { Text("写信") }
+            }
         }
         item {
             val folders = (foldersState as? LoadState.Data)?.value?.data?.folders.orEmpty()

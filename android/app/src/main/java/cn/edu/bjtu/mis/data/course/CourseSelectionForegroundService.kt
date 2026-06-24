@@ -1,14 +1,21 @@
 package cn.edu.bjtu.mis.data.course
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -19,6 +26,7 @@ import cn.edu.bjtu.mis.data.sync.SessionKeepAliveForegroundService
 import cn.edu.bjtu.mis.model.CourseSelectionReplaceRule
 import cn.edu.bjtu.mis.model.CourseSelectionRunConfig
 import cn.edu.bjtu.mis.model.CourseSelectionRunState
+import cn.edu.bjtu.mis.model.CourseSelectionSuccessAlert
 import cn.edu.bjtu.mis.model.CourseSelectionTarget
 import cn.edu.bjtu.mis.model.ModuleKeys
 import kotlinx.coroutines.CoroutineScope
@@ -33,6 +41,7 @@ class CourseSelectionForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var observerJob: Job? = null
     private var lastCaptchaNotificationId: String? = null
+    private val notifiedSuccessAlertIds = mutableSetOf<Long>()
     private var keepAliveHeld = false
 
     private val runner: CourseSelectionRunner
@@ -61,6 +70,10 @@ class CourseSelectionForegroundService : Service() {
                 if (config == null) {
                     stopSelf(startId)
                     return START_NOT_STICKY
+                }
+                synchronized(notifiedSuccessAlertIds) {
+                    notifiedSuccessAlertIds.clear()
+                    notifiedSuccessAlertIds += runner.state.value.successAlerts.map { it.eventId }
                 }
                 startForegroundCompat(buildRunningNotification(runner.state.value))
                 observeRunner()
@@ -91,6 +104,7 @@ class CourseSelectionForegroundService : Service() {
 
     private fun updateNotifications(state: CourseSelectionRunState) {
         val notificationManager = NotificationManagerCompat.from(this)
+        notifySuccessAlerts(notificationManager, state.successAlerts)
         if (!state.running) {
             releaseKeepAlive()
             notificationManager.cancel(NOTIFICATION_ID_RUNNING)
@@ -101,14 +115,15 @@ class CourseSelectionForegroundService : Service() {
         }
 
         acquireKeepAlive()
-        notificationManager.notify(NOTIFICATION_ID_RUNNING, buildRunningNotification(state))
+        notifySafely(notificationManager, NOTIFICATION_ID_RUNNING, buildRunningNotification(state))
         val challengeId = state.awaitingCaptcha?.challengeId
         if (challengeId == null) {
             lastCaptchaNotificationId = null
             notificationManager.cancel(NOTIFICATION_ID_CAPTCHA)
         } else if (challengeId != lastCaptchaNotificationId) {
             lastCaptchaNotificationId = challengeId
-            notificationManager.notify(NOTIFICATION_ID_CAPTCHA, buildCaptchaNotification(state))
+            notifySafely(notificationManager, NOTIFICATION_ID_CAPTCHA, buildCaptchaNotification(state))
+            vibrateStrongly()
         }
     }
 
@@ -151,6 +166,21 @@ class CourseSelectionForegroundService : Service() {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .build()
 
+    private fun buildSuccessNotification(alert: CourseSelectionSuccessAlert) =
+        NotificationCompat.Builder(this, CHANNEL_ALERTS)
+            .setSmallIcon(R.drawable.ic_menu_24)
+            .setContentTitle("抢课成功")
+            .setContentText(alert.courseName)
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText("${alert.courseName}\n${alert.message}"),
+            )
+            .setContentIntent(openCourseSelectionPendingIntent(REQUEST_OPEN_SUCCESS))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .build()
+
     private fun runningNotificationText(state: CourseSelectionRunState): String =
         when {
             state.stopping -> "正在停止，当前请求完成后退出"
@@ -173,6 +203,57 @@ class CourseSelectionForegroundService : Service() {
         } else {
             @Suppress("DEPRECATION")
             stopForeground(true)
+        }
+    }
+
+    private fun notifySuccessAlerts(
+        notificationManager: NotificationManagerCompat,
+        alerts: List<CourseSelectionSuccessAlert>,
+    ) {
+        val unseenAlerts = synchronized(notifiedSuccessAlertIds) {
+            alerts
+                .filter { it.eventId !in notifiedSuccessAlertIds }
+                .sortedBy { it.eventId }
+                .also { unseen -> notifiedSuccessAlertIds += unseen.map { it.eventId } }
+        }
+        unseenAlerts.forEach { alert ->
+            notifySafely(notificationManager, successNotificationId(alert.eventId), buildSuccessNotification(alert))
+            vibrateStrongly()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun notifySafely(
+        notificationManager: NotificationManagerCompat,
+        notificationId: Int,
+        notification: Notification,
+    ) {
+        if (!canPostNotifications()) return
+        runCatching { notificationManager.notify(notificationId, notification) }
+    }
+
+    private fun canPostNotifications(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    private fun successNotificationId(eventId: Long): Int =
+        NOTIFICATION_ID_SUCCESS_BASE + (eventId % NOTIFICATION_ID_SUCCESS_BUCKETS).toInt()
+
+    private fun vibrateStrongly() {
+        val timings = longArrayOf(0L, 250L, 120L, 350L, 120L, 500L)
+        val amplitudes = intArrayOf(0, 255, 0, 255, 0, 255)
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            getSystemService(VibratorManager::class.java)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Vibrator::class.java)
+        }
+        if (vibrator?.hasVibrator() != true) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(timings, -1)
         }
     }
 
@@ -205,8 +286,8 @@ class CourseSelectionForegroundService : Service() {
             },
         )
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ALERTS, "抢课验证码提醒", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "抢课需要验证码时提醒"
+            NotificationChannel(CHANNEL_ALERTS, "抢课关键提醒", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "抢课需要验证码或成功时提醒"
             },
         )
     }
@@ -268,9 +349,12 @@ class CourseSelectionForegroundService : Service() {
         private const val CHANNEL_ALERTS = "course_selection_alerts"
         private const val NOTIFICATION_ID_RUNNING = 2101
         private const val NOTIFICATION_ID_CAPTCHA = 2102
+        private const val NOTIFICATION_ID_SUCCESS_BASE = 2110
+        private const val NOTIFICATION_ID_SUCCESS_BUCKETS = 900
         private const val REQUEST_OPEN_RUNNING = 3101
         private const val REQUEST_OPEN_CAPTCHA = 3102
         private const val REQUEST_STOP = 3103
+        private const val REQUEST_OPEN_SUCCESS = 3104
         private const val KEEP_ALIVE_TOKEN = "course_selection"
 
         fun start(context: Context, config: CourseSelectionRunConfig) {

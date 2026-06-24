@@ -4,6 +4,7 @@ import cn.edu.bjtu.mis.model.CourseSelectionAttemptResult
 import cn.edu.bjtu.mis.model.CourseSelectionReplaceRule
 import cn.edu.bjtu.mis.model.CourseSelectionRunConfig
 import cn.edu.bjtu.mis.model.CourseSelectionRunState
+import cn.edu.bjtu.mis.model.CourseSelectionSuccessAlert
 import cn.edu.bjtu.mis.model.CourseSelectionTarget
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -28,6 +29,7 @@ class CourseSelectionRunner(
 
     private var runJob: Job? = null
     private var captchaWaiter: CompletableDeferred<CourseSelectionAttemptResult>? = null
+    private var successAlertSequence = 0L
     @Volatile
     private var stopRequested = false
 
@@ -151,7 +153,17 @@ class CourseSelectionRunner(
         log("${target.courseName}: ${result.message ?: result.status}")
         val finalResult = resolveCaptcha(target, result) ?: return false
         if (finalResult.status in selectionSuccessStatuses) {
-            _state.update { it.copy(doneKeys = it.doneKeys + target.key) }
+            val successAlert = if (finalResult.status == "success") {
+                nextSuccessAlert(target, finalResult)
+            } else {
+                null
+            }
+            _state.update {
+                it.copy(
+                    doneKeys = it.doneKeys + target.key,
+                    successAlerts = if (successAlert == null) it.successAlerts else it.successAlerts + successAlert,
+                )
+            }
             return true
         }
         return false
@@ -161,10 +173,16 @@ class CourseSelectionRunner(
         log("换课 ${rule.drop.courseName} -> ${rule.target.courseName}: ${result.message ?: result.status}")
         val finalResult = resolveCaptcha(rule.target, result) ?: return false
         if (finalResult.status in replaceSuccessStatuses || finalResult.status in selectionSuccessStatuses) {
+            val successAlert = if (finalResult.status in realSuccessStatuses) {
+                nextSuccessAlert(rule.target, finalResult, rule.id)
+            } else {
+                null
+            }
             _state.update {
                 it.copy(
                     doneReplaceRuleIds = it.doneReplaceRuleIds + rule.id,
                     doneKeys = it.doneKeys + rule.target.key,
+                    successAlerts = if (successAlert == null) it.successAlerts else it.successAlerts + successAlert,
                 )
             }
             return true
@@ -220,8 +238,22 @@ class CourseSelectionRunner(
         _state.update { it.copy(logs = (listOf(message) + it.logs).take(120)) }
     }
 
+    private fun nextSuccessAlert(
+        target: CourseSelectionTarget,
+        result: CourseSelectionAttemptResult,
+        replaceRuleId: String? = null,
+    ): CourseSelectionSuccessAlert =
+        CourseSelectionSuccessAlert(
+            eventId = ++successAlertSequence,
+            courseKey = target.key,
+            courseName = result.course?.courseName?.takeIf { it.isNotBlank() } ?: target.courseName,
+            message = result.message?.takeIf { it.isNotBlank() } ?: "选课成功。",
+            replaceRuleId = replaceRuleId,
+        )
+
     private companion object {
         val selectionSuccessStatuses = setOf("success", "already_selected")
         val replaceSuccessStatuses = setOf("replace_success", "target_already_selected")
+        val realSuccessStatuses = setOf("success", "replace_success")
     }
 }

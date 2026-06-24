@@ -94,8 +94,8 @@ android {
         applicationId = "cn.edu.bjtu.mis"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "v1.2.1"
+        versionCode = 6
+        versionName = "v1.3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -159,6 +159,7 @@ dependencies {
     implementation(libs.pdfbox.android)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.hls)
+    implementation(libs.media3.session)
     implementation(libs.media3.ui)
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.cordova.android)

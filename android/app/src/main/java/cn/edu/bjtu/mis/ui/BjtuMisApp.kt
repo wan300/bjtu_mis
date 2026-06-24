@@ -14,12 +14,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -29,7 +29,6 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,7 +50,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.data.provider.SessionValidationPolicy
@@ -137,7 +138,6 @@ private val BottomTabs = listOf(
     BottomTab(ModuleKeys.Profile, "我的", ShellIcon.Person, R.drawable.icon_profile),
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BjtuMisApp(
     container: AppContainer,
@@ -461,6 +461,8 @@ fun BjtuMisApp(
                 )
             }
 
+            val useBackgroundStatusBar = current == RouteServices || current == ModuleKeys.Profile || current !in MainRoutes
+            val backgroundStatusBarColor = MaterialTheme.colorScheme.background
             val extendHomeIntoStatusBar = themeOption.isDark && current == RouteHome
             val isOpenWebUiAgent = current == ModuleKeys.OpenWebUiAgent
             val isLightAgentTheme = isOpenWebUiAgent && !themeOption.isDark
@@ -469,6 +471,7 @@ fun BjtuMisApp(
                     extendHomeIntoStatusBar -> Color.Transparent
                     isLightAgentTheme -> Color.White
                     isOpenWebUiAgent -> Color(0xFF171717)
+                    useBackgroundStatusBar -> backgroundStatusBarColor
                     else -> MaterialTheme.colorScheme.primary
                 },
                 navigationBarColor = MaterialTheme.colorScheme.surface,
@@ -486,8 +489,7 @@ fun BjtuMisApp(
                 contentWindowInsets = WindowInsets(0.dp),
                 topBar = {
                     when {
-                        current == RouteServices -> MainTitleBar("服务")
-                        current == ModuleKeys.Profile -> MainTitleBar("我的")
+                        current == RouteServices -> CompactTitleBar("服务")
                         current == RouteHomeworkDetail -> DetailTitleBar(
                             title = "作业详情",
                             onBack = ::closeHomeworkDetail,
@@ -707,42 +709,40 @@ private fun ModuleRoute(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun MainTitleBar(title: String) {
-    val colorScheme = MaterialTheme.colorScheme
-    CenterAlignedTopAppBar(
-        title = {
-            Text(title, color = colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
-        },
-        windowInsets = WindowInsets(0.dp),
-        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-            containerColor = colorScheme.primary,
-            titleContentColor = colorScheme.onPrimary,
-        ),
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DetailTitleBar(title: String, onBack: () -> Unit) {
+    CompactTitleBar(title = title, onBack = onBack)
+}
+
+@Composable
+private fun CompactTitleBar(title: String, onBack: (() -> Unit)? = null) {
     val colorScheme = MaterialTheme.colorScheme
-    CenterAlignedTopAppBar(
-        title = {
-            Text(title, color = colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
-        },
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                ShellLineIcon(ShellIcon.Back, color = colorScheme.onPrimary)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .background(colorScheme.background)
+            .padding(start = if (onBack == null) 20.dp else 4.dp, end = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (onBack != null) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier.size(48.dp),
+            ) {
+                ShellLineIcon(ShellIcon.Back, color = colorScheme.onBackground)
             }
-        },
-        windowInsets = WindowInsets(0.dp),
-        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-            containerColor = colorScheme.primary,
-            titleContentColor = colorScheme.onPrimary,
-            navigationIconContentColor = colorScheme.onPrimary,
-        ),
-    )
+        }
+        Text(
+            text = title,
+            color = colorScheme.onBackground,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
 }
 
 @Composable

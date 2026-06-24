@@ -161,7 +161,7 @@ class SyncRepository(
                 fetchAndStore(ModuleKeys.HistoryScores, summary, errors) { aa.fetchHistoryScores() }
                 fetchAndStore(ModuleKeys.AcademicProgress, summary, errors) { aa.fetchAcademicProgress() }
                 fetchAndStore(ModuleKeys.Homework, summary, errors) { ve.fetchHomework(term = currentTerm) }
-                fetchAndStore(ModuleKeys.CourseResources, summary, errors) { ve.fetchCourseResources(term = currentTerm) }
+                fetchAndStore(ModuleKeys.CourseResources, summary, errors) { ve.fetchAllCourseRootResources(term = currentTerm) }
                 fetchAndStore(ModuleKeys.EmptyRooms, summary, errors) { aa.fetchEmptyRooms(week = currentWeek) }
                 fetchAndStore(ModuleKeys.Mail, summary, errors) {
                     val mail = CoremailProvider(client)
@@ -227,6 +227,9 @@ class SyncRepository(
 
     suspend fun snapshots(): List<ModuleSnapshotEntity> = dao.getSnapshots()
 
+    suspend fun updateSummaries(): List<ModuleUpdateSummary> =
+        dao.getModuleUpdateSummaries().map { it.toUpdateSummary() }
+
     @PublishedApi
     internal suspend inline fun <reified T> snapshot(moduleKey: String): ModuleEnvelope<T>? =
         dao.getSnapshot(moduleKey)?.payloadJson?.let { AppJson.decodeFromString<ModuleEnvelope<T>>(it) }
@@ -256,14 +259,25 @@ class SyncRepository(
 
     @PublishedApi
     internal suspend inline fun <reified T> saveSnapshot(moduleKey: String, envelope: ModuleEnvelope<T>) {
+        val syncedAt = envelope.syncedAt ?: nowIso()
+        val payloadJson = AppJson.encodeToString(envelope)
+        val oldSnapshot = dao.getSnapshot(moduleKey)
+        buildModuleUpdateSummary(
+            moduleKey = moduleKey,
+            oldPayloadJson = oldSnapshot?.payloadJson,
+            newPayloadJson = payloadJson,
+            syncedAt = syncedAt,
+        )?.let { summary ->
+            dao.saveModuleUpdateSummary(summary.toEntity())
+        }
         dao.saveSnapshot(
             ModuleSnapshotEntity(
                 moduleKey = moduleKey,
-                syncedAt = envelope.syncedAt ?: nowIso(),
+                syncedAt = syncedAt,
                 sourceSystem = envelope.sourceSystem,
                 coverage = envelope.coverage.name.lowercase(),
                 sourceParamsJson = envelope.sourceParams.toString(),
-                payloadJson = AppJson.encodeToString(envelope),
+                payloadJson = payloadJson,
             )
         )
     }
@@ -377,6 +391,8 @@ data class OverviewDashboard(
     val homework: List<HomeworkItem>,
     val exams: List<ExamItem>,
     val calendar: CalendarData?,
+    val highlights: List<DashboardHighlight>,
+    val hiddenHighlightCount: Int,
     val hasCache: Boolean,
 )
 
@@ -390,12 +406,18 @@ class OverviewRepository(
             val homework = syncRepository.snapshot<HomeworkData>(ModuleKeys.Homework)?.data?.items.orEmpty()
             val exams = syncRepository.snapshot<ExamData>(ModuleKeys.Exams)?.data?.items.orEmpty()
             val calendar = syncRepository.snapshot<CalendarData>(ModuleKeys.Calendar)?.data
+            val highlights = buildOverviewHighlights(
+                homework = homework,
+                summaries = syncRepository.updateSummaries(),
+            )
             OverviewDashboard(
                 snapshots = snapshots,
                 latest = latest,
                 homework = homework,
                 exams = exams,
                 calendar = calendar,
+                highlights = highlights.items,
+                hiddenHighlightCount = highlights.remainingCount,
                 hasCache = snapshots.isNotEmpty() || homework.isNotEmpty() || exams.isNotEmpty() || calendar != null,
             )
         }

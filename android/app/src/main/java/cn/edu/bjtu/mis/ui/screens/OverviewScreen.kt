@@ -63,6 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cn.edu.bjtu.mis.R
+import cn.edu.bjtu.mis.data.repository.DashboardHighlight
 import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.data.repository.OverviewDashboard
 import cn.edu.bjtu.mis.data.repository.OverviewRepository
@@ -79,7 +80,6 @@ import cn.edu.bjtu.mis.model.ModuleKeys
 import cn.edu.bjtu.mis.ui.components.InfoCard
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
-import cn.edu.bjtu.mis.ui.components.SectionTitle
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -280,6 +280,16 @@ fun OverviewScreen(
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
         }
+        (state as? LoadState.Data)?.value?.let { dashboard ->
+            item {
+                PriorityReminderCard(
+                    highlights = dashboard.highlights,
+                    hiddenCount = dashboard.hiddenHighlightCount,
+                    onNavigate = onNavigate,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                )
+            }
+        }
         when (val current = state) {
             LoadState.Loading, is LoadState.Error -> item {
                 Box(Modifier.padding(horizontal = 14.dp)) {
@@ -291,13 +301,6 @@ fun OverviewScreen(
                 item {
                     DashboardStatusCard(
                         dashboard = dashboard,
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                    )
-                }
-                item {
-                    TodoCard(
-                        todos = dashboardTodos(dashboard),
-                        onNavigate = onNavigate,
                         modifier = Modifier.padding(horizontal = 14.dp),
                     )
                 }
@@ -333,9 +336,6 @@ fun ServicesScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 16.dp),
     ) {
-        item {
-            SectionTitle(title = "服务", subtitle = "按使用场景聚合当前已实现模块")
-        }
         items(groups, key = { it.title }) { group ->
             InfoCard(title = group.title, subtitle = group.subtitle) {
                 ServiceGrid(entries = group.entries, onNavigate = onNavigate)
@@ -426,6 +426,94 @@ private fun OverviewHero(
                 text = sessionDetail.ifBlank { "校园信息本地采集与离线查看" },
                 color = colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
                 style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PriorityReminderCard(
+    highlights: List<DashboardHighlight>,
+    hiddenCount: Int,
+    onNavigate: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    InfoCard(title = "重点提醒", subtitle = "临期作业与最近同步更新", modifier = modifier) {
+        if (highlights.isEmpty()) {
+            Text("暂无临期作业或新更新", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                highlights.forEach { highlight ->
+                    PriorityReminderRow(highlight = highlight, onNavigate = onNavigate)
+                }
+                if (hiddenCount > 0) {
+                    Text(
+                        "还有 $hiddenCount 条更新，可进入对应模块查看",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PriorityReminderRow(
+    highlight: DashboardHighlight,
+    onNavigate: (String) -> Unit,
+) {
+    val tint = when {
+        highlight.urgent -> MaterialTheme.colorScheme.error
+        highlight.route == ModuleKeys.Homework -> Color(0xFF2AA876)
+        highlight.route == ModuleKeys.Exams -> Color(0xFFD64B6B)
+        highlight.route == ModuleKeys.Scores -> Color(0xFFE46B2D)
+        highlight.route == ModuleKeys.CourseResources -> Color(0xFF7C58C2)
+        else -> MaterialTheme.colorScheme.primary
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f), MaterialTheme.shapes.medium)
+            .clickable { onNavigate(highlight.route) }
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(72.dp)
+                .background(tint.copy(alpha = 0.12f), MaterialTheme.shapes.small)
+                .padding(horizontal = 6.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                highlight.tag,
+                style = MaterialTheme.typography.labelSmall,
+                color = tint,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                highlight.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val subtitle = if (highlight.updated && highlight.route == ModuleKeys.Homework && highlight.tag.contains("作业")) {
+                listOf("有更新", highlight.subtitle).filter { it.isNotBlank() }.joinToString(" · ")
+            } else {
+                highlight.subtitle
+            }
+            Text(
+                subtitle.ifBlank { "点击查看详情" },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )

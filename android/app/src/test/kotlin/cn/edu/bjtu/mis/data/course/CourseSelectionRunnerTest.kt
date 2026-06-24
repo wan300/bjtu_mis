@@ -9,6 +9,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -28,6 +29,53 @@ class CourseSelectionRunnerTest {
 
         assertTrue(target.key in runner.state.value.doneKeys)
         assertTrue(runner.state.value.completed)
+        val alert = runner.state.value.successAlerts.singleOrNull()
+        assertNotNull(alert)
+        assertEquals(target.key, alert!!.courseKey)
+        assertEquals(target.courseName, alert.courseName)
+        assertEquals("ok", alert.message)
+        assertNull(alert.replaceRuleId)
+    }
+
+    @Test
+    fun alreadySelectedDoesNotCreateSuccessAlert() = runBlocking {
+        val target = CourseSelectionTarget("M410003B_01", "Platform Software")
+        val runner = CourseSelectionRunner(
+            selectCourse = { CourseSelectionAttemptResult(status = "already_selected", message = "课程已选中。") },
+            replaceCourse = { CourseSelectionAttemptResult(status = "replace_success", message = "ok") },
+            submitCaptchaAnswer = { _, _ -> CourseSelectionAttemptResult(status = "failed") },
+        )
+
+        assertTrue(runner.start(CourseSelectionRunConfig(listOf(target), retryIntervalMillis = 0, maxRounds = 1)))
+        waitUntil { target.key in runner.state.value.doneKeys && !runner.state.value.running }
+
+        assertTrue(runner.state.value.completed)
+        assertTrue(runner.state.value.successAlerts.isEmpty())
+    }
+
+    @Test
+    fun recordsEachSuccessAlertWhenMultipleTargetsComplete() = runBlocking {
+        val first = CourseSelectionTarget("M410003B_01", "Platform Software")
+        val second = CourseSelectionTarget("M310005B_01", "Operating Systems")
+        val runner = CourseSelectionRunner(
+            selectCourse = { CourseSelectionAttemptResult(status = "success", message = "ok:${it.key}") },
+            replaceCourse = { CourseSelectionAttemptResult(status = "replace_success", message = "ok") },
+            submitCaptchaAnswer = { _, _ -> CourseSelectionAttemptResult(status = "failed") },
+        )
+
+        assertTrue(
+            runner.start(
+                CourseSelectionRunConfig(
+                    listOf(first, second),
+                    retryIntervalMillis = 0,
+                    maxRounds = 1,
+                ),
+            ),
+        )
+        waitUntil { runner.state.value.successAlerts.size == 2 && !runner.state.value.running }
+
+        assertEquals(listOf(first.key, second.key), runner.state.value.successAlerts.map { it.courseKey })
+        assertEquals(listOf(1L, 2L), runner.state.value.successAlerts.map { it.eventId })
     }
 
     @Test
@@ -57,6 +105,10 @@ class CourseSelectionRunnerTest {
 
         assertTrue(target.key in runner.state.value.doneKeys)
         assertNull(runner.state.value.awaitingCaptcha)
+        val alert = runner.state.value.successAlerts.singleOrNull()
+        assertNotNull(alert)
+        assertEquals(target.key, alert!!.courseKey)
+        assertEquals("ok", alert.message)
     }
 
     @Test

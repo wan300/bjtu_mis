@@ -163,12 +163,6 @@ fun ThirdPartyServicesScreen(
         contentPadding = PaddingValues(14.dp),
     ) {
         item {
-            SectionTitle(
-                title = "第三方服务",
-                subtitle = "从公开 GitHub 仓库导入静态 Web 服务",
-            )
-        }
-        item {
             InfoCard(title = "导入服务", subtitle = "仓库根目录需包含 bjtu-service.json 和 dist/") {
                 OutlinedTextField(
                     value = githubUrl,

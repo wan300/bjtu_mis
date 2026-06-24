@@ -1,6 +1,7 @@
 package cn.edu.bjtu.mis.data.provider
 
 import android.util.Log
+import cn.edu.bjtu.mis.data.course.COURSE_RESOURCES_OVERVIEW_SCOPE
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.data.network.FileResponse
 import cn.edu.bjtu.mis.data.network.MultipartFilePart
@@ -572,10 +573,100 @@ class VeProvider(private val client: BjtuHttpClient) {
                 normalizedFolder,
                 merged.tree,
                 merged.folders,
-                merged.resources,
+                merged.resources.map { it.copy(courseId = selected.courseId, courseName = selected.courseName) },
                 categories = categories,
                 selectedCategoryKey = selectedCategoryKey,
             )
+        )
+    }
+
+    suspend fun fetchAllCourseRootResources(
+        term: String? = null,
+    ): ModuleEnvelope<CourseResourcesData> {
+        ensureStrictFlow("course resources")
+        val currentTerm = term ?: parseCalendarTerms(
+            getJsonObject("/ve/back/rp/common/teachCalendar.shtml", mapOf("method" to "queryCurrentXq"))
+        ).second
+        val selectedCategoryKey = COURSE_RESOURCE_ALL_CATEGORY_KEY
+        val categoryConfigs = courseResourceConfigsFor(selectedCategoryKey)
+        val categories = courseResourceCategoryModels()
+        val normalizedFolder = "0"
+
+        if (currentTerm.isNullOrBlank()) {
+            return ModuleEnvelope(
+                module = "course_resources",
+                sourceSystem = "ve",
+                coverage = CoverageLevel.Provisional,
+                sourceParams = buildJsonObject {
+                    put("fallback_reason", "missing_current_term")
+                    put("overview_scope", COURSE_RESOURCES_OVERVIEW_SCOPE)
+                    put("folder_id", normalizedFolder)
+                    put("category_key", selectedCategoryKey)
+                },
+                data = buildCourseResourcesData(
+                    null,
+                    emptyList(),
+                    null,
+                    normalizedFolder,
+                    emptyList(),
+                    emptyList(),
+                    emptyList(),
+                    categories = categories,
+                    selectedCategoryKey = selectedCategoryKey,
+                ),
+            )
+        }
+
+        val courses = parseCourses(
+            getJsonObject(
+                "/ve/back/coursePlatform/course.shtml",
+                mapOf("method" to "getCourseList", "pagesize" to "100", "page" to "1", "xqCode" to currentTerm),
+            )
+        )
+        val sourceParams = buildJsonObject {
+            put("term", currentTerm)
+            put("overview_scope", COURSE_RESOURCES_OVERVIEW_SCOPE)
+            put("folder_id", normalizedFolder)
+            put("category_key", selectedCategoryKey)
+            put("category_keys", categoryConfigs.joinToString(",") { it.key })
+        }
+        val results = mutableListOf<CourseResourceFetchResult>()
+        val errors = mutableListOf<String>()
+        courses.forEach { course ->
+            categoryConfigs.forEach { category ->
+                runCatching {
+                    fetchCourseResourceCategory(course, category, normalizedFolder, search = null)
+                }.onSuccess { result ->
+                    results += result.copy(
+                        resources = result.resources.map {
+                            it.copy(courseId = course.courseId, courseName = course.courseName)
+                        },
+                    )
+                }.onFailure { error ->
+                    errors += "${course.courseName}:${courseResourceCategoryError(category, error)}"
+                }
+            }
+        }
+        val merged = mergeCourseResourceFetchResults(results)
+        return ModuleEnvelope(
+            module = "course_resources",
+            sourceSystem = "ve",
+            coverage = if (errors.isEmpty()) CoverageLevel.Verified else CoverageLevel.Provisional,
+            sourceParams = buildJsonObject {
+                sourceParams.forEach { (key, value) -> put(key, value) }
+                if (errors.isNotEmpty()) put("fallback_reason", errors.joinToString("; "))
+            },
+            data = buildCourseResourcesData(
+                currentTerm,
+                courses,
+                null,
+                normalizedFolder,
+                merged.tree,
+                merged.folders,
+                merged.resources,
+                categories = categories,
+                selectedCategoryKey = selectedCategoryKey,
+            ),
         )
     }
 

@@ -32,4 +32,18 @@ class AppDatabaseMigrationTest {
     fun migrationEightToNineAddsThirdPartyPackageDigest() {
         assertTrue(ADD_THIRD_PARTY_SERVICE_PACKAGE_DIGEST_SQL.contains("`package_digest_sha256` TEXT NOT NULL DEFAULT ''"))
     }
+
+    @Test
+    fun migrationNineToTenCreatesModuleUpdateSummariesTableShape() {
+        val createSql = CREATE_MODULE_UPDATE_SUMMARIES_SQL
+
+        listOf(
+            "`module_key` TEXT NOT NULL",
+            "`synced_at` TEXT NOT NULL",
+            "`items_json` TEXT NOT NULL",
+            "PRIMARY KEY(`module_key`)",
+        ).forEach { fragment ->
+            assertTrue("Missing SQL fragment: $fragment", createSql.contains(fragment))
+        }
+    }
 }

@@ -55,6 +55,17 @@ data class ModuleSnapshotEntity(
     val payloadJson: String,
 )
 
+@Entity(tableName = "module_update_summaries")
+data class ModuleUpdateSummaryEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "module_key")
+    val moduleKey: String,
+    @ColumnInfo(name = "synced_at")
+    val syncedAt: String,
+    @ColumnInfo(name = "items_json")
+    val itemsJson: String,
+)
+
 @Entity(tableName = "user_courses")
 data class UserCourseEntity(
     @PrimaryKey(autoGenerate = true)
@@ -192,6 +203,15 @@ interface BjtuMisDao {
     suspend fun getSnapshots(): List<ModuleSnapshotEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveModuleUpdateSummary(entity: ModuleUpdateSummaryEntity)
+
+    @Query("SELECT * FROM module_update_summaries WHERE module_key = :moduleKey")
+    suspend fun getModuleUpdateSummary(moduleKey: String): ModuleUpdateSummaryEntity?
+
+    @Query("SELECT * FROM module_update_summaries ORDER BY module_key")
+    suspend fun getModuleUpdateSummaries(): List<ModuleUpdateSummaryEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveUserCourse(entity: UserCourseEntity): Long
 
     @Query("SELECT * FROM user_courses WHERE id = :id")
@@ -272,13 +292,14 @@ interface BjtuMisDao {
     entities = [
         SyncRunEntity::class,
         ModuleSnapshotEntity::class,
+        ModuleUpdateSummaryEntity::class,
         UserCourseEntity::class,
         UserTodoEntity::class,
         MailFolderEntity::class,
         MailMessageSummaryEntity::class,
         ThirdPartyServiceEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -407,6 +428,21 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
         db.execSQL(ADD_THIRD_PARTY_SERVICE_PACKAGE_DIGEST_SQL)
     }
 }
+
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(CREATE_MODULE_UPDATE_SUMMARIES_SQL)
+    }
+}
+
+internal const val CREATE_MODULE_UPDATE_SUMMARIES_SQL = """
+CREATE TABLE IF NOT EXISTS `module_update_summaries` (
+    `module_key` TEXT NOT NULL,
+    `synced_at` TEXT NOT NULL,
+    `items_json` TEXT NOT NULL,
+    PRIMARY KEY(`module_key`)
+)
+"""
 
 internal const val CREATE_THIRD_PARTY_SERVICES_SQL = """
 CREATE TABLE IF NOT EXISTS `third_party_services` (

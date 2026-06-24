@@ -39,6 +39,7 @@ import cn.edu.bjtu.mis.ui.components.InfoCard
 import cn.edu.bjtu.mis.ui.components.KeyValue
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
+import cn.edu.bjtu.mis.ui.components.PageActionRow
 import cn.edu.bjtu.mis.ui.components.SectionTitle
 import kotlinx.coroutines.launch
 
@@ -184,21 +185,19 @@ fun TeachingAssessmentScreen(
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            SectionTitle(
-                title = if (previewMode) "批量评教预览" else "评教",
-                subtitle = if (previewMode) {
-                    "确认课程和预填内容后才会提交。"
-                } else {
-                    "实时读取 AA 教学支撑平台待评课程。"
-                },
-                trailing = {
-                    if (previewMode) {
+            if (previewMode) {
+                SectionTitle(
+                    title = "批量评教预览",
+                    subtitle = "确认课程和预填内容后才会提交。",
+                    trailing = {
                         OutlinedButton(enabled = !submitRunning, onClick = { drafts = emptyList() }) { Text("返回列表") }
-                    } else {
-                        Button(onClick = ::load) { Text("刷新") }
-                    }
-                },
-            )
+                    },
+                )
+            } else {
+                PageActionRow {
+                    Button(onClick = ::load) { Text("刷新") }
+                }
+            }
         }
 
         if (!previewMode) {

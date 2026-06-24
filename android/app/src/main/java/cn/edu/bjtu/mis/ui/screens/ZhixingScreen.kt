@@ -75,6 +75,7 @@ import cn.edu.bjtu.mis.model.ZhixingThreadPost
 import cn.edu.bjtu.mis.ui.components.InfoCard
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
+import cn.edu.bjtu.mis.ui.components.PageActionRow
 import cn.edu.bjtu.mis.ui.components.SectionTitle
 import kotlinx.coroutines.launch
 
@@ -246,12 +247,6 @@ private fun ZhixingStatusScaffold(content: @Composable () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
-        item {
-            SectionTitle(
-                title = "知行",
-                subtitle = "知行信息交流平台",
-            )
-        }
         item { content() }
     }
 }
@@ -268,11 +263,9 @@ private fun ZhixingLoginGate(
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
         item {
-            SectionTitle(
-                title = "知行",
-                subtitle = "登录后浏览论坛内容",
-                trailing = { AssistChip(onClick = onOpenOriginal, label = { Text("原站") }) },
-            )
+            PageActionRow {
+                AssistChip(onClick = onOpenOriginal, label = { Text("原站") })
+            }
         }
         item {
             InfoCard("需要登录知行", subtitle = authState.message ?: "未登录") {
@@ -311,16 +304,10 @@ private fun ZhixingFeedScreen(
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
         item {
-            SectionTitle(
-                title = "知行",
-                subtitle = authState.username ?: "知行信息交流平台",
-                trailing = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onRefresh) { Text("刷新") }
-                        OutlinedButton(onClick = onLogout) { Text("退出") }
-                    }
-                },
-            )
+            PageActionRow {
+                OutlinedButton(onClick = onRefresh) { Text("刷新") }
+                OutlinedButton(onClick = onLogout) { Text("退出") }
+            }
         }
         item {
             ZhixingSearchCard(

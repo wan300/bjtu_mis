@@ -8,6 +8,7 @@ import cn.edu.bjtu.mis.data.db.BjtuMisDao
 import cn.edu.bjtu.mis.data.db.MailFolderEntity
 import cn.edu.bjtu.mis.data.db.MailMessageSummaryEntity
 import cn.edu.bjtu.mis.data.db.ModuleSnapshotEntity
+import cn.edu.bjtu.mis.data.db.ModuleUpdateSummaryEntity
 import cn.edu.bjtu.mis.data.db.SyncRunEntity
 import cn.edu.bjtu.mis.data.db.UserCourseEntity
 import cn.edu.bjtu.mis.data.db.UserTodoEntity
@@ -21,6 +22,7 @@ import cn.edu.bjtu.mis.data.security.SessionCookieStore
 import cn.edu.bjtu.mis.model.CalendarData
 import cn.edu.bjtu.mis.model.CoverageLevel
 import cn.edu.bjtu.mis.model.HomeworkData
+import cn.edu.bjtu.mis.model.HomeworkItem
 import cn.edu.bjtu.mis.model.MailFoldersData
 import cn.edu.bjtu.mis.model.MailMessagesData
 import cn.edu.bjtu.mis.model.ModuleEnvelope
@@ -28,6 +30,8 @@ import cn.edu.bjtu.mis.model.ModuleKeys
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -35,6 +39,28 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RepositoryLoadStrategyTest {
+    @Test
+    fun saveSnapshotStoresAndReplacesUpdateSummary() = runBlocking {
+        MockWebServer().use { server ->
+            val dao = FakeBjtuMisDao()
+            val syncRepository = SyncRepository(dao, sessionManager(server))
+            val baseline = homeworkEnvelope(homework(1, "Lab", dueAt = "2026-06-30 23:59"))
+            val changed = homeworkEnvelope(homework(1, "Lab", dueAt = "2026-07-01 23:59"))
+            val unchanged = homeworkEnvelope(homework(1, "Lab", dueAt = "2026-07-01 23:59"))
+
+            syncRepository.saveSnapshot(ModuleKeys.Homework, baseline)
+            assertTrue(syncRepository.updateSummaries().single().items.isEmpty())
+
+            syncRepository.saveSnapshot(ModuleKeys.Homework, changed)
+            val changedSummary = syncRepository.updateSummaries().single()
+            assertEquals(ModuleKeys.Homework, changedSummary.moduleKey)
+            assertEquals(listOf("modified"), changedSummary.items.map { it.changeType })
+
+            syncRepository.saveSnapshot(ModuleKeys.Homework, unchanged)
+            assertTrue(syncRepository.updateSummaries().single().items.isEmpty())
+        }
+    }
+
     @Test
     fun cacheOnlyReturnsModuleSnapshotWithoutNetwork() = runBlocking {
         MockWebServer().use { server ->
@@ -195,8 +221,33 @@ class RepositoryLoadStrategyTest {
             CaptchaSolveResult(expression = "1+1=", answer = "2")
     }
 
+    private fun homeworkEnvelope(item: HomeworkItem): ModuleEnvelope<HomeworkData> =
+        ModuleEnvelope(
+            module = ModuleKeys.Homework,
+            syncedAt = "2026-06-23T10:00:00Z",
+            sourceSystem = "test",
+            coverage = CoverageLevel.Verified,
+            data = HomeworkData(currentTerm = "2025-2026-2-2", items = listOf(item)),
+            sourceParams = buildJsonObject {
+                put("term", "2025-2026-2-2")
+            },
+        )
+
+    private fun homework(id: Int, title: String, dueAt: String): HomeworkItem =
+        HomeworkItem(
+            homeworkId = id,
+            course = "Software",
+            courseId = 10,
+            title = title,
+            openedAt = "2026-06-20 08:00",
+            dueAt = dueAt,
+            status = "open",
+            subType = 0,
+        )
+
     private class FakeBjtuMisDao : BjtuMisDao {
         private val snapshots = linkedMapOf<String, ModuleSnapshotEntity>()
+        private val updateSummaries = linkedMapOf<String, ModuleUpdateSummaryEntity>()
         private val mailFolders = linkedMapOf<String, MailFolderEntity>()
         private val mailMessages = linkedMapOf<String, MailMessageSummaryEntity>()
         private val userCourses = linkedMapOf<Long, UserCourseEntity>()
@@ -233,6 +284,16 @@ class RepositoryLoadStrategyTest {
         override suspend fun getSnapshot(moduleKey: String): ModuleSnapshotEntity? = snapshots[moduleKey]
 
         override suspend fun getSnapshots(): List<ModuleSnapshotEntity> = snapshots.values.toList()
+
+        override suspend fun saveModuleUpdateSummary(entity: ModuleUpdateSummaryEntity) {
+            updateSummaries[entity.moduleKey] = entity
+        }
+
+        override suspend fun getModuleUpdateSummary(moduleKey: String): ModuleUpdateSummaryEntity? =
+            updateSummaries[moduleKey]
+
+        override suspend fun getModuleUpdateSummaries(): List<ModuleUpdateSummaryEntity> =
+            updateSummaries.values.toList()
 
         override suspend fun saveUserCourse(entity: UserCourseEntity): Long {
             val id = entity.id.takeIf { it != 0L } ?: ((userCourses.keys.maxOrNull() ?: 0L) + 1L)

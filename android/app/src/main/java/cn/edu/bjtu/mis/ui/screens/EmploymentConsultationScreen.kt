@@ -60,6 +60,7 @@ import cn.edu.bjtu.mis.model.ModuleEnvelope
 import cn.edu.bjtu.mis.ui.components.InfoCard
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
+import cn.edu.bjtu.mis.ui.components.PageActionRow
 import cn.edu.bjtu.mis.ui.components.SectionTitle
 import kotlinx.coroutines.launch
 
@@ -292,21 +293,17 @@ fun EmploymentConsultationScreen(
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 16.dp),
     ) {
         item {
-            SectionTitle(
-                title = "就业咨询",
-                subtitle = "宣讲会、双选会、招聘信息与实习信息",
-                trailing = {
-                    OutlinedButton(
-                        onClick = {
-                            loadHome(forceRefresh = true)
-                            loadFilters(forceRefresh = true)
-                            loadPage(selectedType, reset = true)
-                        },
-                    ) {
-                        Text("刷新")
-                    }
-                },
-            )
+            PageActionRow {
+                OutlinedButton(
+                    onClick = {
+                        loadHome(forceRefresh = true)
+                        loadFilters(forceRefresh = true)
+                        loadPage(selectedType, reset = true)
+                    },
+                ) {
+                    Text("刷新")
+                }
+            }
         }
         item {
             EmploymentCalendarSyncSettingCard(

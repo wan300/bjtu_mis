@@ -79,6 +79,8 @@ log/
 *.log.*
 *.tmp
 *.temp
+tmp_*.png
+tmp_*.xml
 *.bak
 *.orig
 *.rej

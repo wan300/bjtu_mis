@@ -133,6 +133,14 @@ data class CourseSelectionReplaceRule(
     val drop: CourseSelectionTarget,
 )
 
+data class CourseSelectionSuccessAlert(
+    val eventId: Long,
+    val courseKey: String,
+    val courseName: String,
+    val message: String,
+    val replaceRuleId: String? = null,
+)
+
 data class CourseSelectionRunConfig(
     val targets: List<CourseSelectionTarget> = emptyList(),
     val replaceRules: List<CourseSelectionReplaceRule> = emptyList(),
@@ -150,6 +158,7 @@ data class CourseSelectionRunState(
     val awaitingCaptchaCourse: CourseSelectionTarget? = null,
     val captchaSubmitting: Boolean = false,
     val captchaError: String? = null,
+    val successAlerts: List<CourseSelectionSuccessAlert> = emptyList(),
     val error: String? = null,
     val completed: Boolean = false,
 )
@@ -431,6 +440,8 @@ data class CourseResourceItem(
     val resourceId: String,
     val rpId: String,
     val resId: String? = null,
+    val courseId: Int? = null,
+    val courseName: String? = null,
     val name: String,
     val extension: String? = null,
     val size: String? = null,

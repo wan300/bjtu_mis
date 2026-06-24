@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -32,9 +33,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -53,9 +59,10 @@ import cn.edu.bjtu.mis.ui.components.InfoCard
 import cn.edu.bjtu.mis.ui.components.KeyValue
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
-import cn.edu.bjtu.mis.ui.components.SectionTitle
+import cn.edu.bjtu.mis.ui.components.PageActionRow
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun CourseSelectionScreen(
     repository: CourseSelectionRepository,
@@ -63,6 +70,8 @@ fun CourseSelectionScreen(
     initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
 ) {
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val captchaFocusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
     val runState by runner.state.collectAsStateWithLifecycle()
     var state by remember { mutableStateOf<LoadState<ModuleEnvelope<CourseSelectionData>>>(LoadState.Loading) }
@@ -123,27 +132,33 @@ fun CourseSelectionScreen(
             .onFailure { uiError = it.message ?: "抢课后台服务启动失败" }
     }
 
+    fun submitCaptcha() {
+        val captcha = captchaText.trim()
+        if (captcha.isBlank() || runState.captchaSubmitting) return
+        CourseSelectionForegroundService.submitCaptcha(context, captcha)
+    }
+
     LaunchedEffect(Unit) { load(initialLoadStrategy) }
     LaunchedEffect(runState.completed) {
         if (runState.completed) load()
     }
     LaunchedEffect(runState.awaitingCaptcha?.challengeId) {
         captchaText = ""
+        if (runState.awaitingCaptcha != null) {
+            runCatching { captchaFocusRequester.requestFocus() }
+            keyboardController?.show()
+        }
     }
 
     val chosenCourses = (state as? LoadState.Data)?.value?.data?.availableCourses.orEmpty().filter { it.key in selectedKeys }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
-            SectionTitle(
-                title = "抢课",
-                subtitle = "从 AA 选课页读取可选课程，支持普通多门抢课和高级换课规则。",
-                trailing = {
-                    Button(enabled = !runState.running, onClick = ::load) {
-                        Text("刷新")
-                    }
-                },
-            )
+            PageActionRow {
+                Button(enabled = !runState.running, onClick = ::load) {
+                    Text("刷新")
+                }
+            }
         }
         when (val current = state) {
             LoadState.Loading, is LoadState.Error -> item { LoadingOrError(current) }
@@ -278,6 +293,9 @@ fun CourseSelectionScreen(
                         label = { Text("验证码") },
                         singleLine = true,
                         enabled = !runState.captchaSubmitting,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { submitCaptcha() }),
+                        modifier = Modifier.focusRequester(captchaFocusRequester),
                     )
                     runState.captchaError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
@@ -285,9 +303,7 @@ fun CourseSelectionScreen(
             confirmButton = {
                 TextButton(
                     enabled = captchaText.isNotBlank() && !runState.captchaSubmitting,
-                    onClick = {
-                        CourseSelectionForegroundService.submitCaptcha(context, captchaText)
-                    },
+                    onClick = { submitCaptcha() },
                 ) {
                     Text(if (runState.captchaSubmitting) "提交中" else "提交")
                 }
