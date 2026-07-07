@@ -20,6 +20,7 @@ class CourseSelectionRunnerTest {
         val target = CourseSelectionTarget("M410003B_01", "Platform Software")
         val runner = CourseSelectionRunner(
             selectCourse = { CourseSelectionAttemptResult(status = "success", message = "ok") },
+            selectCourses = { CourseSelectionAttemptResult(status = "failed") },
             replaceCourse = { CourseSelectionAttemptResult(status = "replace_success", message = "ok") },
             submitCaptchaAnswer = { _, _ -> CourseSelectionAttemptResult(status = "failed") },
         )
@@ -42,6 +43,7 @@ class CourseSelectionRunnerTest {
         val target = CourseSelectionTarget("M410003B_01", "Platform Software")
         val runner = CourseSelectionRunner(
             selectCourse = { CourseSelectionAttemptResult(status = "already_selected", message = "课程已选中。") },
+            selectCourses = { CourseSelectionAttemptResult(status = "failed") },
             replaceCourse = { CourseSelectionAttemptResult(status = "replace_success", message = "ok") },
             submitCaptchaAnswer = { _, _ -> CourseSelectionAttemptResult(status = "failed") },
         )
@@ -59,6 +61,13 @@ class CourseSelectionRunnerTest {
         val second = CourseSelectionTarget("M310005B_01", "Operating Systems")
         val runner = CourseSelectionRunner(
             selectCourse = { CourseSelectionAttemptResult(status = "success", message = "ok:${it.key}") },
+            selectCourses = { targets ->
+                CourseSelectionAttemptResult(
+                    status = "success",
+                    message = "ok",
+                    completedCourseKeys = targets.map { it.key },
+                )
+            },
             replaceCourse = { CourseSelectionAttemptResult(status = "replace_success", message = "ok") },
             submitCaptchaAnswer = { _, _ -> CourseSelectionAttemptResult(status = "failed") },
         )
@@ -79,6 +88,73 @@ class CourseSelectionRunnerTest {
     }
 
     @Test
+    fun batchMarksOnlyCompletedTargetsDone() = runBlocking {
+        val first = CourseSelectionTarget("M410003B_01", "Platform Software")
+        val second = CourseSelectionTarget("M310005B_01", "Operating Systems")
+        val runner = CourseSelectionRunner(
+            selectCourse = { CourseSelectionAttemptResult(status = "success") },
+            selectCourses = {
+                CourseSelectionAttemptResult(
+                    status = "success",
+                    message = "partial",
+                    completedCourseKeys = listOf(first.key),
+                )
+            },
+            replaceCourse = { CourseSelectionAttemptResult(status = "replace_success") },
+            submitCaptchaAnswer = { _, _ -> CourseSelectionAttemptResult(status = "failed") },
+        )
+
+        assertTrue(
+            runner.start(
+                CourseSelectionRunConfig(
+                    listOf(first, second),
+                    retryIntervalMillis = 0,
+                    maxRounds = 1,
+                ),
+            ),
+        )
+        waitUntil { first.key in runner.state.value.doneKeys && !runner.state.value.running }
+
+        assertTrue(first.key in runner.state.value.doneKeys)
+        assertFalse(second.key in runner.state.value.doneKeys)
+        assertEquals(listOf(first.key), runner.state.value.successAlerts.map { it.courseKey })
+    }
+
+    @Test
+    fun batchUnparseableFallsBackToSingleTargets() = runBlocking {
+        val first = CourseSelectionTarget("M410003B_01", "Platform Software")
+        val second = CourseSelectionTarget("M310005B_01", "Operating Systems")
+        val calls = mutableListOf<String>()
+        val runner = CourseSelectionRunner(
+            selectCourse = { target ->
+                calls += "single:${target.key}"
+                CourseSelectionAttemptResult(status = "success", message = "ok:${target.key}")
+            },
+            selectCourses = {
+                calls += "batch"
+                CourseSelectionAttemptResult(status = "unparseable", message = "cannot merge")
+            },
+            replaceCourse = { CourseSelectionAttemptResult(status = "replace_success") },
+            submitCaptchaAnswer = { _, _ -> CourseSelectionAttemptResult(status = "failed") },
+        )
+
+        assertTrue(
+            runner.start(
+                CourseSelectionRunConfig(
+                    listOf(first, second),
+                    retryIntervalMillis = 0,
+                    maxRounds = 1,
+                ),
+            ),
+        )
+        waitUntil { first.key in runner.state.value.doneKeys && second.key in runner.state.value.doneKeys }
+
+        assertEquals(listOf("batch", "single:${first.key}", "single:${second.key}"), calls)
+        assertEquals(setOf(first.key, second.key), runner.state.value.doneKeys)
+        assertEquals(listOf(first.key, second.key), runner.state.value.successAlerts.map { it.courseKey })
+    }
+
+    @Test
     fun waitsForCaptchaAndContinuesAfterSubmit() = runBlocking {
         val target = CourseSelectionTarget("M410003B_01", "Platform Software")
         val challenge = CourseSelectionCaptchaChallenge(
@@ -88,6 +164,7 @@ class CourseSelectionRunnerTest {
         )
         val runner = CourseSelectionRunner(
             selectCourse = { CourseSelectionAttemptResult(status = "captcha_required", captchaChallenge = challenge) },
+            selectCourses = { CourseSelectionAttemptResult(status = "failed") },
             replaceCourse = { CourseSelectionAttemptResult(status = "replace_success") },
             submitCaptchaAnswer = { challengeId, captcha ->
                 assertEquals("captcha-1", challengeId)
@@ -121,6 +198,7 @@ class CourseSelectionRunnerTest {
         )
         val runner = CourseSelectionRunner(
             selectCourse = { CourseSelectionAttemptResult(status = "captcha_required", captchaChallenge = challenge) },
+            selectCourses = { CourseSelectionAttemptResult(status = "failed") },
             replaceCourse = { CourseSelectionAttemptResult(status = "replace_success") },
             submitCaptchaAnswer = { _, _ -> CourseSelectionAttemptResult(status = "success") },
         )
@@ -147,6 +225,7 @@ class CourseSelectionRunnerTest {
                 calls += "select:${it.key}"
                 CourseSelectionAttemptResult(status = "success")
             },
+            selectCourses = { CourseSelectionAttemptResult(status = "failed") },
             replaceCourse = {
                 calls += "replace:${it.target.key}:${it.drop.key}"
                 CourseSelectionAttemptResult(status = "replace_success")

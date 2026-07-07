@@ -3,6 +3,7 @@ package cn.edu.bjtu.mis.data.parser
 import cn.edu.bjtu.mis.data.AppJson
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -30,6 +31,50 @@ class ParserTest {
     }
 
     @Test
+    fun parseCourseSelectionDetectsTableByCourseSignals() {
+        val parsed = parseCourseSelectionPage(text("course_selection_detected_table.html"))
+
+        assertTrue(parsed.data.canSubmit)
+        assertEquals(1, parsed.data.selectedCourses.size)
+        assertEquals(1, parsed.data.availableCourses.size)
+        assertEquals("M500001B_02", parsed.data.availableCourses.single().key)
+        assertEquals(3, parsed.data.availableCourses.single().remaining)
+        assertEquals("late-checkbox", parsed.actions.getValue("M500001B_02").fields["selects"])
+        assertEquals("selected-late", parsed.dropActions.getValue("M310005B_01").fields["pk"])
+    }
+
+    @Test
+    fun parseCourseSelectionSelectsActionTable() {
+        val parsed = parseCourseSelectionPage(
+            text("course_selection_selects_action.html"),
+            "https://aa.bjtu.edu.cn/course_selection/courseselecttask/selects_action/?action=load&iframe=school",
+        )
+
+        assertTrue(parsed.data.canSubmit)
+        assertEquals(1, parsed.data.selectedCourses.size)
+        assertEquals("A101001B_01", parsed.data.selectedCourses.single().key)
+        assertEquals(2, parsed.data.availableCourses.size)
+        assertEquals("A101005B_01", parsed.data.availableCourses.first().key)
+        assertEquals(1, parsed.data.availableCourses.first().remaining)
+        assertEquals("101005", parsed.actions.getValue("A101005B_01").fields["checkboxs"])
+        assertTrue(parsed.actions.getValue("A101005B_01").actionUrl.endsWith("/course_selection/courseselecttask/selects_action/?action=submit"))
+        assertEquals(0, parsed.data.availableCourses[1].remaining)
+        assertTrue("A101005B_02" !in parsed.actions)
+    }
+
+    @Test
+    fun parseCourseSelectionSelectedStatusTable() {
+        val parsed = parseCourseSelectionPage(
+            text("course_selection_selects_action_selected.html"),
+            "https://aa.bjtu.edu.cn/course_selection/courseselecttask/selects/",
+        )
+
+        assertEquals(1, parsed.data.selectedCourses.size)
+        assertEquals("A101005B_01", parsed.data.selectedCourses.single().key)
+        assertTrue(parsed.data.availableCourses.isEmpty())
+    }
+
+    @Test
     fun parseCourseSelectionCaptchaForm() {
         val parsed = parseCourseSelectionCaptcha(
             """
@@ -48,6 +93,27 @@ class ParserTest {
         assertEquals("captcha", parsed.inputName)
         assertEquals("csrf-token", parsed.fields["csrfmiddlewaretoken"])
         assertTrue(parsed.fields.getValue("__action__").endsWith("/course_selection/courseselecttask/captcha/"))
+    }
+
+    @Test
+    fun parseCourseSelectionCaptchaBootboxWithoutForm() {
+        val parsed = parseCourseSelectionCaptcha(
+            """
+            <div class="modal bootbox">
+              <div class="captcha-dialog">
+                <input type="hidden" name="hashkey" value="hash-token" />
+                <img src="/captcha/image/hash-token/" />
+                <input name="answer" />
+              </div>
+            </div>
+            """.trimIndent(),
+            "https://aa.bjtu.edu.cn/course_selection/courseselecttask/selects/",
+        )
+
+        assertEquals("https://aa.bjtu.edu.cn/captcha/image/hash-token/", parsed.imageUrl)
+        assertEquals("answer", parsed.inputName)
+        assertEquals("hash-token", parsed.fields["hashkey"])
+        assertTrue(parsed.fields.getValue("__action__").endsWith("/course_selection/courseselecttask/selects/"))
     }
 
     @Test
@@ -93,6 +159,7 @@ class ParserTest {
         val data = parseScores(text("scores_main.html"))
         assertEquals(2, data.items.size)
         assertTrue(data.items.first().courseName.isNotBlank())
+        assertNull(data.items.first().detail)
         assertEquals("/score/scores/stu/detail/1001/?term=2025-2026-2-2", data.items.first().detailPath)
     }
 
@@ -104,6 +171,18 @@ class ParserTest {
         assertEquals("软件项目管理与产品运维", data.fields.first().value)
         assertEquals(listOf("项目", "比例", "成绩"), data.tables[0].headers)
         assertEquals(listOf("平时", "40%", "88"), data.tables[0].rows.first())
+    }
+
+    @Test
+    fun parseScoreDetailLabelValueFixture() {
+        val data = parseScoreDetail(text("score_detail_label_value.html"))
+
+        assertEquals("成绩详情", data.title)
+        assertEquals("88", data.fields.first { it.label == "平时成绩" }.value)
+        val componentTable = data.tables.single { it.title == "分项成绩" }
+        assertEquals(listOf("项目", "比例", "成绩"), componentTable.headers)
+        assertEquals(listOf("平时", "40%", "88"), componentTable.rows[0])
+        assertEquals(listOf("期末", "60%", "85"), componentTable.rows[1])
     }
 
     @Test

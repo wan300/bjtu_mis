@@ -54,6 +54,7 @@ data class CourseSelectionAction(
     val actionUrl: String,
     val method: String,
     val fields: Map<String, String>,
+    val fieldPairs: List<Pair<String, String>> = fields.toList(),
 )
 
 data class ParsedCourseSelectionPage(
@@ -72,44 +73,77 @@ fun parseCourseSelectionPage(
     val actions = mutableMapOf<String, CourseSelectionAction>()
     val dropActions = mutableMapOf<String, CourseSelectionAction>()
     val submit = submitAction(document, pageUrl)
-    var canSubmit = submit.actionUrl != null
-    var submitError = submit.error
 
-    val selectedTable = document.selectFirst("#selected-container table")
-    directRows(selectedTable).drop(1).forEachIndexed { index, cells ->
-        courseSelectionCourse(cells, selected = true, index = index)?.let { course ->
-            selectedCourses += course
-            dropAction(cells.firstOrNull(), pageUrl, submit.fields)?.let { action ->
-                dropActions[course.key] = action
+    val allTables = document.select("table.table-bordered, table.table, table")
+        .distinctBy { it.cssSelector() }
+    val selectedTables = allTables.filter(::isSelectedCourseSelectionTable)
+    selectedTables.forEach { table ->
+        val columns = courseSelectionColumns(table)
+        courseSelectionBodyRows(table).forEach { cells ->
+            courseSelectionCourse(cells, selected = true, index = selectedCourses.size, columns = columns)?.let { course ->
+                if (selectedCourses.none { it.key == course.key }) {
+                    selectedCourses += course
+                }
+                dropAction(cells, pageUrl, submit.fieldPairs)?.let { action ->
+                    dropActions[course.key] = action
+                }
             }
         }
     }
 
-    val candidateTables = document.select("table.table-bordered").ifEmpty { document.select("table") }
-    val tables = candidateTables.filter { table -> table.parents().none { it.id() == "selected-container" } }
-    val availableTable = tables.getOrNull(1) ?: tables.getOrNull(0)
-
-    directRows(availableTable).drop(1).forEachIndexed { index, cells ->
-        val course = courseSelectionCourse(cells, selected = false, index = index) ?: return@forEachIndexed
-        availableCourses += course
-        val (checkboxName, checkboxValue) = checkboxPayload(cells.firstOrNull())
-        if (submit.actionUrl != null && checkboxName != null) {
-            actions[course.key] = CourseSelectionAction(
-                actionUrl = submit.actionUrl,
-                method = submit.method,
-                fields = submit.fields + (checkboxName to (checkboxValue ?: "on")),
-            )
-        } else if (checkboxName == null) {
-            canSubmit = false
-            submitError = submitError ?: "无法解析选课提交入口：目标课程行没有 checkbox name。"
+    allTables
+        .filterNot { table -> table in selectedTables }
+        .filter(::isAvailableCourseSelectionTable)
+        .forEach { table ->
+            val columns = courseSelectionColumns(table)
+            courseSelectionBodyRows(table).forEach { cells ->
+                val texts = cells.map { normalizeSpace(it.text()) }
+                val rowSelected = isSelectedCourseSelectionRow(cells, texts, columns)
+                val course = courseSelectionCourse(
+                    cells = cells,
+                    selected = rowSelected,
+                    index = selectedCourses.size + availableCourses.size,
+                    columns = columns,
+                ) ?: return@forEach
+                if (course.selected) {
+                    if (selectedCourses.none { it.key == course.key }) {
+                        selectedCourses += course
+                    }
+                    dropAction(cells, pageUrl, submit.fieldPairs)?.let { action ->
+                        dropActions[course.key] = action
+                    }
+                    return@forEach
+                }
+                if (availableCourses.none { it.key == course.key }) {
+                    availableCourses += course
+                }
+                val (checkboxName, checkboxValue) = checkboxPayload(cells)
+                if (submit.actionUrl != null && checkboxName != null) {
+                    val fieldPairs = submit.fieldPairs + (checkboxName to (checkboxValue ?: "on"))
+                    actions[course.key] = CourseSelectionAction(
+                        actionUrl = submit.actionUrl,
+                        method = submit.method,
+                        fields = fieldPairs.toMap(),
+                        fieldPairs = fieldPairs,
+                    )
+                }
+            }
         }
+    val submitError = if (
+        availableCourses.isNotEmpty() &&
+        actions.isEmpty() &&
+        availableCourses.any { it.remaining == null || it.remaining > 0 }
+    ) {
+        submit.error
+    } else {
+        null
     }
 
     return ParsedCourseSelectionPage(
         data = CourseSelectionData(
             selectedCourses = selectedCourses,
             availableCourses = availableCourses,
-            canSubmit = canSubmit,
+            canSubmit = actions.isNotEmpty(),
             submitError = submitError,
         ),
         actions = actions,
@@ -131,7 +165,8 @@ fun parseCourseSelectionCaptcha(html: String, pageUrl: String): CourseSelectionC
     val form = image?.parents()?.firstOrNull { it.tagName().equals("form", ignoreCase = true) }
         ?: document.selectFirst("form")
     val action = form?.attr("action")?.takeIf { it.isNotBlank() }?.let { resolveUrl(pageUrl, it) } ?: pageUrl
-    val inputName = (form?.select("input") ?: document.select("input"))
+    val fieldRoot = form ?: modal
+    val inputName = fieldRoot.select("input")
         .firstOrNull { input ->
             val type = input.attr("type").ifBlank { "text" }.lowercase()
             val name = normalizeSpace(input.attr("name"))
@@ -142,7 +177,7 @@ fun parseCourseSelectionCaptcha(html: String, pageUrl: String): CourseSelectionC
     return CourseSelectionCaptchaForm(
         imageUrl = image?.attr("src")?.takeIf { it.isNotBlank() }?.let { resolveUrl(pageUrl, it) },
         inputName = inputName,
-        fields = formFields(form) + ("__action__" to action),
+        fields = formFields(fieldRoot) + ("__action__" to action),
         prompt = normalizeSpace(modal.text()).takeIf { it.isNotBlank() },
     )
 }
@@ -294,14 +329,36 @@ private data class SubmitAction(
     val actionUrl: String?,
     val method: String,
     val fields: Map<String, String>,
+    val fieldPairs: List<Pair<String, String>>,
     val error: String?,
 )
 
+private data class CourseSelectionColumns(
+    val actionIndex: Int = 0,
+    val courseIndex: Int = 1,
+    val remainingIndex: Int? = 2,
+    val creditIndex: Int? = 3,
+    val courseTypeIndex: Int? = 4,
+    val examTypeIndex: Int? = 5,
+    val teacherIndex: Int? = 6,
+    val timeLocationIndex: Int? = 7,
+    val noteIndex: Int? = 8,
+    val statusIndex: Int? = null,
+    val matchedHeader: Boolean = false,
+)
+
 private fun submitAction(document: Element, pageUrl: String): SubmitAction {
-    val submit = document.selectFirst("a.btn-primary, button.btn-primary, input[type=submit]")
+    val actionPageSubmitUrl = courseSelectionActionSubmitUrl(pageUrl)
+    val submit = document.select("a.btn-primary, button.btn-primary, input[type=submit], button[type=submit]")
+        .firstOrNull(::isCourseSelectionSubmitControl)
+        ?: document.selectFirst("a.btn-primary, button.btn-primary, input[type=submit], button[type=submit]")
     val form = submit?.parents()?.firstOrNull { it.tagName().equals("form", ignoreCase = true) }
         ?: document.selectFirst("form")
-    val method = form?.attr("method")?.let(::normalizeSpace)?.lowercase()?.ifBlank { null } ?: "post"
+    val method = if (actionPageSubmitUrl != null) {
+        "post"
+    } else {
+        form?.attr("method")?.let(::normalizeSpace)?.lowercase()?.ifBlank { null } ?: "post"
+    }
     val candidates = mutableListOf<String>()
     if (submit != null) {
         listOf("data-url", "data-href", "data-action", "formaction", "href").forEach { attr ->
@@ -310,21 +367,49 @@ private fun submitAction(document: Element, pageUrl: String): SubmitAction {
                 candidates += value
             }
         }
+        onclickActionCandidate(normalizeSpace(submit.attr("onclick")))?.let(candidates::add)
     }
     if (form != null) {
         candidates += form.attr("action").takeIf { it.isNotBlank() } ?: pageUrl
     }
-    val actionUrl = candidates.firstOrNull()?.let { resolveUrl(pageUrl, it) }
+    val actionUrl = actionPageSubmitUrl ?: candidates.firstOrNull()?.let { resolveUrl(pageUrl, it) }
+    val fieldPairs = formFieldPairs(form)
     return SubmitAction(
         actionUrl = actionUrl,
         method = method,
-        fields = formFields(form),
+        fields = fieldPairs.toMap(),
+        fieldPairs = fieldPairs,
         error = if (actionUrl == null) "无法解析选课提交入口：页面没有暴露 form/action/data-url。" else null,
     )
 }
 
+private fun courseSelectionActionSubmitUrl(pageUrl: String): String? =
+    pageUrl
+        .takeIf { it.contains("/course_selection/courseselecttask/selects_action/", ignoreCase = true) }
+        ?.let { resolveUrl(pageUrl, "/course_selection/courseselecttask/selects_action/?action=submit") }
+
+private fun isCourseSelectionSubmitControl(element: Element): Boolean {
+    val text = normalizeSpace(
+        listOf(
+            element.text(),
+            element.attr("value"),
+            element.attr("title"),
+            element.attr("aria-label"),
+        ).joinToString(" ")
+    )
+    if (text.isBlank()) return element.tagName().equals("input", ignoreCase = true)
+    val lower = text.lowercase()
+    return listOf("submit", "select", "confirm").any { lower.contains(it) } ||
+        listOf("\u63d0\u4ea4", "\u9009\u8bfe", "\u786e\u8ba4", "\u62a2\u8bfe").any { text.contains(it) }
+}
+
 private fun formFields(form: Element?): Map<String, String> {
     if (form == null) return emptyMap()
+    return formFieldPairs(form).toMap()
+}
+
+private fun formFieldPairs(form: Element?): List<Pair<String, String>> {
+    if (form == null) return emptyList()
     return form.select("input[name]").mapNotNull { input ->
         val name = normalizeSpace(input.attr("name"))
         val type = input.attr("type").lowercase()
@@ -333,7 +418,7 @@ private fun formFields(form: Element?): Map<String, String> {
         } else {
             name to input.attr("value")
         }
-    }.toMap()
+    }
 }
 
 private fun formFieldValue(form: Element?, name: String): String? =
@@ -382,6 +467,16 @@ private fun checkboxPayload(cell: Element?): Pair<String?, String?> {
     return name to checkbox.attr("value").ifBlank { "on" }
 }
 
+private fun checkboxPayload(cells: List<Element>): Pair<String?, String?> {
+    val checkbox = cells.asSequence()
+        .mapNotNull { it.selectFirst("input[type=checkbox][name]") }
+        .firstOrNull()
+        ?: return null to null
+    val name = normalizeSpace(checkbox.attr("name"))
+    if (name.isBlank()) return null to null
+    return name to checkbox.attr("value").ifBlank { "on" }
+}
+
 private fun onclickActionCandidate(value: String): String? =
     Regex("""["']([^"']*(?:delete|courseselecttask)[^"']*)["']""", RegexOption.IGNORE_CASE)
         .find(value)
@@ -390,7 +485,7 @@ private fun onclickActionCandidate(value: String): String? =
         ?.let(::normalizeSpace)
         ?.takeIf { it.isNotBlank() && !it.startsWith("javascript:", ignoreCase = true) }
 
-private fun dropAction(cell: Element?, pageUrl: String, baseFields: Map<String, String>): CourseSelectionAction? {
+private fun dropAction(cell: Element?, pageUrl: String, baseFields: List<Pair<String, String>>): CourseSelectionAction? {
     val trigger = cell?.selectFirst(".select-delete-btn, [data-pk], [data-url], [data-href], [data-action], [formaction], a, button, input")
         ?: return null
     val dataPk = listOf("data-pk", "pk", "value")
@@ -404,15 +499,79 @@ private fun dropAction(cell: Element?, pageUrl: String, baseFields: Map<String, 
     }
     onclickActionCandidate(normalizeSpace(trigger.attr("onclick")))?.let(candidates::add)
     if (candidates.isEmpty() && dataPk != null) {
-        candidates += "/course_selection/courseselecttask/delete/"
+        candidates += defaultCourseSelectionDeletePath(pageUrl)
     }
     val actionUrl = candidates.firstOrNull()?.let { resolveUrl(pageUrl, it) } ?: return null
     val method = listOf("data-method", "method")
         .firstNotNullOfOrNull { attr -> normalizeSpace(trigger.attr(attr)).lowercase().takeIf { it.isNotBlank() } }
         ?: "post"
-    val fields = if (dataPk == null) baseFields else baseFields + ("pk" to dataPk)
-    return CourseSelectionAction(actionUrl = actionUrl, method = method, fields = fields)
+    val fieldPairs = if (dataPk == null) baseFields else baseFields + ("pk" to dataPk)
+    return CourseSelectionAction(actionUrl = actionUrl, method = method, fields = fieldPairs.toMap(), fieldPairs = fieldPairs)
 }
+
+private fun dropAction(cells: List<Element>, pageUrl: String, baseFields: List<Pair<String, String>>): CourseSelectionAction? {
+    val trigger = cells.asSequence()
+        .mapNotNull {
+            it.selectFirst(".select-delete-btn, [data-pk], [data-url], [data-href], [data-action], [formaction], a, button, input")
+        }
+        .firstOrNull(::isCourseSelectionDropControl)
+        ?: return null
+    val dataPk = listOf("data-pk", "pk", "value")
+        .firstNotNullOfOrNull { attr -> normalizeSpace(trigger.attr(attr)).takeIf { it.isNotBlank() } }
+    val candidates = mutableListOf<String>()
+    listOf("href", "data-url", "data-href", "data-action", "formaction").forEach { attr ->
+        val value = normalizeSpace(trigger.attr(attr))
+        if (value.isNotBlank() && value != "#" && !value.startsWith("javascript:", ignoreCase = true)) {
+            candidates += value
+        }
+    }
+    onclickActionCandidate(normalizeSpace(trigger.attr("onclick")))?.let(candidates::add)
+    if (candidates.isEmpty() && dataPk != null) {
+        candidates += defaultCourseSelectionDeletePath(pageUrl)
+    }
+    val actionUrl = candidates.firstOrNull()?.let { resolveUrl(pageUrl, it) } ?: return null
+    val method = listOf("data-method", "method")
+        .firstNotNullOfOrNull { attr -> normalizeSpace(trigger.attr(attr)).lowercase().takeIf { it.isNotBlank() } }
+        ?: "post"
+    val fieldPairs = if (dataPk == null) baseFields else baseFields + ("pk" to dataPk)
+    return CourseSelectionAction(actionUrl = actionUrl, method = method, fields = fieldPairs.toMap(), fieldPairs = fieldPairs)
+}
+
+private fun defaultCourseSelectionDeletePath(pageUrl: String): String =
+    if (pageUrl.contains("/course_selection/courseselecttask/selects_action/", ignoreCase = true)) {
+        "/course_selection/courseselecttask/selects_action/?action=delete"
+    } else {
+        "/course_selection/courseselecttask/delete/"
+    }
+
+private fun isCourseSelectionDropControl(element: Element): Boolean {
+    if (normalizeSpace(element.attr("data-pk")).isNotBlank()) return true
+    val text = normalizeSpace("${element.text()} ${element.attr("title")} ${element.attr("aria-label")}")
+    val lower = text.lowercase()
+    return lower.contains("delete") ||
+        listOf("\u9000\u8bfe", "\u5220\u9664", "\u53d6\u6d88").any { text.contains(it) }
+}
+
+private fun isSelectedCourseSelectionRow(
+    cells: List<Element>,
+    texts: List<String>,
+    columns: CourseSelectionColumns,
+): Boolean {
+    val status = columns.statusIndex
+        ?.let { texts.getOrNull(it) }
+        .orEmpty()
+        .ifBlank { texts.getOrNull(columns.actionIndex).orEmpty() }
+    return isSelectedStatusText(status) ||
+        cells.any { cell ->
+            cell.selectFirst(".select-delete-btn, [data-pk]") != null ||
+                isCourseSelectionDropControl(cell)
+        }
+}
+
+private fun isSelectedStatusText(text: String): Boolean =
+    text.contains("\u5df2\u9009") ||
+        text.contains("\u9009\u4e2d") ||
+        text.contains("selected", ignoreCase = true)
 
 private fun courseSelectionCourse(cells: List<Element>, selected: Boolean, index: Int): CourseSelectionCourse? {
     val texts = cells.map { normalizeSpace(it.text()) }
@@ -423,7 +582,7 @@ private fun courseSelectionCourse(cells: List<Element>, selected: Boolean, index
     return CourseSelectionCourse(
         key = key.ifBlank { "course_$index" },
         status = status,
-        selected = selected || status.contains("已选") || status.contains("selected", ignoreCase = true),
+        selected = selected || isSelectedStatusText(status),
         courseName = texts[1],
         courseCode = code,
         section = section,
@@ -438,10 +597,156 @@ private fun courseSelectionCourse(cells: List<Element>, selected: Boolean, index
     )
 }
 
+private fun courseSelectionCourse(
+    cells: List<Element>,
+    selected: Boolean,
+    index: Int,
+    columns: CourseSelectionColumns,
+): CourseSelectionCourse? {
+    val texts = cells.map { normalizeSpace(it.text()) }
+    val courseIndex = courseCellIndex(cells, texts, columns) ?: return null
+    val courseName = texts.getOrNull(courseIndex).orEmpty()
+    if (!isCourseSelectionRow(cells, texts, courseIndex, selected, columns)) return null
+    val (key, code, section) = courseSelectionKey(courseName)
+    val status = columns.statusIndex
+        ?.let { texts.getOrNull(it) }
+        .orEmpty()
+        .ifBlank { texts.getOrNull(columns.actionIndex).orEmpty() }
+        .ifBlank { if (selected) "selected" else "available" }
+    val remainingText = columns.remainingIndex?.let { texts.getOrNull(it) }?.takeIf { it.isNotBlank() }
+    return CourseSelectionCourse(
+        key = key.ifBlank { "course_$index" },
+        status = status,
+        selected = selected || isSelectedStatusText(status),
+        courseName = courseName,
+        courseCode = code,
+        section = section,
+        remaining = remainingText?.let { Regex("""-?\d+""").find(it)?.value?.toIntOrNull() },
+        remainingText = remainingText,
+        credit = columns.creditIndex?.let { texts.getOrNull(it) }?.takeIf { it.isNotBlank() },
+        courseType = columns.courseTypeIndex?.let { texts.getOrNull(it) }?.takeIf { it.isNotBlank() },
+        examType = columns.examTypeIndex?.let { texts.getOrNull(it) }?.takeIf { it.isNotBlank() },
+        teacher = columns.teacherIndex?.let { texts.getOrNull(it) }?.takeIf { it.isNotBlank() },
+        timeLocation = columns.timeLocationIndex?.let { texts.getOrNull(it) }?.takeIf { it.isNotBlank() },
+        note = columns.noteIndex?.let { texts.getOrNull(it) }?.takeIf { it.isNotBlank() },
+    )
+}
+
+private fun isSelectedCourseSelectionTable(table: Element): Boolean =
+    table.parents().any { it.id() == "selected-container" }
+
+private fun isAvailableCourseSelectionTable(table: Element): Boolean =
+    courseSelectionTableScore(table) >= 4
+
+private fun courseSelectionTableScore(table: Element): Int {
+    val headerText = courseSelectionHeaderCells(table).joinToString(" ")
+    val bodyText = courseSelectionBodyRows(table).take(3).flatten().joinToString(" ") { normalizeSpace(it.text()) }
+    var score = 0
+    if (table.selectFirst("input[type=checkbox][name]") != null) score += 3
+    if (containsAny(headerText, "course", "\u8bfe\u7a0b", "\u8bfe\u5802")) score += 2
+    if (containsAny(headerText, "remaining", "\u4f59\u91cf", "\u8bfe\u4f59")) score += 2
+    if (containsAny(headerText, "teacher", "\u6559\u5e08", "\u4efb\u8bfe")) score += 1
+    if (containsAny(headerText, "credit", "\u5b66\u5206")) score += 1
+    if (Regex("""[A-Za-z]\d+[A-Za-z]?""").containsMatchIn(bodyText)) score += 1
+    return score
+}
+
+private fun courseSelectionColumns(table: Element): CourseSelectionColumns {
+    val headers = courseSelectionHeaderCells(table)
+    if (headers.isEmpty()) return CourseSelectionColumns()
+
+    fun index(vararg needles: String): Int? =
+        headers.indexOfFirst { header -> containsAny(header, *needles) }
+            .takeIf { it >= 0 }
+
+    val actionIndex = index(
+        "select",
+        "action",
+        "operation",
+        "\u64cd\u4f5c",
+        "\u9009\u62e9",
+        "\u9009\u8bfe",
+        "\u9000\u8bfe",
+        "\u5220\u9664",
+    ) ?: 0
+    val courseIndex = index("course", "\u8bfe\u7a0b", "\u8bfe\u5802", "\u540d\u79f0") ?: 1
+    val typeIndex = headers.indexOfFirst { header ->
+        containsAny(header, "attribute", "\u5c5e\u6027", "\u7c7b\u578b") &&
+            !containsAny(header, "exam", "\u8003\u6838", "\u8003\u8bd5")
+    }.takeIf { it >= 0 }
+    val teacherIndex = index("teacher", "\u6559\u5e08", "\u4efb\u8bfe")
+    val timeLocationIndex = headers.indexOfFirst { header ->
+        containsAny(header, "time", "location", "\u65f6\u95f4", "\u5730\u70b9") ||
+            (containsAny(header, "\u4e0a\u8bfe") && !containsAny(header, "teacher", "\u6559\u5e08", "\u4efb\u8bfe"))
+    }.takeIf { it >= 0 }
+    return CourseSelectionColumns(
+        actionIndex = actionIndex,
+        courseIndex = courseIndex,
+        remainingIndex = index("remaining", "\u4f59\u91cf", "\u8bfe\u4f59"),
+        creditIndex = index("credit", "\u5b66\u5206", "\u5b66\u65f6"),
+        courseTypeIndex = typeIndex,
+        examTypeIndex = index("exam", "assessment", "\u8003\u6838", "\u8003\u8bd5"),
+        teacherIndex = teacherIndex,
+        timeLocationIndex = timeLocationIndex,
+        noteIndex = index("note", "remark", "\u5907\u6ce8", "\u9650\u5236", "\u8bf4\u660e"),
+        statusIndex = index("status", "\u72b6\u6001", "\u9009\u8bfe\u72b6\u6001"),
+        matchedHeader = true,
+    )
+}
+
+private fun courseSelectionHeaderCells(table: Element): List<String> {
+    val firstRow = directRows(table).firstOrNull() ?: return emptyList()
+    if (firstRow.none { it.tagName().equals("th", ignoreCase = true) }) return emptyList()
+    return firstRow.map { normalizeSpace(it.text()) }
+}
+
+private fun courseSelectionBodyRows(table: Element): List<List<Element>> {
+    val rows = directRows(table)
+    if (rows.isEmpty()) return emptyList()
+    val hasHeader = rows.first().any { it.tagName().equals("th", ignoreCase = true) }
+    return if (hasHeader) rows.drop(1) else rows
+}
+
+private fun courseCellIndex(
+    cells: List<Element>,
+    texts: List<String>,
+    columns: CourseSelectionColumns,
+): Int? {
+    if (!texts.getOrNull(columns.courseIndex).isNullOrBlank()) return columns.courseIndex
+    cells.indices.firstOrNull { index ->
+        index != columns.actionIndex && Regex("""[A-Za-z]\d+[A-Za-z]?""").containsMatchIn(texts[index])
+    }?.let { return it }
+    return texts.indices.firstOrNull { index ->
+        index != columns.actionIndex &&
+            texts[index].isNotBlank() &&
+            cells[index].selectFirst("input[type=checkbox]") == null
+    }
+}
+
+private fun isCourseSelectionRow(
+    cells: List<Element>,
+    texts: List<String>,
+    courseIndex: Int,
+    selected: Boolean,
+    columns: CourseSelectionColumns,
+): Boolean {
+    val courseText = texts.getOrNull(courseIndex).orEmpty()
+    if (courseText.isBlank()) return false
+    if (containsAny(courseText, "course", "\u8bfe\u7a0b") && cells.any { it.tagName().equals("th", ignoreCase = true) }) {
+        return false
+    }
+    val hasCheckbox = cells.any { it.selectFirst("input[type=checkbox][name]") != null }
+    val hasCourseCode = Regex("""[A-Za-z]\d+[A-Za-z]?""").containsMatchIn(courseText)
+    return selected || hasCheckbox || hasCourseCode || columns.matchedHeader && texts.size >= 4
+}
+
 private fun courseSelectionKey(courseName: String): Triple<String, String?, String?> {
     val text = normalizeSpace(courseName)
-    val code = Regex("""^([A-Za-z]\d+[A-Za-z]?)""").find(text)?.groupValues?.get(1)
-    val section = Regex("""\s(\d{2})(?:\s|$)""").find(text)?.groupValues?.get(1)
+    val code = Regex("""(?:^|\s)([A-Za-z]\d+[A-Za-z]?)(?=[\s:：]|$)""")
+        .find(text)
+        ?.groupValues
+        ?.getOrNull(1)
+    val section = Regex("""(?:^|\s)(\d{2})(?:\s|\u73ed|$)""").find(text)?.groupValues?.get(1)
     val key = when {
         code != null && section != null -> "${code}_$section"
         code != null -> code
@@ -455,6 +760,11 @@ private fun directRows(table: Element?): List<List<Element>> {
     return table.select("tr").mapNotNull { row ->
         row.select("> th, > td").takeIf { it.isNotEmpty() }
     }
+}
+
+private fun containsAny(text: String, vararg needles: String): Boolean {
+    val lower = text.lowercase()
+    return needles.any { needle -> lower.contains(needle.lowercase()) }
 }
 
 private fun resolveUrl(baseUrl: String, value: String): String =
@@ -537,6 +847,7 @@ fun parseScores(html: String, requestedTerm: String? = null): ScoreData {
         val cellNodes = row.select("> th, > td")
         val cells = cellNodes.map { normalizeSpace(it.text()) }
         if (cells.size < 7) return@mapNotNull null
+        val detailPath = cellNodes.getOrNull(7)?.let(::extractScoreDetailPath)
         ScoreItem(
             term = requestedTerm ?: cells.getOrNull(1) ?: currentTerm,
             courseName = cells.getOrElse(2) { cells.getOrElse(1) { "" } },
@@ -544,11 +855,18 @@ fun parseScores(html: String, requestedTerm: String? = null): ScoreData {
             score = cells.getOrNull(4),
             bonusScore = cells.getOrNull(5),
             teacher = cells.getOrNull(6),
-            detail = cells.getOrNull(7),
-            detailPath = cellNodes.getOrNull(7)?.let(::extractScoreDetailPath),
+            detail = cells.getOrNull(7)?.let { cleanInlineScoreDetail(it, detailPath) },
+            detailPath = detailPath,
         )
     }
     return ScoreData(currentTerm = requestedTerm ?: currentTerm, availableTerms = options, items = items)
+}
+
+private fun cleanInlineScoreDetail(value: String, detailPath: String?): String? {
+    val cleaned = normalizeSpace(value)
+    if (cleaned.isBlank()) return null
+    if (detailPath != null && isGenericScoreDetailText(cleaned)) return null
+    return cleaned
 }
 
 private fun extractScoreDetailPath(cell: Element): String? {
@@ -618,11 +936,14 @@ fun parseScoreDetail(html: String): ScoreDetailData {
         }
 
         val headerCells = table.selectFirst("tr")?.select("> th, > td").orEmpty()
-        val hasHeader = headerCells.isNotEmpty() && headerCells.all { it.tagName().equals("th", ignoreCase = true) }
+        val hasHeader = headerCells.isNotEmpty() && (
+            headerCells.all { it.tagName().equals("th", ignoreCase = true) } ||
+                looksLikeScoreDetailHeader(rows.first())
+            )
         val headers = if (hasHeader) rows.first() else emptyList()
         val bodyRows = if (hasHeader) rows.drop(1) else rows
         val isFieldTable = !hasHeader && rows.all { row -> row.size >= 2 && row.size % 2 == 0 }
-        if (bodyRows.isNotEmpty() && !isFieldTable) {
+        if (bodyRows.isNotEmpty() && !isFieldTable && !isGenericScoreDetailRows(bodyRows)) {
             tables += ScoreDetailTable(
                 title = tableTitle(table),
                 headers = headers,
@@ -631,14 +952,143 @@ fun parseScoreDetail(html: String): ScoreDetailData {
         }
     }
 
+    extractScoreDetailFieldsFromElements(document).forEach { (label, value) -> addField(label, value) }
     val rawText = normalizeSpace(document.text()).let { if (it.length > 4000) "${it.take(4000)}..." else it }
+    extractScoreDetailFieldsFromText(rawText).forEach { (label, value) -> addField(label, value) }
+    if (!hasScoreComponentTable(tables)) {
+        scoreComponentTableFromFields(fields)?.let(tables::add)
+    }
     return ScoreDetailData(
         title = title,
         fields = fields,
         tables = tables,
-        rawText = rawText.ifBlank { null },
+        rawText = rawText.takeUnless { it.isBlank() || isGenericScoreDetailText(it) },
     )
 }
+
+private fun looksLikeScoreDetailHeader(row: List<String>): Boolean {
+    if (row.size < 2) return false
+    val joined = row.joinToString(" ")
+    return containsAny(joined, "项目", "分项", "平时", "期末", "占比", "比例", "权重") &&
+        containsAny(joined, "成绩", "得分", "分数", "占比", "比例", "权重")
+}
+
+private fun isGenericScoreDetailRows(rows: List<List<String>>): Boolean =
+    rows.flatten().filter { it.isNotBlank() }.let { values ->
+        values.isNotEmpty() && values.all(::isGenericScoreDetailText)
+    }
+
+private fun isGenericScoreDetailText(value: String): Boolean {
+    val compact = normalizeSpace(value).replace(Regex("""\s+"""), "")
+    return compact in setOf("详情", "详细", "详细信息", "查看", "查看详情", "成绩详情", "分数详情")
+}
+
+private fun extractScoreDetailFieldsFromElements(document: Element): List<Pair<String, String>> {
+    val fields = mutableListOf<Pair<String, String>>()
+    document.select("label, .control-label, .form-label, .col-form-label, .field-label").forEach { labelElement ->
+        val label = cleanScoreDetailLabel(labelElement.text())
+        if (!isUsefulScoreDetailLabel(label)) return@forEach
+        val value = labelElement.nextElementSibling()?.text()?.let(::normalizeSpace)
+            ?.takeIf { it.isNotBlank() }
+            ?: labelElement.parent()?.let { parent ->
+                normalizeSpace(parent.text().removePrefix(labelElement.text())).trimStart(':', '：')
+            }?.takeIf { it.isNotBlank() }
+        if (!value.isNullOrBlank()) fields += label to value
+    }
+    return fields
+}
+
+private fun extractScoreDetailFieldsFromText(text: String): List<Pair<String, String>> {
+    if (text.isBlank()) return emptyList()
+    val fields = mutableListOf<Pair<String, String>>()
+    val pattern = Regex("""([^：:\s][^：:]{0,24})[：:]\s*([^：:]+?)(?=\s+[^：:\s][^：:]{0,24}[：:]|$)""")
+    pattern.findAll(text).forEach { match ->
+        val label = cleanScoreDetailLabel(match.groupValues[1])
+        val value = normalizeSpace(match.groupValues[2]).trimEnd(';', '；')
+        if (isUsefulScoreDetailLabel(label) && value.isNotBlank()) fields += label to value
+    }
+    return fields
+}
+
+private fun cleanScoreDetailLabel(value: String): String =
+    normalizeSpace(value).trimEnd(':', '：')
+
+private fun isUsefulScoreDetailLabel(label: String): Boolean =
+    label.isNotBlank() && containsAny(
+        label,
+        "课程",
+        "项目",
+        "成绩",
+        "得分",
+        "分数",
+        "比例",
+        "占比",
+        "权重",
+        "平时",
+        "期末",
+        "期中",
+        "总评",
+    )
+
+private data class ScoreComponent(
+    val name: String,
+    var ratio: String? = null,
+    var score: String? = null,
+)
+
+private fun scoreComponentTableFromFields(fields: List<ScoreDetailField>): ScoreDetailTable? {
+    val components = linkedMapOf<String, ScoreComponent>()
+    fields.forEach { field ->
+        val name = scoreComponentName(field.label) ?: return@forEach
+        val component = components.getOrPut(name) { ScoreComponent(name) }
+        val ratio = extractScoreRatio(field.value)
+        val score = extractScoreValue(field.value, ratio)
+        when {
+            isScoreRatioLabel(field.label) -> component.ratio = ratio ?: field.value
+            isScoreValueLabel(field.label) -> component.score = score
+            ratio != null && score != null -> {
+                component.ratio = ratio
+                component.score = score
+            }
+            ratio != null -> component.ratio = ratio
+            score != null -> component.score = score
+        }
+    }
+    val rows = components.values
+        .filter { !it.ratio.isNullOrBlank() || !it.score.isNullOrBlank() }
+        .map { component -> listOf(component.name, component.ratio.orEmpty(), component.score.orEmpty()) }
+    if (rows.isEmpty()) return null
+    return ScoreDetailTable(title = "分项成绩", headers = listOf("项目", "比例", "成绩"), rows = rows)
+}
+
+private fun scoreComponentName(label: String): String? {
+    val compact = normalizeSpace(label).replace(Regex("""\s+"""), "")
+    return listOf("平时", "期末", "期中", "实验", "上机", "作业", "课堂", "考勤", "出勤", "小测", "测验", "报告", "论文", "答辩", "实践", "项目", "总评")
+        .firstOrNull { compact.contains(it) }
+}
+
+private fun isScoreRatioLabel(label: String): Boolean =
+    containsAny(label, "比例", "占比", "权重", "比重", "百分比")
+
+private fun isScoreValueLabel(label: String): Boolean =
+    containsAny(label, "成绩", "得分", "分数")
+
+private fun extractScoreRatio(value: String): String? =
+    Regex("""\d+(?:\.\d+)?\s*%""").find(value)?.value?.replace(Regex("""\s+"""), "")
+
+private fun extractScoreValue(value: String, ratio: String? = null): String? {
+    val cleaned = normalizeSpace(value)
+    if (cleaned.isBlank()) return null
+    val withoutRatio = ratio?.let { normalizeSpace(cleaned.replace(it, "")) } ?: cleaned
+    return withoutRatio.trim('(', ')', '（', '）', ',', '，', ';', '；').takeIf { it.isNotBlank() }
+}
+
+private fun hasScoreComponentTable(tables: List<ScoreDetailTable>): Boolean =
+    tables.any { table ->
+        val text = (table.headers + table.rows.flatten()).joinToString(" ")
+        containsAny(text, "平时", "期末", "期中", "比例", "占比", "权重") &&
+            containsAny(text, "成绩", "得分", "分数", "比例", "占比", "权重")
+    }
 
 private fun scoreDetailTitle(document: Element): String? {
     listOf(".modal-title", "h1", "h2", "h3", "legend", "title").forEach { selector ->

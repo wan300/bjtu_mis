@@ -1,5 +1,6 @@
 package cn.edu.bjtu.mis.data.agent.tools
 
+import cn.edu.bjtu.mis.data.perf.PerfTrace
 import cn.edu.bjtu.mis.data.repository.MailRepository
 import cn.edu.bjtu.mis.model.MailAttachment
 import cn.edu.bjtu.mis.model.MailComposeRequest
@@ -106,7 +107,7 @@ class MailAgentTool(
             "end_date" to stringSchema("Inclusive end date/time. Date-only values include the whole day."),
             "days" to integerSchema("Recent window in days when start_date is omitted. Defaults to 7.", minimum = 1),
             "limit" to integerSchema("Maximum messages to return. Defaults to 50.", minimum = 1, maximum = 100),
-            "scan_limit" to integerSchema("Maximum messages to scan while seeking the date window. Defaults to 500.", minimum = 1, maximum = MAX_SCAN_LIMIT),
+            "scan_limit" to integerSchema("Maximum messages to scan while seeking the date window. Defaults to 150.", minimum = 1, maximum = MAX_SCAN_LIMIT),
         )
 
         override suspend fun execute(taskId: String, arguments: JsonObject): ToolResult = withContext(Dispatchers.IO) {
@@ -176,12 +177,13 @@ class MailAgentTool(
             "end_date" to stringSchema("Inclusive end date/time. Date-only values include the whole day."),
             "days" to integerSchema("Recent window in days when start_date is omitted. Defaults to 7.", minimum = 1),
             "limit" to integerSchema("Maximum messages to inspect. Defaults to 50.", minimum = 1, maximum = 100),
-            "scan_limit" to integerSchema("Maximum messages to scan while seeking the date window. Defaults to 500.", minimum = 1, maximum = MAX_SCAN_LIMIT),
-            "max_messages_with_body" to integerSchema("Maximum prioritized messages to read fully. Defaults to 20.", minimum = 1, maximum = 50),
+            "scan_limit" to integerSchema("Maximum messages to scan while seeking the date window. Defaults to 150.", minimum = 1, maximum = MAX_SCAN_LIMIT),
+            "max_messages_with_body" to integerSchema("Maximum prioritized messages to read fully. Defaults to 8.", minimum = 1, maximum = 50),
             "max_body_chars" to integerSchema("Maximum body excerpt characters per message. Defaults to 3000.", minimum = 1, maximum = MAX_BODY_CHARS),
         )
 
         override suspend fun execute(taskId: String, arguments: JsonObject): ToolResult = withContext(Dispatchers.IO) {
+            PerfTrace.measureSuspend("Agent.mail.digest_context") {
             val request = MailWindowRequest.from(arguments, clock)
             val maxBodies = arguments.int("max_messages_with_body", DEFAULT_DIGEST_BODY_COUNT).coerceIn(1, 50)
             val maxBodyChars = arguments.int("max_body_chars", DEFAULT_DIGEST_BODY_CHARS).coerceIn(1, MAX_BODY_CHARS)
@@ -210,6 +212,7 @@ class MailAgentTool(
                     "items" to JsonArray(items),
                 )
             )
+            }
         }
     }
 
@@ -359,13 +362,13 @@ class MailAgentTool(
 private const val DEFAULT_FOLDER_ID = "1"
 private const val DEFAULT_DAYS = 7
 private const val DEFAULT_LIMIT = 50
-private const val DEFAULT_SCAN_LIMIT = 500
+private const val DEFAULT_SCAN_LIMIT = 150
 private const val MAX_SCAN_LIMIT = 2000
 private const val PAGE_SIZE = 50
 private const val SECONDS_PER_DAY = 24L * 60L * 60L
 private const val DEFAULT_BODY_CHARS = 12000
 private const val MAX_BODY_CHARS = 30000
-private const val DEFAULT_DIGEST_BODY_COUNT = 20
+private const val DEFAULT_DIGEST_BODY_COUNT = 8
 private const val DEFAULT_DIGEST_BODY_CHARS = 3000
 private const val DEFAULT_CONTACT_LIMIT = 8
 

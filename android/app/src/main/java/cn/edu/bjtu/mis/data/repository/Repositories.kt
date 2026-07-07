@@ -35,6 +35,7 @@ import cn.edu.bjtu.mis.model.CourseReplayPlaybackInfo
 import cn.edu.bjtu.mis.model.CourseResourceItem
 import cn.edu.bjtu.mis.model.CourseSelectionAttemptResult
 import cn.edu.bjtu.mis.model.CourseSelectionData
+import cn.edu.bjtu.mis.model.CourseSelectionTarget
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.EmptyRoomData
 import cn.edu.bjtu.mis.model.EmploymentArticleDetail
@@ -92,6 +93,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import okhttp3.Cookie
 import java.io.File
@@ -140,6 +143,7 @@ class SyncRepository(
     private val mutex = Mutex()
 
     suspend fun runSync(): SyncRun = mutex.withLock {
+        PerfTrace.measureSuspend("Sync.full") {
         val startedAt = nowIso()
         val runId = dao.insertSyncRun(SyncRunEntity(startedAt = startedAt, status = "running"))
         val summary = linkedMapOf<String, SyncModuleSummary>()
@@ -160,8 +164,14 @@ class SyncRepository(
                 fetchAndStore(ModuleKeys.Scores, summary, errors) { aa.fetchScores(ctype = "lr") }
                 fetchAndStore(ModuleKeys.HistoryScores, summary, errors) { aa.fetchHistoryScores() }
                 fetchAndStore(ModuleKeys.AcademicProgress, summary, errors) { aa.fetchAcademicProgress() }
-                fetchAndStore(ModuleKeys.Homework, summary, errors) { ve.fetchHomework(term = currentTerm) }
-                fetchAndStore(ModuleKeys.CourseResources, summary, errors) { ve.fetchAllCourseRootResources(term = currentTerm) }
+                fetchAndStore(ModuleKeys.Homework, summary, errors) {
+                    ve.fetchHomework(term = currentTerm, includeAttachments = false)
+                }
+                summary[ModuleKeys.CourseResources] = SyncModuleSummary(
+                    status = "skipped",
+                    durationMs = 0,
+                    error = "课程资源已改为按需刷新，避免全量同步耗时过长。",
+                )
                 fetchAndStore(ModuleKeys.EmptyRooms, summary, errors) { aa.fetchEmptyRooms(week = currentWeek) }
                 fetchAndStore(ModuleKeys.Mail, summary, errors) {
                     val mail = CoremailProvider(client)
@@ -184,7 +194,8 @@ class SyncRepository(
 
         val status = if (errors.isEmpty()) "success" else "partial_failure"
         finish(runId, status, summary, errors.joinToString(" | ").takeIf { it.isNotBlank() })
-        return latestStatus()
+        latestStatus()
+        }
     }
 
     suspend fun runQuickSync(): SyncRun = mutex.withLock {
@@ -240,18 +251,28 @@ class SyncRepository(
         errors: MutableList<String>,
         crossinline fetcher: suspend () -> ModuleEnvelope<T>,
     ): ModuleEnvelope<T>? {
+        val startedAt = PerfTrace.nowMillis()
         return runCatching {
             val envelope = fetcher().withSyncedAt(nowIso())
             saveSnapshot(moduleKey, envelope)
+            val durationMs = PerfTrace.nowMillis() - startedAt
             summary[moduleKey] = SyncModuleSummary(
                 status = "success",
                 coverage = envelope.coverage,
                 items = itemCount(envelope.data),
+                durationMs = durationMs,
             )
+            PerfTrace.mark("Sync.module.$moduleKey", "${durationMs}ms status=success")
             envelope
         }.getOrElse { error ->
             if (error is SessionExpiredException) throw error
-            summary[moduleKey] = SyncModuleSummary(status = "error", error = error.message)
+            val durationMs = PerfTrace.nowMillis() - startedAt
+            summary[moduleKey] = SyncModuleSummary(
+                status = "error",
+                durationMs = durationMs,
+                error = error.message,
+            )
+            PerfTrace.mark("Sync.module.$moduleKey", "${durationMs}ms status=error")
             errors += "$moduleKey: ${error.message}"
             null
         }
@@ -442,7 +463,12 @@ class ModuleRepository(
         term: String? = null,
         strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): ModuleEnvelope<ScoreData> =
-        fetchWithStrategy(ModuleKeys.HistoryScores, requestKey(ModuleKeys.HistoryScores, "term" to term), strategy) {
+        fetchWithStrategy(
+            ModuleKeys.HistoryScores,
+            requestKey(ModuleKeys.HistoryScores, "term" to term),
+            strategy,
+            cacheParams = requestParams("term" to (term ?: "all"), "ctype" to "ln"),
+        ) {
             AaProvider(it).fetchHistoryScores(term)
         }
 
@@ -450,7 +476,11 @@ class ModuleRepository(
         term: String? = null,
         strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): Flow<ProgressiveModuleState<ScoreData>> =
-        progressiveLiveOrSnapshot(ModuleKeys.HistoryScores, strategy = strategy) { client ->
+        progressiveLiveOrSnapshot(
+            ModuleKeys.HistoryScores,
+            strategy = strategy,
+            cacheParams = requestParams("term" to (term ?: "all"), "ctype" to "ln"),
+        ) { client ->
             AaProvider(client).fetchHistoryScoresProgressive(term)
         }
 
@@ -464,7 +494,12 @@ class ModuleRepository(
         term: String? = null,
         strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): ModuleEnvelope<ExamData> =
-        fetchWithStrategy(ModuleKeys.Exams, requestKey(ModuleKeys.Exams, "term" to term), strategy) {
+        fetchWithStrategy(
+            ModuleKeys.Exams,
+            requestKey(ModuleKeys.Exams, "term" to term),
+            strategy,
+            cacheParams = requestParams("term" to term),
+        ) {
             AaProvider(it).fetchExams(term)
         }
 
@@ -473,7 +508,12 @@ class ModuleRepository(
         ctype: String? = null,
         strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): ModuleEnvelope<ScoreData> =
-        fetchWithStrategy(ModuleKeys.Scores, requestKey(ModuleKeys.Scores, "term" to term, "ctype" to ctype), strategy) {
+        fetchWithStrategy(
+            ModuleKeys.Scores,
+            requestKey(ModuleKeys.Scores, "term" to term, "ctype" to ctype),
+            strategy,
+            cacheParams = requestParams("term" to term, "ctype" to ctype),
+        ) {
             AaProvider(it).fetchScores(term, ctype)
         }
 
@@ -484,7 +524,12 @@ class ModuleRepository(
         month: String? = null,
         strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): ModuleEnvelope<CalendarData> =
-        fetchWithStrategy(ModuleKeys.Calendar, requestKey(ModuleKeys.Calendar, "month" to month), strategy) {
+        fetchWithStrategy(
+            ModuleKeys.Calendar,
+            requestKey(ModuleKeys.Calendar, "month" to month),
+            strategy,
+            cacheParams = requestParams("month" to (month ?: LocalDate.now().toString().substring(0, 7))),
+        ) {
             VeProvider(it).fetchCalendar(month)
         }
 
@@ -532,6 +577,7 @@ class ModuleRepository(
             ModuleKeys.EmptyRooms,
             requestKey(ModuleKeys.EmptyRooms, "term" to term, "week" to week, "building" to building, "room" to room),
             strategy,
+            cacheParams = requestParams("term" to term, "week" to week, "building" to building, "room" to room),
         ) {
             AaProvider(it).fetchEmptyRooms(term, week, building, room)
         }
@@ -566,12 +612,21 @@ class ModuleRepository(
             requestKey(
                 ModuleKeys.CourseResources,
                 "term" to term,
-                "courseId" to courseId,
-                "folderId" to folderId,
+                "requested_course_id" to courseId.orEmpty(),
+                "course_id" to courseId,
+                "folder_id" to folderId,
                 "search" to search,
-                "categoryKey" to categoryKey,
+                "category_key" to categoryKey,
             ),
             strategy,
+            cacheParams = requestParams(
+                "term" to term,
+                "requested_course_id" to courseId.orEmpty(),
+                "course_id" to courseId,
+                "folder_id" to folderId,
+                "search" to search,
+                "category_key" to categoryKey,
+            ),
         ) {
             VeProvider(it).fetchCourseResources(term, courseId, folderId, search, categoryKey)
         }
@@ -584,7 +639,17 @@ class ModuleRepository(
         categoryKey: String? = null,
         strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): Flow<ProgressiveModuleState<CourseResourcesData>> =
-        progressiveLiveOrSnapshot(ModuleKeys.CourseResources, strategy = strategy) { client ->
+        progressiveLiveOrSnapshot(
+            ModuleKeys.CourseResources,
+            strategy = strategy,
+            cacheParams = requestParams(
+                "term" to term,
+                "course_id" to courseId,
+                "folder_id" to folderId,
+                "search" to search,
+                "category_key" to categoryKey,
+            ),
+        ) { client ->
             VeProvider(client).fetchCourseResourcesProgressive(term, courseId, folderId, search, categoryKey)
         }
 
@@ -593,7 +658,11 @@ class ModuleRepository(
         courseId: String? = null,
         strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): Flow<ProgressiveModuleState<CourseReplayData>> =
-        progressiveLiveOrSnapshot(ModuleKeys.CourseReplay, strategy = strategy) { client ->
+        progressiveLiveOrSnapshot(
+            ModuleKeys.CourseReplay,
+            strategy = strategy,
+            cacheParams = requestParams("term" to term, "requested_course_id" to courseId.orEmpty()),
+        ) { client ->
             VeProvider(client).fetchCourseReplaysProgressive(term, courseId)
         }
 
@@ -630,18 +699,23 @@ class ModuleRepository(
         moduleKey: String,
         requestKey: String = moduleKey,
         strategy: ModuleLoadStrategy,
+        cacheParams: List<Pair<String, String?>> = emptyList(),
         crossinline fetcher: suspend (cn.edu.bjtu.mis.data.network.BjtuHttpClient) -> ModuleEnvelope<T>,
     ): ModuleEnvelope<T> =
         when (strategy) {
-            ModuleLoadStrategy.CacheOnly -> syncRepository.snapshot<T>(moduleKey) ?: throw LocalSnapshotMissingException(moduleKey)
+            ModuleLoadStrategy.CacheOnly -> syncRepository.snapshot<T>(moduleKey)
+                ?.takeIf { it.matchesCacheParams(cacheParams) }
+                ?: throw LocalSnapshotMissingException(moduleKey)
             ModuleLoadStrategy.CacheFirst -> syncRepository.snapshot<T>(moduleKey)
-                ?: fetchLiveOrSnapshot(moduleKey, requestKey, fetcher)
-            ModuleLoadStrategy.NetworkFirst -> fetchLiveOrSnapshot(moduleKey, requestKey, fetcher)
+                ?.takeIf { it.matchesCacheParams(cacheParams) }
+                ?: fetchLiveOrSnapshot(moduleKey, requestKey, cacheParams, fetcher)
+            ModuleLoadStrategy.NetworkFirst -> fetchLiveOrSnapshot(moduleKey, requestKey, cacheParams, fetcher)
         }
 
     private suspend inline fun <reified T> fetchLiveOrSnapshot(
         moduleKey: String,
         requestKey: String = moduleKey,
+        cacheParams: List<Pair<String, String?>> = emptyList(),
         crossinline fetcher: suspend (cn.edu.bjtu.mis.data.network.BjtuHttpClient) -> ModuleEnvelope<T>,
     ): ModuleEnvelope<T> {
         return singleFlight.run(requestKey) {
@@ -651,6 +725,7 @@ class ModuleRepository(
                 envelope
             }.getOrElse {
                 syncRepository.snapshot<T>(moduleKey)
+                    ?.takeIf { cached -> cached.matchesCacheParams(cacheParams) }
                     ?: throw it
             }
         }
@@ -661,13 +736,26 @@ class ModuleRepository(
         return if (suffix.isBlank()) moduleKey else "$moduleKey:$suffix"
     }
 
+    private fun requestParams(vararg params: Pair<String, String?>): List<Pair<String, String?>> =
+        params.toList()
+
+    private fun <T> ModuleEnvelope<T>.matchesCacheParams(params: List<Pair<String, String?>>): Boolean =
+        params
+            .mapNotNull { (key, value) -> value?.trim()?.let { key to it } }
+            .all { (key, expected) ->
+                sourceParams[key]?.jsonPrimitive?.contentOrNull?.trim() == expected
+            }
+
     private inline fun <reified T> progressiveLiveOrSnapshot(
         moduleKey: String,
         noinline transform: (ModuleEnvelope<T>) -> ModuleEnvelope<T> = { it },
         strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+        cacheParams: List<Pair<String, String?>> = emptyList(),
         crossinline fetcher: (BjtuHttpClient) -> Flow<ProgressiveModuleState<T>>,
     ): Flow<ProgressiveModuleState<T>> = flow {
-        val cached = syncRepository.snapshot<T>(moduleKey)?.let(transform)
+        val cached = syncRepository.snapshot<T>(moduleKey)
+            ?.takeIf { it.matchesCacheParams(cacheParams) }
+            ?.let(transform)
         var latestNetworkEnvelope: ModuleEnvelope<T>? = null
         if (strategy == ModuleLoadStrategy.CacheOnly || (strategy == ModuleLoadStrategy.CacheFirst && cached != null)) {
             emit(
@@ -1481,6 +1569,28 @@ class CourseSelectionRepository(
     suspend fun select(courseKey: String, courseName: String? = null): CourseSelectionAttemptResult =
         sessionManager.withAuthenticatedClient { AaProvider(it).attemptCourseSelection(courseKey, courseName) }
 
+    suspend fun select(target: CourseSelectionTarget): CourseSelectionAttemptResult =
+        sessionManager.withAuthenticatedClient { AaProvider(it).attemptCourseSelections(listOf(target)) }
+
+    suspend fun selectBatch(targets: List<CourseSelectionTarget>): CourseSelectionAttemptResult =
+        sessionManager.withAuthenticatedClient { AaProvider(it).attemptCourseSelections(targets) }
+
+    suspend fun listingGroup(groupName: String): ModuleEnvelope<CourseSelectionData> =
+        sessionManager.withAuthenticatedClient { AaProvider(it).fetchCourseSelectionGroup(groupName) }
+
+    suspend fun listingQuery(
+        groupName: String?,
+        courseQuery: String = "",
+        sectionQuery: String = "",
+    ): ModuleEnvelope<CourseSelectionData> =
+        sessionManager.withAuthenticatedClient {
+            AaProvider(it).fetchCourseSelectionQuery(
+                groupName = groupName,
+                courseQuery = courseQuery,
+                sectionQuery = sectionQuery,
+            )
+        }
+
     suspend fun drop(courseKey: String, courseName: String? = null): CourseSelectionAttemptResult =
         sessionManager.withAuthenticatedClient { AaProvider(it).dropCourseSelection(courseKey, courseName) }
 
@@ -1489,9 +1599,20 @@ class CourseSelectionRepository(
         dropCourseKey: String,
         targetCourseName: String? = null,
         dropCourseName: String? = null,
+        targetGroupName: String? = null,
+        targetCourseQuery: String = "",
+        targetSectionQuery: String = "",
     ): CourseSelectionAttemptResult =
         sessionManager.withAuthenticatedClient {
-            AaProvider(it).replaceCourseSelection(targetCourseKey, targetCourseName, dropCourseKey, dropCourseName)
+            AaProvider(it).replaceCourseSelection(
+                targetCourseKey = targetCourseKey,
+                targetCourseName = targetCourseName,
+                dropCourseKey = dropCourseKey,
+                dropCourseName = dropCourseName,
+                targetGroupName = targetGroupName,
+                targetCourseQuery = targetCourseQuery,
+                targetSectionQuery = targetSectionQuery,
+            )
         }
 
     suspend fun submitCaptcha(challengeId: String, captcha: String): CourseSelectionAttemptResult =

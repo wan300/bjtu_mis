@@ -11,14 +11,14 @@
       name="description"
       content="BJTU MIS Android 是面向北京交通大学学生的校园学习服务 App，整合课表、成绩、考务、作业、课程资源、邮箱和内置 Open WebUI Agent。"
     >
-    <link rel="icon" type="image/png" href="assets/icons/icon_home.png?v=2026060603">
-    <link rel="stylesheet" href="assets/css/styles.css?v=2026060603">
+    <link rel="icon" type="image/png" href="assets/icons/icon_home.png?v=2026062602">
+    <link rel="stylesheet" href="assets/css/styles.css?v=2026062602">
   </head>
   <body data-page="home">
     <header class="site-header">
       <div class="site-header__inner">
         <a class="brand" href="index.html" aria-label="BJTU MIS Android 主页">
-          <img src="assets/icons/icon_home.png?v=2026060603" alt="" width="40" height="40">
+          <img src="assets/icons/icon_home.png?v=2026062602" alt="" width="40" height="40">
           <span>BJTU MIS Android</span>
         </a>
         <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false" data-nav-toggle>
@@ -46,18 +46,25 @@
               面向北京交通大学学生的校园学习服务 App。把 MIS、教学服务、课程资料、校园邮箱与作业辅助能力整合到手机端，支持本地同步、离线查看和嵌入式 Open WebUI Agent。
             </p>
             <div class="hero__actions">
-              <a class="btn btn--signal" data-download-button href="https://github.com/wan300/bjtu_mis_Android/releases/download/v1.2.1/app-release.apk">
-                <span class="btn__icon">↓</span>
-                <span class="btn__text">
-                  <span data-download-label>下载所选 APK</span>
-                  <small class="btn__subtext">当前选择 <span data-release-version>v1.2.1</span></small>
-                </span>
-              </a>
+              <div class="hero__download">
+                <a class="btn btn--signal" data-download-button href="https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.3.1">
+                  <span class="btn__icon">↓</span>
+                  <span class="btn__text">
+                    <span data-download-label>查看发布页</span>
+                    <small class="btn__subtext">当前选择 <span data-release-version>v1.3.1</span></small>
+                  </span>
+                </a>
+                <p class="hero__download-note">
+                  中国大陆地区如无法使用 GitHub Releases 下载，可通过
+                  <a href="https://pan.baidu.com/s/1a4Ijf02F5d-fhcoIFm22aQ?pwd=0721" target="_blank" rel="noreferrer">百度网盘备用下载</a>
+                  获取 app，提取码：<strong>0721</strong>。
+                </p>
+              </div>
               <a class="btn btn--ghost" href="#modules">查看功能模块</a>
             </div>
           </div>
         </div>
-        <img class="hero__rail" src="assets/img/rail-characters.png?v=2026060603" alt="" width="764" height="316">
+        <img class="hero__rail" src="assets/img/rail-characters.png?v=2026062602" alt="" width="764" height="316">
         <div class="rail-bed" aria-hidden="true"></div>
       </section>
 
@@ -141,25 +148,30 @@
             <label class="release-selector" for="release-select">
               <span>版本选择</span>
               <select id="release-select" data-release-select aria-describedby="release-select-help">
-                <option value="v1.2.1">v1.2.1 · 正式版 · 2026-06-06</option>
+                <option value="v1.3.1">v1.3.1 · 正式版 · 2026-06-24</option>
               </select>
             </label>
             <p class="download-panel__hint" id="release-select-help">
               当前选择会同时更新下载链接、文件大小和对应发布页。
             </p>
             <div class="download-panel__actions">
-              <a class="btn btn--signal" data-download-button href="https://github.com/wan300/bjtu_mis_Android/releases/download/v1.2.1/app-release.apk">
+              <a class="btn btn--signal" data-download-button href="https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.3.1">
                 <span class="btn__icon">↓</span>
-                <span data-download-label>下载所选 APK</span>
+                <span data-download-label>查看发布页</span>
               </a>
               <a class="btn btn--ghost" data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases" target="_blank" rel="noreferrer">查看发布页</a>
             </div>
+            <p class="download-panel__mirror">
+              中国大陆地区如无法使用 GitHub Releases 下载，可通过
+              <a href="https://pan.baidu.com/s/1a4Ijf02F5d-fhcoIFm22aQ?pwd=0721" target="_blank" rel="noreferrer">百度网盘备用下载</a>
+              获取 app，提取码：<strong>0721</strong>。
+            </p>
             <p class="release-note">GitHub API 暂时不可用，当前显示内置版本快照。</p>
           </div>
           <div class="download-panel__status" aria-label="发布信息">
             <div class="ticket-row">
               <span>当前选择</span>
-              <strong data-release-version>v1.2.1</strong>
+              <strong data-release-version>v1.3.1</strong>
             </div>
             <div class="ticket-row">
               <span>发布类型</span>
@@ -167,7 +179,7 @@
             </div>
             <div class="ticket-row">
               <span>发布日期</span>
-              <strong data-release-published>2026-06-06</strong>
+              <strong data-release-published>2026-06-24</strong>
             </div>
             <div class="ticket-row">
               <span>文件大小</span>
@@ -175,7 +187,7 @@
             </div>
             <div class="ticket-row">
               <span>下载状态</span>
-              <strong data-release-availability>可下载</strong>
+              <strong data-release-availability>未提供 APK</strong>
             </div>
             <div class="ticket-row">
               <span>源代码</span>
@@ -193,7 +205,7 @@
       </div>
     </footer>
 
-    <script src="assets/js/modules.js?v=2026060603"></script>
-    <script src="assets/js/site.js?v=2026060603"></script>
+    <script src="assets/js/modules.js?v=2026062602"></script>
+    <script src="assets/js/site.js?v=2026062602"></script>
   </body>
 </html>

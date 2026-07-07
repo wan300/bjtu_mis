@@ -74,12 +74,14 @@ class BjtuHttpClient(
         url: String,
         params: Map<String, String?> = emptyMap(),
         headers: Map<String, String> = emptyMap(),
+        timeoutMillis: Long? = null,
     ): TextResponse = executeText(
         Request.Builder()
             .url(buildUrl(url, params))
             .headers(headers.toHeaders())
             .get()
-            .build()
+            .build(),
+        timeoutMillis = timeoutMillis,
     )
 
     suspend fun postForm(
@@ -87,6 +89,15 @@ class BjtuHttpClient(
         form: Map<String, String>,
         params: Map<String, String?> = emptyMap(),
         headers: Map<String, String> = emptyMap(),
+        timeoutMillis: Long? = null,
+    ): TextResponse = postForm(url, form.toList(), params, headers, timeoutMillis)
+
+    suspend fun postForm(
+        url: String,
+        form: List<Pair<String, String>>,
+        params: Map<String, String?> = emptyMap(),
+        headers: Map<String, String> = emptyMap(),
+        timeoutMillis: Long? = null,
     ): TextResponse {
         val body = FormBody.Builder().apply {
             form.forEach { (key, value) -> add(key, value) }
@@ -96,7 +107,8 @@ class BjtuHttpClient(
                 .url(buildUrl(url, params))
                 .headers(headers.toHeaders())
                 .post(body)
-                .build()
+                .build(),
+            timeoutMillis = timeoutMillis,
         )
     }
 
@@ -105,6 +117,7 @@ class BjtuHttpClient(
         files: List<MultipartFilePart>,
         params: Map<String, String?> = emptyMap(),
         headers: Map<String, String> = emptyMap(),
+        timeoutMillis: Long? = null,
     ): TextResponse {
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
@@ -123,7 +136,8 @@ class BjtuHttpClient(
                 .url(buildUrl(url, params))
                 .headers(headers.toHeaders())
                 .post(body)
-                .build()
+                .build(),
+            timeoutMillis = timeoutMillis,
         )
     }
 
@@ -133,31 +147,35 @@ class BjtuHttpClient(
         params: Map<String, String?> = emptyMap(),
         headers: Map<String, String> = emptyMap(),
         contentType: String = "application/json; charset=utf-8",
+        timeoutMillis: Long? = null,
     ): TextResponse = executeText(
         Request.Builder()
             .url(buildUrl(url, params))
             .headers(headers.toHeaders())
             .post(json.toRequestBody(contentType.toMediaType()))
-            .build()
+            .build(),
+        timeoutMillis = timeoutMillis,
     )
 
     suspend fun getJson(
         url: String,
         params: Map<String, String?> = emptyMap(),
         headers: Map<String, String> = emptyMap(),
-    ): JsonElement = AppJson.parseToJsonElement(getText(url, params, headers).body)
+        timeoutMillis: Long? = null,
+    ): JsonElement = AppJson.parseToJsonElement(getText(url, params, headers, timeoutMillis).body)
 
     suspend fun getBytes(
         url: String,
         params: Map<String, String?> = emptyMap(),
         headers: Map<String, String> = emptyMap(),
+        timeoutMillis: Long? = null,
     ): BytesResponse = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(buildUrl(url, params))
             .headers(headers.toHeaders())
             .get()
             .build()
-        val response = executeCall(request)
+        val response = executeCall(request, timeoutMillis)
         response.use {
             if (!it.isSuccessful) throw IOException("HTTP ${it.code} for ${it.request.url}")
             BytesResponse(
@@ -174,13 +192,14 @@ class BjtuHttpClient(
         target: File,
         params: Map<String, String?> = emptyMap(),
         headers: Map<String, String> = emptyMap(),
+        timeoutMillis: Long? = null,
     ): FileResponse = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(buildUrl(url, params))
             .headers(headers.toHeaders())
             .get()
             .build()
-        val response = executeCall(request)
+        val response = executeCall(request, timeoutMillis)
         response.use {
             if (!it.isSuccessful) throw IOException("HTTP ${it.code} for ${it.request.url}")
             val body = it.body ?: throw IOException("Empty response body for ${it.request.url}")
@@ -226,8 +245,8 @@ class BjtuHttpClient(
         }
     }
 
-    private suspend fun executeText(request: Request): TextResponse = withContext(Dispatchers.IO) {
-        val response = executeCall(request)
+    private suspend fun executeText(request: Request, timeoutMillis: Long? = null): TextResponse = withContext(Dispatchers.IO) {
+        val response = executeCall(request, timeoutMillis)
         response.use {
             if (!it.isSuccessful) throw IOException("HTTP ${it.code} for ${it.request.url}")
             TextResponse(
@@ -239,10 +258,12 @@ class BjtuHttpClient(
         }
     }
 
-    private fun executeCall(request: Request) =
+    private fun executeCall(request: Request, timeoutMillis: Long? = null) =
         try {
             val startedAt = PerfTrace.nowMillis()
-            client.newCall(request).execute().also { response ->
+            client.newCall(request).also { call ->
+                timeoutMillis?.takeIf { it > 0 }?.let { call.timeout().timeout(it, TimeUnit.MILLISECONDS) }
+            }.execute().also { response ->
                 PerfTrace.mark(
                     "http",
                     "${request.method} ${request.url.host}${request.url.encodedPath} ${response.code} ${PerfTrace.nowMillis() - startedAt}ms",
@@ -272,6 +293,8 @@ class BjtuHttpClient(
         }.build()
 
     companion object {
+        const val LIST_REQUEST_TIMEOUT_MILLIS = 15_000L
+
         const val DEFAULT_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Mobile Safari/537.36"
     }

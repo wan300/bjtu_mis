@@ -3,6 +3,20 @@
   const releaseListingUrl = "https://github.com/wan300/bjtu_mis_Android/releases";
   const fallbackReleases = [
     {
+      tag_name: "v1.3.1",
+      html_url: "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.3.1",
+      prerelease: false,
+      published_at: "2026-06-24T17:08:04Z",
+      assets: [
+        {
+          name: "bjtu-mis-android-v1.3.1-release-unsigned.apk",
+          size: 212949118,
+          browser_download_url:
+            "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.3.1/bjtu-mis-android-v1.3.1-release-unsigned.apk"
+        }
+      ]
+    },
+    {
       tag_name: "v1.3.0-beta.1",
       html_url: "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.3.0-beta.1",
       prerelease: true,
@@ -87,12 +101,12 @@
       ]
     }
   ];
-  const fallbackApk = "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.2.1/app-release.apk";
-  const fallbackRelease = "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.2.1";
-  const fallbackTag = "v1.2.1";
+  const fallbackApk = "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.3.1";
+  const fallbackRelease = "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.3.1";
+  const fallbackTag = "v1.3.1";
   const fallbackSizeText = "--";
   const releaseRefreshInterval = 5 * 60 * 1000;
-  const imageAssetQuery = "?v=2026060603";
+  const imageAssetQuery = "?v=2026062602";
 
   const moduleData = window.BJTU_MODULES || [];
   const isModulePage = document.body.dataset.page === "module";
@@ -306,21 +320,21 @@
       node.textContent = "正式版";
     });
     published.forEach((node) => {
-      node.textContent = "2026-06-06";
+      node.textContent = "2026-06-24";
     });
     availability.forEach((node) => {
-      node.textContent = "可下载";
-      node.classList.remove("is-unavailable");
+      node.textContent = "未提供 APK";
+      node.classList.add("is-unavailable");
     });
 
     if (!buttons.length && !releaseLinks.length && !releaseSelects.length) return;
 
     function findApkAsset(assets) {
       if (!Array.isArray(assets)) return null;
-      return (
-        assets.find((asset) => asset.name === "app-release.apk") ||
-        assets.find((asset) => /\.apk$/i.test(asset.name))
+      const installableApks = assets.filter(
+        (asset) => /\.apk$/i.test(asset.name || "") && !/unsigned/i.test(asset.name || "")
       );
+      return installableApks.find((asset) => asset.name === "app-release.apk") || installableApks[0] || null;
     }
 
     function normalizeRelease(release) {

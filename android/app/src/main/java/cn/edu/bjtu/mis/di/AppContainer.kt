@@ -146,13 +146,17 @@ class AppContainer(context: Context) {
     val courseSelectionRunner: CourseSelectionRunner by lazy {
         PerfTrace.measure("AppContainer.courseSelectionRunner") {
             CourseSelectionRunner(
-                selectCourse = { target -> courseSelectionRepository.select(target.key, target.courseName) },
+                selectCourse = { target -> courseSelectionRepository.select(target) },
+                selectCourses = { targets -> courseSelectionRepository.selectBatch(targets) },
                 replaceCourse = { rule ->
                     courseSelectionRepository.replace(
                         targetCourseKey = rule.target.key,
                         targetCourseName = rule.target.courseName,
                         dropCourseKey = rule.drop.key,
                         dropCourseName = rule.drop.courseName,
+                        targetGroupName = rule.target.groupName,
+                        targetCourseQuery = rule.target.courseQuery,
+                        targetSectionQuery = rule.target.sectionQuery,
                     )
                 },
                 submitCaptchaAnswer = { challengeId, captcha -> courseSelectionRepository.submitCaptcha(challengeId, captcha) },

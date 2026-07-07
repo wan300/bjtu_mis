@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 
 class CourseSelectionRunner(
     private val selectCourse: suspend (CourseSelectionTarget) -> CourseSelectionAttemptResult,
+    private val selectCourses: suspend (List<CourseSelectionTarget>) -> CourseSelectionAttemptResult,
     private val replaceCourse: suspend (CourseSelectionReplaceRule) -> CourseSelectionAttemptResult,
     private val submitCaptchaAnswer: suspend (challengeId: String, captcha: String) -> CourseSelectionAttemptResult,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
@@ -107,14 +108,23 @@ class CourseSelectionRunner(
                             log("换课 ${rule.drop.courseName} -> ${rule.target.courseName}: ${error.message ?: "请求失败"}")
                         }
                 }
-                for (target in config.targets) {
-                    if (stopRequested) break
-                    if (target.key in _state.value.doneKeys) continue
-                    runCatching { selectCourse(target) }
-                        .onSuccess { handleResult(target, it) }
-                        .onFailure { error ->
-                            log("${target.courseName}: ${error.message ?: "请求失败"}")
+                val pendingTargets = config.targets.filter { it.key !in _state.value.doneKeys }
+                if (!stopRequested && pendingTargets.isNotEmpty()) {
+                    runCatching {
+                        if (pendingTargets.size == 1) {
+                            selectCourse(pendingTargets.single())
+                        } else {
+                            selectCourses(pendingTargets)
                         }
+                    }.onSuccess { result ->
+                        if (pendingTargets.size == 1) {
+                            handleResult(pendingTargets.single(), result)
+                        } else {
+                            handleTargetsResultOrFallback(pendingTargets, result)
+                        }
+                    }.onFailure { error ->
+                        log("批量抢课: ${error.message ?: "请求失败"}")
+                    }
                 }
                 val replaceDone = config.replaceRules.all { it.id in _state.value.doneReplaceRuleIds }
                 val targetsDone = config.targets.all { it.key in _state.value.doneKeys }
@@ -169,6 +179,66 @@ class CourseSelectionRunner(
         return false
     }
 
+    private suspend fun handleTargetsResultOrFallback(
+        targets: List<CourseSelectionTarget>,
+        result: CourseSelectionAttemptResult,
+    ): Boolean {
+        var handled = handleTargetsResult(targets, result)
+        if (result.status !in batchFallbackStatuses || stopRequested) return handled
+
+        val remainingTargets = targets.filter { it.key !in _state.value.doneKeys }
+        if (remainingTargets.isEmpty()) return handled
+
+        log("批量抢课入口不可用，改为逐门尝试。")
+        for (target in remainingTargets) {
+            if (stopRequested) break
+            runCatching { selectCourse(target) }
+                .onSuccess { singleResult ->
+                    handled = handleResult(target, singleResult) || handled
+                }
+                .onFailure { error ->
+                    log("${target.courseName}: ${error.message ?: "请求失败"}")
+                }
+        }
+        return handled
+    }
+
+    private suspend fun handleTargetsResult(
+        targets: List<CourseSelectionTarget>,
+        result: CourseSelectionAttemptResult,
+    ): Boolean {
+        val label = "批量抢课 ${targets.size} 门"
+        log("$label: ${result.message ?: result.status}")
+        val displayTarget = CourseSelectionTarget(
+            key = "batch:${targets.joinToString(",") { it.key }}",
+            courseName = label,
+        )
+        val finalResult = resolveCaptcha(displayTarget, result) ?: return false
+        val completedKeys = finalResult.completedCourseKeys
+            .ifEmpty {
+                if (finalResult.status in selectionSuccessStatuses) targets.map { it.key } else emptyList()
+            }
+            .toSet()
+        val completedTargets = targets.filter { it.key in completedKeys }
+        if (completedTargets.isNotEmpty()) {
+            val alerts = if (finalResult.status == "success") {
+                completedTargets.map { target -> nextSuccessAlert(target, finalResult.copy(course = null)) }
+            } else {
+                emptyList()
+            }
+            _state.update {
+                it.copy(
+                    doneKeys = it.doneKeys + completedTargets.map { target -> target.key },
+                    successAlerts = it.successAlerts + alerts,
+                )
+            }
+        }
+        if (finalResult.status in selectionSuccessStatuses) {
+            return completedTargets.isNotEmpty()
+        }
+        return false
+    }
+
     private suspend fun handleReplaceResult(rule: CourseSelectionReplaceRule, result: CourseSelectionAttemptResult): Boolean {
         log("换课 ${rule.drop.courseName} -> ${rule.target.courseName}: ${result.message ?: result.status}")
         val finalResult = resolveCaptcha(rule.target, result) ?: return false
@@ -208,6 +278,7 @@ class CourseSelectionRunner(
         initialResult: CourseSelectionAttemptResult,
     ): CourseSelectionAttemptResult? {
         var current = initialResult
+        val completedKeys = current.completedCourseKeys.toMutableSet()
         while (current.status == "captcha_required" && current.captchaChallenge != null && !stopRequested) {
             val waiter = CompletableDeferred<CourseSelectionAttemptResult>()
             captchaWaiter = waiter
@@ -220,6 +291,7 @@ class CourseSelectionRunner(
                 )
             }
             current = waiter.await()
+            completedKeys += current.completedCourseKeys
             captchaWaiter = null
             _state.update {
                 it.copy(
@@ -230,6 +302,9 @@ class CourseSelectionRunner(
             }
             if (stopRequested) return null
             log("${target.courseName}: ${current.message ?: current.status}")
+        }
+        if (completedKeys.isNotEmpty()) {
+            current = current.copy(completedCourseKeys = completedKeys.toList())
         }
         return current
     }
@@ -255,5 +330,6 @@ class CourseSelectionRunner(
         val selectionSuccessStatuses = setOf("success", "already_selected")
         val replaceSuccessStatuses = setOf("replace_success", "target_already_selected")
         val realSuccessStatuses = setOf("success", "replace_success")
+        val batchFallbackStatuses = setOf("not_found", "unparseable")
     }
 }

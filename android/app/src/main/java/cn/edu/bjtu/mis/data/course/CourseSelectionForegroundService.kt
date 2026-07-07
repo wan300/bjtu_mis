@@ -11,6 +11,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import android.os.IBinder
 import android.os.VibrationEffect
@@ -167,7 +169,7 @@ class CourseSelectionForegroundService : Service() {
             .build()
 
     private fun buildSuccessNotification(alert: CourseSelectionSuccessAlert) =
-        NotificationCompat.Builder(this, CHANNEL_ALERTS)
+        NotificationCompat.Builder(this, CHANNEL_SUCCESS_ALERTS)
             .setSmallIcon(R.drawable.ic_menu_24)
             .setContentTitle("抢课成功")
             .setContentText(alert.courseName)
@@ -177,7 +179,10 @@ class CourseSelectionForegroundService : Service() {
             )
             .setContentIntent(openCourseSelectionPendingIntent(REQUEST_OPEN_SUCCESS))
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setVibrate(SUCCESS_VIBRATION_PATTERN)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .build()
 
@@ -240,7 +245,6 @@ class CourseSelectionForegroundService : Service() {
         NOTIFICATION_ID_SUCCESS_BASE + (eventId % NOTIFICATION_ID_SUCCESS_BUCKETS).toInt()
 
     private fun vibrateStrongly() {
-        val timings = longArrayOf(0L, 250L, 120L, 350L, 120L, 500L)
         val amplitudes = intArrayOf(0, 255, 0, 255, 0, 255)
         val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             getSystemService(VibratorManager::class.java)?.defaultVibrator
@@ -250,10 +254,10 @@ class CourseSelectionForegroundService : Service() {
         }
         if (vibrator?.hasVibrator() != true) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
+            vibrator.vibrate(VibrationEffect.createWaveform(SUCCESS_VIBRATION_PATTERN, amplitudes, -1))
         } else {
             @Suppress("DEPRECATION")
-            vibrator.vibrate(timings, -1)
+            vibrator.vibrate(SUCCESS_VIBRATION_PATTERN, -1)
         }
     }
 
@@ -280,6 +284,11 @@ class CourseSelectionForegroundService : Service() {
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java)
+        val alertAudioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        val alertSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_RUNNING, "抢课后台运行", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "显示抢课前台服务运行状态"
@@ -287,7 +296,15 @@ class CourseSelectionForegroundService : Service() {
         )
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_ALERTS, "抢课关键提醒", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "抢课需要验证码或成功时提醒"
+                description = "抢课需要验证码时提醒"
+            },
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_SUCCESS_ALERTS, "抢课成功提醒", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "抢课成功后在屏幕顶部弹出提醒"
+                enableVibration(true)
+                vibrationPattern = SUCCESS_VIBRATION_PATTERN
+                setSound(alertSound, alertAudioAttributes)
             },
         )
     }
@@ -295,13 +312,29 @@ class CourseSelectionForegroundService : Service() {
     private fun Intent.toRunConfig(): CourseSelectionRunConfig? {
         val keys = getStringArrayListExtra(EXTRA_TARGET_KEYS).orEmpty()
         val names = getStringArrayListExtra(EXTRA_TARGET_NAMES).orEmpty()
+        val groupNames = getStringArrayListExtra(EXTRA_TARGET_GROUP_NAMES).orEmpty()
+        val courseQueries = getStringArrayListExtra(EXTRA_TARGET_COURSE_QUERIES).orEmpty()
+        val sectionQueries = getStringArrayListExtra(EXTRA_TARGET_SECTION_QUERIES).orEmpty()
         val targets = keys.mapIndexedNotNull { index, key ->
             val name = names.getOrNull(index).orEmpty()
-            if (key.isBlank()) null else CourseSelectionTarget(key, name.ifBlank { key })
+            if (key.isBlank()) {
+                null
+            } else {
+                CourseSelectionTarget(
+                    key = key,
+                    courseName = name.ifBlank { key },
+                    groupName = groupNames.getOrNull(index)?.trim()?.takeIf { it.isNotBlank() },
+                    courseQuery = courseQueries.getOrNull(index).orEmpty(),
+                    sectionQuery = sectionQueries.getOrNull(index).orEmpty(),
+                )
+            }
         }
         val ruleIds = getStringArrayListExtra(EXTRA_REPLACE_RULE_IDS).orEmpty()
         val replaceTargetKeys = getStringArrayListExtra(EXTRA_REPLACE_TARGET_KEYS).orEmpty()
         val replaceTargetNames = getStringArrayListExtra(EXTRA_REPLACE_TARGET_NAMES).orEmpty()
+        val replaceTargetGroupNames = getStringArrayListExtra(EXTRA_REPLACE_TARGET_GROUP_NAMES).orEmpty()
+        val replaceTargetCourseQueries = getStringArrayListExtra(EXTRA_REPLACE_TARGET_COURSE_QUERIES).orEmpty()
+        val replaceTargetSectionQueries = getStringArrayListExtra(EXTRA_REPLACE_TARGET_SECTION_QUERIES).orEmpty()
         val replaceDropKeys = getStringArrayListExtra(EXTRA_REPLACE_DROP_KEYS).orEmpty()
         val replaceDropNames = getStringArrayListExtra(EXTRA_REPLACE_DROP_NAMES).orEmpty()
         val replaceRules = replaceTargetKeys.mapIndexedNotNull { index, targetKey ->
@@ -314,7 +347,13 @@ class CourseSelectionForegroundService : Service() {
                 val id = ruleIds.getOrNull(index).orEmpty().ifBlank { "$targetKey->$dropKey" }
                 CourseSelectionReplaceRule(
                     id = id,
-                    target = CourseSelectionTarget(targetKey, targetName),
+                    target = CourseSelectionTarget(
+                        key = targetKey,
+                        courseName = targetName,
+                        groupName = replaceTargetGroupNames.getOrNull(index)?.trim()?.takeIf { it.isNotBlank() },
+                        courseQuery = replaceTargetCourseQueries.getOrNull(index).orEmpty(),
+                        sectionQuery = replaceTargetSectionQueries.getOrNull(index).orEmpty(),
+                    ),
                     drop = CourseSelectionTarget(dropKey, dropName),
                 )
             }
@@ -336,9 +375,15 @@ class CourseSelectionForegroundService : Service() {
 
         private const val EXTRA_TARGET_KEYS = "target_keys"
         private const val EXTRA_TARGET_NAMES = "target_names"
+        private const val EXTRA_TARGET_GROUP_NAMES = "target_group_names"
+        private const val EXTRA_TARGET_COURSE_QUERIES = "target_course_queries"
+        private const val EXTRA_TARGET_SECTION_QUERIES = "target_section_queries"
         private const val EXTRA_REPLACE_RULE_IDS = "replace_rule_ids"
         private const val EXTRA_REPLACE_TARGET_KEYS = "replace_target_keys"
         private const val EXTRA_REPLACE_TARGET_NAMES = "replace_target_names"
+        private const val EXTRA_REPLACE_TARGET_GROUP_NAMES = "replace_target_group_names"
+        private const val EXTRA_REPLACE_TARGET_COURSE_QUERIES = "replace_target_course_queries"
+        private const val EXTRA_REPLACE_TARGET_SECTION_QUERIES = "replace_target_section_queries"
         private const val EXTRA_REPLACE_DROP_KEYS = "replace_drop_keys"
         private const val EXTRA_REPLACE_DROP_NAMES = "replace_drop_names"
         private const val EXTRA_INTERVAL_MS = "interval_ms"
@@ -347,6 +392,7 @@ class CourseSelectionForegroundService : Service() {
 
         private const val CHANNEL_RUNNING = "course_selection_running"
         private const val CHANNEL_ALERTS = "course_selection_alerts"
+        private const val CHANNEL_SUCCESS_ALERTS = "course_selection_success_alerts_v2"
         private const val NOTIFICATION_ID_RUNNING = 2101
         private const val NOTIFICATION_ID_CAPTCHA = 2102
         private const val NOTIFICATION_ID_SUCCESS_BASE = 2110
@@ -356,15 +402,22 @@ class CourseSelectionForegroundService : Service() {
         private const val REQUEST_STOP = 3103
         private const val REQUEST_OPEN_SUCCESS = 3104
         private const val KEEP_ALIVE_TOKEN = "course_selection"
+        private val SUCCESS_VIBRATION_PATTERN = longArrayOf(0L, 250L, 120L, 350L, 120L, 500L)
 
         fun start(context: Context, config: CourseSelectionRunConfig) {
             val intent = Intent(context, CourseSelectionForegroundService::class.java)
                 .setAction(ACTION_START)
                 .putStringArrayListExtra(EXTRA_TARGET_KEYS, ArrayList(config.targets.map { it.key }))
                 .putStringArrayListExtra(EXTRA_TARGET_NAMES, ArrayList(config.targets.map { it.courseName }))
+                .putStringArrayListExtra(EXTRA_TARGET_GROUP_NAMES, ArrayList(config.targets.map { it.groupName.orEmpty() }))
+                .putStringArrayListExtra(EXTRA_TARGET_COURSE_QUERIES, ArrayList(config.targets.map { it.courseQuery }))
+                .putStringArrayListExtra(EXTRA_TARGET_SECTION_QUERIES, ArrayList(config.targets.map { it.sectionQuery }))
                 .putStringArrayListExtra(EXTRA_REPLACE_RULE_IDS, ArrayList(config.replaceRules.map { it.id }))
                 .putStringArrayListExtra(EXTRA_REPLACE_TARGET_KEYS, ArrayList(config.replaceRules.map { it.target.key }))
                 .putStringArrayListExtra(EXTRA_REPLACE_TARGET_NAMES, ArrayList(config.replaceRules.map { it.target.courseName }))
+                .putStringArrayListExtra(EXTRA_REPLACE_TARGET_GROUP_NAMES, ArrayList(config.replaceRules.map { it.target.groupName.orEmpty() }))
+                .putStringArrayListExtra(EXTRA_REPLACE_TARGET_COURSE_QUERIES, ArrayList(config.replaceRules.map { it.target.courseQuery }))
+                .putStringArrayListExtra(EXTRA_REPLACE_TARGET_SECTION_QUERIES, ArrayList(config.replaceRules.map { it.target.sectionQuery }))
                 .putStringArrayListExtra(EXTRA_REPLACE_DROP_KEYS, ArrayList(config.replaceRules.map { it.drop.key }))
                 .putStringArrayListExtra(EXTRA_REPLACE_DROP_NAMES, ArrayList(config.replaceRules.map { it.drop.courseName }))
                 .putExtra(EXTRA_INTERVAL_MS, config.retryIntervalMillis)

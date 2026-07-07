@@ -5,8 +5,6 @@ import android.content.ContextWrapper
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.Box
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -14,12 +12,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentContainerView
+import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
 import cn.edu.bjtu.mis.openwebui.OpenWebUiAgentFragment
 import cn.edu.bjtu.mis.ui.theme.AppThemeOption
@@ -32,8 +30,7 @@ fun OpenWebUiAgentScreen(
     visible: Boolean = true,
     onBackHandlerChanged: ((() -> Boolean)?) -> Unit,
 ) {
-    var studentName by remember { mutableStateOf<String?>(null) }
-    var profileLoaded by remember { mutableStateOf(false) }
+    var studentName by remember { mutableStateOf<String?>("同学") }
     val agentTheme = when (themeOption) {
         AppThemeOption.Default -> OpenWebUiAgentFragment.AGENT_THEME_LIGHT
         AppThemeOption.MascotGold -> OpenWebUiAgentFragment.AGENT_THEME_DARK
@@ -41,23 +38,11 @@ fun OpenWebUiAgentScreen(
     }
 
     LaunchedEffect(repository) {
-        studentName = runCatching {
-            repository.profile().data.name?.trim()?.takeIf { it.isNotBlank() }
-        }.getOrNull()
-        profileLoaded = true
-    }
-
-    if (!profileLoaded) {
-        LaunchedEffect(Unit) {
-            onBackHandlerChanged(null)
+        runCatching {
+            repository.profile(strategy = ModuleLoadStrategy.CacheFirst).data.name?.trim()?.takeIf { it.isNotBlank() }
+        }.getOrNull()?.let {
+            studentName = it
         }
-        Box(
-            modifier = modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator()
-        }
-        return
     }
 
     val context = LocalContext.current
@@ -107,6 +92,7 @@ fun OpenWebUiAgentScreen(
                 fragment = fragmentManager.findFragmentById(container.id) as? OpenWebUiAgentFragment
             } else {
                 fragment?.updatePreferredTheme(agentTheme)
+                fragment?.updateStudentName(studentName)
             }
             if (visible && becameVisible) {
                 fragment?.notifyHomeworkHandoffAvailable()

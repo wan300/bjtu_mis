@@ -94,6 +94,7 @@ class SessionManager(
 
     suspend fun fetchInlineLoginCaptcha(): SessionCaptcha = mutex.withLock {
         validationCache.clear()
+        VeSessionContextCache.clear()
         cookieJar.clear()
         val loginPage = httpClient.getText(endpoints.misHomeUrl)
         if (!isCasLoginUrl(loginPage.url)) {
@@ -124,6 +125,7 @@ class SessionManager(
         persistCredentials: Boolean = true,
     ): SessionStatus = mutex.withLock {
         val state = inlineLoginState ?: throw SessionExpiredException("验证码已失效，请刷新后重试。")
+        VeSessionContextCache.clear()
         cookieJar.restoreFromJson(state.cookiesJson)
         val response = httpClient.postForm(
             state.loginUrl,
@@ -285,6 +287,7 @@ class SessionManager(
         return runCatching {
             val response = httpClient.getText(endpoints.misHomeUrl)
             if (isCasLoginUrl(response.url)) {
+                VeSessionContextCache.clear()
                 SessionStatus(SessionState.Expired, "会话已过期，请重新登录。")
             } else {
                 val aaReady = ensureAaSessionReady()
@@ -307,10 +310,10 @@ class SessionManager(
 
     suspend fun recoverSession(
         policy: SessionValidationPolicy = SessionValidationPolicy.UseRecentOrValidate,
-    ): AutoLoginResult {
+    ): AutoLoginResult = PerfTrace.measureSuspend("Session.recover") {
         val current = validateSession(policy)
         if (current.state == SessionState.Ready) {
-            return AutoLoginResult(
+            return@measureSuspend AutoLoginResult(
                 status = AutoLoginStatus.Ready,
                 message = current.detail,
                 attempts = 0,
@@ -318,7 +321,7 @@ class SessionManager(
             )
         }
 
-        return reauthMutex.withLock {
+        return@measureSuspend reauthMutex.withLock {
             if (policy == SessionValidationPolicy.UseRecentOrValidate) {
                 validationCache.getFresh()?.let { afterLock ->
                     return@withLock AutoLoginResult(
@@ -349,6 +352,7 @@ class SessionManager(
             }
         } catch (error: SessionExpiredException) {
             validationCache.clear()
+            VeSessionContextCache.clear()
             val retried = recoverSession(SessionValidationPolicy.Fresh)
             if (retried.status != AutoLoginStatus.Ready) {
                 throw SessionExpiredException(retried.message ?: error.message ?: "会话已过期，自动重新登录失败。")
@@ -362,6 +366,7 @@ class SessionManager(
     fun logout() {
         inlineLoginState = null
         validationCache.clear()
+        VeSessionContextCache.clear()
         cookieJar.clear()
         cookieStore.clear()
         credentialStore.clear()

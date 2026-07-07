@@ -1,0 +1,38 @@
+<html>
+  <body>
+    <form method="post" action="/course_selection/courseselecttask/submit/">
+      <input type="hidden" name="csrfmiddlewaretoken" value="csrf-token" />
+      <table class="table table-bordered">
+        <tr><th>Meta</th><th>Value</th></tr>
+        <tr><td>Task</td><td>Open</td></tr>
+      </table>
+      <table class="table table-bordered">
+        <tr><th>Notice</th><th>Value</th></tr>
+        <tr><td>Ignore</td><td>This is not a course table</td></tr>
+      </table>
+      <table class="table table-bordered">
+        <tr>
+          <th>Course</th><th>Remaining</th><th>Credit</th><th>Type</th><th>Exam</th><th>Teacher</th><th>Time</th><th>Select</th>
+        </tr>
+        <tr>
+          <td>M500001B Data Mining 02 School</td>
+          <td>3</td><td>2</td><td>Optional</td><td>Exam</td><td>Teacher D</td><td>Thu 1-2 Room 404</td>
+          <td><input type="checkbox" name="selects" value="late-checkbox" /></td>
+        </tr>
+      </table>
+      <div id="selected-container">
+        <table class="table table-bordered">
+          <tr>
+            <th>Course</th><th>Remaining</th><th>Credit</th><th>Type</th><th>Exam</th><th>Teacher</th><th>Time</th><th>Action</th>
+          </tr>
+          <tr>
+            <td>M310005B Operating Systems 01 Software School</td>
+            <td>0</td><td>3</td><td>Required</td><td>Exam</td><td>Teacher A</td><td>Mon 1-2 Room 101</td>
+            <td><a class="select-delete-btn" data-pk="selected-late">Delete</a></td>
+          </tr>
+        </table>
+      </div>
+      <a class="btn btn-primary" href="#">Submit</a>
+    </form>
+  </body>
+</html>

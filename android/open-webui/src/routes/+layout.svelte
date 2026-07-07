@@ -62,6 +62,7 @@
 	import { ENABLE_MOBILE_CLIENT } from '$lib/mobile/feature-flags';
 	import { isNativeAndroid } from '$lib/mobile/platform';
 	import {
+		LOCAL_FIRST_USER_ID,
 		ensureLocalSession,
 		getLocalBackendConfig,
 		isLocalFirstClient
@@ -754,9 +755,19 @@
 				applyThemeUpdate(newTheme);
 			}
 		};
+		const nativeStudentNameUpdateHandler = (event) => {
+			const nextName = event.detail?.name;
+			if (typeof nextName !== 'string' || !nextName.trim()) {
+				return;
+			}
+			user.update((current) =>
+				current?.id === LOCAL_FIRST_USER_ID ? { ...current, name: nextName.trim() } : current
+			);
+		};
 
 		window.addEventListener('message', windowMessageEventHandler);
 		window.addEventListener('bjtu-mis:theme-update', nativeThemeUpdateHandler);
+		window.addEventListener('bjtu-mis:student-name-update', nativeStudentNameUpdateHandler);
 
 		let touchstartY = 0;
 
@@ -1077,6 +1088,7 @@
 			window.removeEventListener('resize', onResize);
 			window.removeEventListener('message', windowMessageEventHandler);
 			window.removeEventListener('bjtu-mis:theme-update', nativeThemeUpdateHandler);
+			window.removeEventListener('bjtu-mis:student-name-update', nativeStudentNameUpdateHandler);
 			document.removeEventListener('touchstart', touchstartHandler);
 			document.removeEventListener('touchmove', touchmoveHandler);
 			document.removeEventListener('touchend', touchendHandler);

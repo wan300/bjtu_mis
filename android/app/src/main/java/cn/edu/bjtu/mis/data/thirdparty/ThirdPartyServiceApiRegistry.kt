@@ -2,6 +2,7 @@ package cn.edu.bjtu.mis.data.thirdparty
 
 import cn.edu.bjtu.mis.data.AppJson
 import cn.edu.bjtu.mis.data.repository.MailRepository
+import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.data.repository.ModuleRepository
 import cn.edu.bjtu.mis.data.security.CredentialStore
 import cn.edu.bjtu.mis.model.MailComposeRequest
@@ -56,9 +57,9 @@ class ThirdPartyServiceApiRegistry(
     }
 
     private suspend fun execute(method: String, params: JsonObject): JsonElement = when (method) {
-        "identity.get_profile" -> json(moduleRepository().profile())
+        "identity.get_profile" -> json(moduleRepository().profile(strategy = readStrategy(params)))
         "identity.get_credentials" -> credentialsJson()
-        "academic.get_timetable" -> json(moduleRepository().timetable())
+        "academic.get_timetable" -> json(moduleRepository().timetable(strategy = readStrategy(params)))
         "academic.save_user_course" -> buildJsonObject {
             put("id", moduleRepository().saveUserCourse(params.toUserCourseDraft()))
         }
@@ -70,13 +71,18 @@ class ThirdPartyServiceApiRegistry(
             moduleRepository().scores(
                 term = params.string("term"),
                 ctype = params.string("ctype"),
+                strategy = readStrategy(params),
             )
         )
-        "academic.get_history_scores" -> json(moduleRepository().historyScores(term = params.string("term")))
-        "academic.get_exams" -> json(moduleRepository().exams(term = params.string("term")))
-        "academic.get_calendar" -> json(moduleRepository().calendar(month = params.string("month")))
-        "academic.get_academic_progress" -> json(moduleRepository().academicProgress())
-        "academic.get_homework" -> json(moduleRepository().homework(status = params.string("status") ?: "all"))
+        "academic.get_history_scores" -> json(
+            moduleRepository().historyScores(term = params.string("term"), strategy = readStrategy(params))
+        )
+        "academic.get_exams" -> json(moduleRepository().exams(term = params.string("term"), strategy = readStrategy(params)))
+        "academic.get_calendar" -> json(moduleRepository().calendar(month = params.string("month"), strategy = readStrategy(params)))
+        "academic.get_academic_progress" -> json(moduleRepository().academicProgress(strategy = readStrategy(params)))
+        "academic.get_homework" -> json(
+            moduleRepository().homework(status = params.string("status") ?: "all", strategy = readStrategy(params))
+        )
         "academic.submit_homework" -> json(
             moduleRepository().submitHomework(
                 homeworkId = params.requiredInt("homework_id"),
@@ -92,14 +98,16 @@ class ThirdPartyServiceApiRegistry(
                 folderId = params.string("folder_id") ?: "0",
                 search = params.string("search"),
                 categoryKey = params.string("category_key"),
+                strategy = readStrategy(params),
             )
         )
-        "mail.list_folders" -> json(mailRepository().folders())
+        "mail.list_folders" -> json(mailRepository().folders(strategy = readStrategy(params)))
         "mail.list_messages" -> json(
             mailRepository().messages(
                 folderId = params.string("folder_id") ?: "1",
                 start = params.int("start") ?: 0,
                 limit = (params.int("limit") ?: 20).coerceIn(1, 100),
+                strategy = readStrategy(params),
             )
         )
         "mail.get_message" -> json(
@@ -120,6 +128,13 @@ class ThirdPartyServiceApiRegistry(
 
     private fun credentialStore(): CredentialStore =
         credentialStore ?: error("CredentialStore is not available")
+
+    private fun readStrategy(params: JsonObject): ModuleLoadStrategy =
+        if (params.boolean("force_refresh") == true) {
+            ModuleLoadStrategy.NetworkFirst
+        } else {
+            ModuleLoadStrategy.CacheFirst
+        }
 
     private fun credentialsJson(): JsonElement {
         val credentials = credentialStore().load()

@@ -22,7 +22,7 @@ class MainActivity : AppCompatActivity() {
         requestedRoute.value = intent.openRoute()
         val app = application as BjtuMisApplication
         val initialLoadStrategy = if (savedInstanceState == null) {
-            ModuleLoadStrategy.NetworkFirst
+            ModuleLoadStrategy.CacheFirst
         } else {
             ModuleLoadStrategy.CacheOnly
         }

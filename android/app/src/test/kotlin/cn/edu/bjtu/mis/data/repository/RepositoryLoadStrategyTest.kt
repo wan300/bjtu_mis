@@ -21,6 +21,7 @@ import cn.edu.bjtu.mis.data.security.LoginCredentials
 import cn.edu.bjtu.mis.data.security.SessionCookieStore
 import cn.edu.bjtu.mis.model.CalendarData
 import cn.edu.bjtu.mis.model.CoverageLevel
+import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.HomeworkData
 import cn.edu.bjtu.mis.model.HomeworkItem
 import cn.edu.bjtu.mis.model.MailFoldersData
@@ -72,14 +73,124 @@ class RepositoryLoadStrategyTest {
                     module = ModuleKeys.Calendar,
                     sourceSystem = "test",
                     coverage = CoverageLevel.Verified,
+                    sourceParams = buildJsonObject { put("month", "2026-06") },
                     data = CalendarData(month = "2026-06", currentWeek = "8"),
                 ),
             )
 
             val repository = ModuleRepository(syncRepository, sessionManager(server))
-            val envelope = repository.calendar(strategy = ModuleLoadStrategy.CacheOnly)
+            val envelope = repository.calendar(month = "2026-06", strategy = ModuleLoadStrategy.CacheOnly)
 
             assertEquals("8", envelope.data.currentWeek)
+            assertEquals(0, server.requestCount)
+        }
+    }
+
+    @Test
+    fun cacheFirstReturnsModuleSnapshotWithoutNetworkWhenCacheExists() = runBlocking {
+        MockWebServer().use { server ->
+            val dao = FakeBjtuMisDao()
+            val syncRepository = SyncRepository(dao, sessionManager(server))
+            syncRepository.saveSnapshot(
+                ModuleKeys.Calendar,
+                ModuleEnvelope(
+                    module = ModuleKeys.Calendar,
+                    sourceSystem = "test",
+                    coverage = CoverageLevel.Verified,
+                    sourceParams = buildJsonObject { put("month", "2026-06") },
+                    data = CalendarData(month = "2026-06", currentWeek = "8"),
+                ),
+            )
+
+            val repository = ModuleRepository(syncRepository, sessionManager(server))
+            val envelope = repository.calendar(month = "2026-06", strategy = ModuleLoadStrategy.CacheFirst)
+
+            assertEquals("8", envelope.data.currentWeek)
+            assertEquals(0, server.requestCount)
+        }
+    }
+
+    @Test
+    fun cacheOnlyDoesNotReturnSnapshotWhenRequestParamsDiffer() = runBlocking {
+        MockWebServer().use { server ->
+            val dao = FakeBjtuMisDao()
+            val syncRepository = SyncRepository(dao, sessionManager(server))
+            syncRepository.saveSnapshot(
+                ModuleKeys.Calendar,
+                ModuleEnvelope(
+                    module = ModuleKeys.Calendar,
+                    sourceSystem = "test",
+                    coverage = CoverageLevel.Verified,
+                    sourceParams = buildJsonObject { put("month", "2026-06") },
+                    data = CalendarData(month = "2026-06", currentWeek = "8"),
+                ),
+            )
+
+            val repository = ModuleRepository(syncRepository, sessionManager(server))
+            val error = runCatching {
+                repository.calendar(month = "2026-07", strategy = ModuleLoadStrategy.CacheOnly)
+            }.exceptionOrNull()
+
+            assertTrue(error is LocalSnapshotMissingException)
+            assertEquals(0, server.requestCount)
+        }
+    }
+
+    @Test
+    fun historyScoresDefaultDoesNotReturnSpecificTermSnapshot() = runBlocking {
+        MockWebServer().use { server ->
+            val dao = FakeBjtuMisDao()
+            val syncRepository = SyncRepository(dao, sessionManager(server))
+            syncRepository.saveSnapshot(
+                ModuleKeys.HistoryScores,
+                ModuleEnvelope(
+                    module = ModuleKeys.HistoryScores,
+                    sourceSystem = "test",
+                    coverage = CoverageLevel.Verified,
+                    sourceParams = buildJsonObject {
+                        put("term", "2025-2026-2-2")
+                        put("ctype", "ln")
+                    },
+                    data = cn.edu.bjtu.mis.model.ScoreData(currentTerm = "2025-2026-2-2"),
+                ),
+            )
+
+            val repository = ModuleRepository(syncRepository, sessionManager(server))
+            val error = runCatching {
+                repository.historyScores(strategy = ModuleLoadStrategy.CacheOnly)
+            }.exceptionOrNull()
+
+            assertTrue(error is LocalSnapshotMissingException)
+            assertEquals(0, server.requestCount)
+        }
+    }
+
+    @Test
+    fun courseResourcesDefaultDoesNotReturnSpecificCourseSnapshot() = runBlocking {
+        MockWebServer().use { server ->
+            val dao = FakeBjtuMisDao()
+            val syncRepository = SyncRepository(dao, sessionManager(server))
+            syncRepository.saveSnapshot(
+                ModuleKeys.CourseResources,
+                ModuleEnvelope(
+                    module = ModuleKeys.CourseResources,
+                    sourceSystem = "test",
+                    coverage = CoverageLevel.Verified,
+                    sourceParams = buildJsonObject {
+                        put("requested_course_id", "42")
+                        put("course_id", "42")
+                        put("folder_id", "0")
+                    },
+                    data = CourseResourcesData(),
+                ),
+            )
+
+            val repository = ModuleRepository(syncRepository, sessionManager(server))
+            val error = runCatching {
+                repository.courseResources(strategy = ModuleLoadStrategy.CacheOnly)
+            }.exceptionOrNull()
+
+            assertTrue(error is LocalSnapshotMissingException)
             assertEquals(0, server.requestCount)
         }
     }

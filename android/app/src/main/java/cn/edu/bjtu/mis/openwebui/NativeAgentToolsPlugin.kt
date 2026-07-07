@@ -275,11 +275,19 @@ class NativeAgentToolsPlugin : Plugin() {
         val failed = mutableListOf<AttachmentFailure>()
         val homework = handoff.homework
         val homeworkId = homework.homeworkId
+        var importedBytes = 0L
 
-        homework.attachments.forEach { attachment ->
+        for (attachment in homework.attachments) {
             if (homeworkId == null) {
                 failed += AttachmentFailure(attachment.filename, "作业 ID 不可用，无法下载附件")
-                return@forEach
+                continue
+            }
+            if (imported.size >= HOMEWORK_HANDOFF_MAX_AUTO_IMPORT_COUNT) {
+                failed += AttachmentFailure(
+                    attachment.filename,
+                    "超过默认自动导入上限（最多 $HOMEWORK_HANDOFF_MAX_AUTO_IMPORT_COUNT 个或 20 MiB），请按需手动下载。",
+                )
+                continue
             }
 
             runCatching {
@@ -289,7 +297,11 @@ class NativeAgentToolsPlugin : Plugin() {
                     attachmentId = attachment.attachmentId,
                     filename = attachment.filename,
                 )
-                appContainer.agentWorkspaceManager.importFiles(
+                val sizeBytes = downloaded.length().coerceAtLeast(0L)
+                if (importedBytes + sizeBytes > HOMEWORK_HANDOFF_MAX_AUTO_IMPORT_BYTES) {
+                    throw IOException("超过默认自动导入大小上限（20 MiB），请按需手动下载。")
+                }
+                val importedAttachment = appContainer.agentWorkspaceManager.importFiles(
                     taskId = workspaceId,
                     sources = listOf(
                         WorkspaceImportSource(
@@ -299,8 +311,10 @@ class NativeAgentToolsPlugin : Plugin() {
                         )
                     ),
                 ).single()
-            }.onSuccess { attachmentInfo ->
+                sizeBytes to importedAttachment
+            }.onSuccess { (sizeBytes, attachmentInfo) ->
                 imported += attachmentInfo
+                importedBytes += sizeBytes
             }.onFailure { error ->
                 failed += AttachmentFailure(
                     filename = attachment.filename,
@@ -542,6 +556,8 @@ class NativeAgentToolsPlugin : Plugin() {
 
     private companion object {
         const val PREVIEW_MAX_BYTES = 10L * 1024L * 1024L
+        const val HOMEWORK_HANDOFF_MAX_AUTO_IMPORT_COUNT = 5
+        const val HOMEWORK_HANDOFF_MAX_AUTO_IMPORT_BYTES = 20L * 1024L * 1024L
 
         val exposedToNativeToolName = linkedMapOf(
             "agent_file_list" to "file.list",

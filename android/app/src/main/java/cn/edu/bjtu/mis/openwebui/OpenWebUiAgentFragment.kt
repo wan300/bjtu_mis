@@ -18,8 +18,9 @@ import org.json.JSONObject
 class OpenWebUiAgentFragment : Fragment() {
     private var bridge: Bridge? = null
     private var currentPreferredTheme: String? = null
+    private var currentStudentName: String? = null
     private val studentName: String?
-        get() = arguments
+        get() = currentStudentName ?: arguments
             ?.getString(ARG_STUDENT_NAME)
             ?.trim()
             ?.takeIf { it.isNotBlank() }
@@ -153,6 +154,20 @@ class OpenWebUiAgentFragment : Fragment() {
                 null,
             )
         }
+    }
+
+    fun updateStudentName(name: String?) {
+        val nextName = name?.trim()?.takeIf { it.isNotBlank() }
+        if (nextName == currentStudentName) return
+        currentStudentName = nextName
+        bridge?.webView?.evaluateJavascript(
+            """
+            window.dispatchEvent(new CustomEvent('bjtu-mis:student-name-update', {
+              detail: { name: ${JSONObject.quote(nextName.orEmpty())} }
+            }));
+            """.trimIndent(),
+            null,
+        )
     }
 
     private fun openWebUiConfig(): CapConfig =

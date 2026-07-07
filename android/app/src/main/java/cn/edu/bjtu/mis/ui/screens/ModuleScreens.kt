@@ -148,6 +148,7 @@ import cn.edu.bjtu.mis.model.ProfileField
 import cn.edu.bjtu.mis.model.ProfileSection
 import cn.edu.bjtu.mis.model.ScoreData
 import cn.edu.bjtu.mis.model.ScoreDetailData
+import cn.edu.bjtu.mis.model.ScoreDetailField
 import cn.edu.bjtu.mis.model.ScoreDetailTable
 import cn.edu.bjtu.mis.model.ScoreItem
 import cn.edu.bjtu.mis.model.StudentProfileData
@@ -1464,12 +1465,14 @@ fun ScoresScreen(
                     if (history) {
                         KeyValue("教师", score.teacher)
                     }
-                    if (!score.detailPath.isNullOrBlank()) {
-                        OutlinedButton(onClick = { openScoreDetail(score) }) {
-                            Text(score.detail?.takeIf { it.isNotBlank() } ?: "查看分数详情")
-                        }
-                    } else {
+                    ScoreInlineDetailView(score.detailData)
+                    if (score.detailData == null) {
                         KeyValue("详情", score.detail)
+                    }
+                    if (!score.detailPath.isNullOrBlank() && (history || score.detailData == null)) {
+                        OutlinedButton(onClick = { openScoreDetail(score) }) {
+                            Text("查看分数详情")
+                        }
                     }
                 }
             }
@@ -1515,6 +1518,75 @@ fun ScoresScreen(
 }
 
 @Composable
+private fun ScoreInlineDetailView(detail: ScoreDetailData?) {
+    if (detail == null) return
+    val tables = detail.tables.filter { table -> table.headers.isNotEmpty() || table.rows.isNotEmpty() }
+    val extraFields = scoreDetailExtraFields(detail)
+    if (tables.isEmpty() && extraFields.isEmpty()) {
+        detail.rawText?.let { KeyValue("详情", it) }
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        tables.forEach { table -> ScoreDetailInlineTableView(table) }
+        extraFields.forEach { field -> KeyValue(field.label, field.value) }
+    }
+}
+
+@Composable
+private fun ScoreDetailInlineTableView(table: ScoreDetailTable) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            table.title?.takeIf { it.isNotBlank() } ?: "分数构成",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Column(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (table.headers.isNotEmpty()) {
+                ScoreDetailTableRow(table.headers, emphasized = true)
+                HorizontalDivider()
+            }
+            table.rows.forEach { row -> ScoreDetailTableRow(row) }
+        }
+    }
+}
+
+private fun scoreDetailExtraFields(detail: ScoreDetailData): List<ScoreDetailField> {
+    val hasComponentTable = detail.tables.any(::isScoreComponentTable)
+    return detail.fields.filterNot { field ->
+        (hasComponentTable && isScoreComponentLabel(field.label)) ||
+            isScoreComponentField(field.label) ||
+            isScoreSummaryField(field.label)
+    }
+}
+
+private fun isScoreComponentTable(table: ScoreDetailTable): Boolean {
+    val text = (table.headers + table.rows.flatten()).joinToString(" ")
+    return listOf("平时", "期末", "期中", "比例", "占比", "权重").any { text.contains(it) } &&
+        listOf("成绩", "得分", "分数", "比例", "占比", "权重").any { text.contains(it) }
+}
+
+private fun isScoreComponentLabel(label: String): Boolean {
+    val compact = label.replace(Regex("""\s+"""), "")
+    return listOf("平时", "期末", "期中", "实验", "上机", "作业", "课堂", "考勤", "出勤", "小测", "测验", "报告", "论文", "答辩", "实践", "项目")
+        .any { compact.contains(it) }
+}
+
+private fun isScoreComponentField(label: String): Boolean {
+    val compact = label.replace(Regex("""\s+"""), "")
+    return isScoreComponentLabel(label) &&
+        listOf("成绩", "得分", "分数", "比例", "占比", "权重", "比重", "百分比")
+            .any { compact.contains(it) }
+}
+
+private fun isScoreSummaryField(label: String): Boolean {
+    val compact = label.replace(Regex("""\s+"""), "")
+    return listOf("课程", "总评", "最终成绩", "成绩").any { compact == it }
+}
+
+@Composable
 private fun ScoreDetailSheetContent(
     score: ScoreItem,
     state: LoadState<ModuleEnvelope<ScoreDetailData>>?,
@@ -1550,7 +1622,7 @@ private fun ScoreDetailSheetContent(
             }
             is LoadState.Data -> {
                 val detail = state.value.data
-                if (!detail.title.isNullOrBlank()) {
+                if (!detail.title.isNullOrBlank() && detail.title != "详情") {
                     Text(detail.title, style = MaterialTheme.typography.titleMedium)
                 }
                 if (detail.fields.isNotEmpty()) {

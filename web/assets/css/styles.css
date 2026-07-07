@@ -208,6 +208,30 @@ h4 {
   gap: 12px;
 }
 
+.hero__download {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 560px;
+  min-width: min(100%, 520px);
+}
+
+.hero__download-note {
+  max-width: 360px;
+  margin: 0;
+  color: var(--rail-soft);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.hero__download-note a {
+  color: var(--teal);
+  font-weight: 900;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .btn {
   min-height: 46px;
   display: inline-flex;
@@ -624,6 +648,23 @@ h4 {
 .download-panel__hint {
   margin: 12px 0 0;
   font-size: 0.95rem;
+}
+
+.download-panel__mirror {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border-left: 4px solid var(--teal);
+  border-radius: var(--radius);
+  background: rgba(223, 243, 245, 0.58);
+  color: var(--rail-soft);
+  font-size: 0.95rem;
+}
+
+.download-panel__mirror a {
+  color: var(--teal);
+  font-weight: 900;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .download-panel__status {
@@ -1171,6 +1212,16 @@ h4 {
   .subhero__actions,
   .docs-hero__actions {
     display: grid;
+  }
+
+  .hero__download {
+    display: grid;
+    min-width: 0;
+  }
+
+  .hero__download-note {
+    max-width: none;
+    font-size: 0.88rem;
   }
 
   .btn {

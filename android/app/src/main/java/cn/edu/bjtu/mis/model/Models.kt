@@ -92,16 +92,33 @@ data class CourseSelectionCourse(
     val remainingText: String? = null,
     val credit: String? = null,
     val courseType: String? = null,
+    val groupName: String? = null,
     val examType: String? = null,
     val teacher: String? = null,
     val timeLocation: String? = null,
     val note: String? = null,
 )
 
+val DefaultCourseSelectionGroupNames: List<String> = listOf(
+    "\u521b\u65b0\u521b\u4e1a\u7d20\u517b\u7c7b\u8bfe\u7a0b",
+    "\u5de5\u7a0b\u7d20\u517b\u7c7b\u8bfe\u7a0b",
+    "\u8f68\u9053\u4ea4\u901a\u7279\u8272\u7c7b\u8bfe\u7a0b",
+    "\u79d1\u5b66\u7d20\u517b\u7c7b\u8bfe\u7a0b",
+    "\u52b3\u80b2\u7d20\u517b\u7c7b\u8bfe\u7a0b",
+    "\u7f8e\u80b2\u7d20\u517b\u7c7b\u8bfe\u7a0b\uff08\u7f8e\u5b66\u548c\u827a\u672f\u53f2\u8bba\u7c7b\uff09",
+    "\u7f8e\u80b2\u7d20\u517b\u7c7b\u8bfe\u7a0b\uff08\u827a\u672f\u9274\u8d4f\u548c\u8bc4\u8bba\u7c7b\uff09",
+    "\u7f8e\u80b2\u7d20\u517b\u7c7b\u8bfe\u7a0b\uff08\u827a\u672f\u4f53\u9a8c\u548c\u5b9e\u8df5\u7c7b\uff09",
+    "\u4eba\u6587\u7d20\u517b\u7c7b\u8bfe\u7a0b",
+    "\u793e\u4f1a\u7d20\u517b\u7c7b\u8bfe\u7a0b",
+    "\u8eab\u5fc3\u7d20\u517b\u7c7b\u8bfe\u7a0b",
+    "\u4f53\u80b2\u7d20\u517b\u7c7b\u8bfe\u7a0b",
+)
+
 @Serializable
 data class CourseSelectionData(
     val selectedCourses: List<CourseSelectionCourse> = emptyList(),
     val availableCourses: List<CourseSelectionCourse> = emptyList(),
+    val courseGroupNames: List<String> = emptyList(),
     val canSubmit: Boolean = false,
     val submitError: String? = null,
 )
@@ -120,11 +137,16 @@ data class CourseSelectionAttemptResult(
     val message: String? = null,
     val course: CourseSelectionCourse? = null,
     val captchaChallenge: CourseSelectionCaptchaChallenge? = null,
+    val completedCourseKeys: List<String> = emptyList(),
 )
 
+@Serializable
 data class CourseSelectionTarget(
     val key: String,
     val courseName: String,
+    val groupName: String? = null,
+    val courseQuery: String = "",
+    val sectionQuery: String = "",
 )
 
 data class CourseSelectionReplaceRule(
@@ -309,6 +331,7 @@ data class ScoreItem(
     val teacher: String? = null,
     val detail: String? = null,
     val detailPath: String? = null,
+    val detailData: ScoreDetailData? = null,
 )
 
 @Serializable
@@ -1135,6 +1158,7 @@ data class SyncModuleSummary(
     val status: String,
     val coverage: CoverageLevel? = null,
     val items: Int? = null,
+    val durationMs: Long? = null,
     val error: String? = null,
 )
 

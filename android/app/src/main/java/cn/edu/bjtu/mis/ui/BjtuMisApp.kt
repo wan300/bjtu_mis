@@ -142,7 +142,7 @@ private val BottomTabs = listOf(
 fun BjtuMisApp(
     container: AppContainer,
     themeOption: AppThemeOption = AppThemeOption.Default,
-    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
+    initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.CacheFirst,
     requestedRoute: String? = null,
     onRouteHandled: () -> Unit = {},
     onExit: () -> Unit,

@@ -6,6 +6,7 @@ import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.data.network.FileResponse
 import cn.edu.bjtu.mis.data.network.MultipartFilePart
 import cn.edu.bjtu.mis.data.network.TextResponse
+import cn.edu.bjtu.mis.data.perf.PerfTrace
 import cn.edu.bjtu.mis.data.parser.buildCourseResourcesData
 import cn.edu.bjtu.mis.data.parser.buildCourseReplayData
 import cn.edu.bjtu.mis.data.parser.buildHomeworkData
@@ -98,6 +99,51 @@ private data class CourseResourceFetchResult(
     val resources: List<CourseResourceItem>,
 )
 
+internal data class VeSessionContext(
+    val sessionId: String?,
+    val hasAjaxSession: Boolean,
+    val coursePlatformIndexReferer: String,
+    val coursePlatformReferer: String,
+    val savedAtMillis: Long,
+)
+
+internal object VeSessionContextCache {
+    private const val TTL_MILLIS = 10L * 60L * 1000L
+    private var context: VeSessionContext? = null
+
+    @Synchronized
+    fun getFresh(): VeSessionContext? {
+        val current = context ?: return null
+        if (PerfTrace.nowMillis() - current.savedAtMillis > TTL_MILLIS) {
+            context = null
+            return null
+        }
+        return current
+    }
+
+    @Synchronized
+    fun remember(
+        sessionId: String?,
+        hasAjaxSession: Boolean,
+        coursePlatformIndexReferer: String,
+        coursePlatformReferer: String,
+    ) {
+        if (coursePlatformIndexReferer == ProviderConstants.VE_COURSE_PLATFORM_BASE_URL) return
+        context = VeSessionContext(
+            sessionId = sessionId,
+            hasAjaxSession = hasAjaxSession,
+            coursePlatformIndexReferer = coursePlatformIndexReferer,
+            coursePlatformReferer = coursePlatformReferer,
+            savedAtMillis = PerfTrace.nowMillis(),
+        )
+    }
+
+    @Synchronized
+    fun clear() {
+        context = null
+    }
+}
+
 internal fun mergeHomeworkItems(items: Iterable<cn.edu.bjtu.mis.model.HomeworkItem>): List<cn.edu.bjtu.mis.model.HomeworkItem> {
     val dedupedItems = linkedMapOf<String, cn.edu.bjtu.mis.model.HomeworkItem>()
     items.forEach { item ->
@@ -187,7 +233,7 @@ class VeProvider(private val client: BjtuHttpClient) {
                                 val attachments = if (includeAttachments) {
                                     attachmentCache.getOrPut(course.courseId to homeworkId) {
                                         runCatching {
-                                            fetchHomeworkAttachments(homeworkId, course.courseId, teacherId)
+                                            fetchHomeworkAttachmentsWithTrace(homeworkId, course.courseId, teacherId)
                                         }.onFailure {
                                             errors += "homeWorkAttachment:${course.courseId}:$homeworkId:${it.message}"
                                         }.getOrDefault(emptyList())
@@ -288,18 +334,7 @@ class VeProvider(private val client: BjtuHttpClient) {
                             )
                             parseHomeworkList(payload, course, subType).forEach { item ->
                                 val homeworkId = item.homeworkId
-                                val attachments = if (includeAttachments && homeworkId != null) {
-                                    attachmentCache.getOrPut(course.courseId to homeworkId) {
-                                        runCatching {
-                                            fetchHomeworkAttachments(homeworkId, course.courseId, teacherId)
-                                        }.onFailure {
-                                            errors += "homeWorkAttachment:${course.courseId}:$homeworkId:${it.message}"
-                                        }.getOrDefault(emptyList())
-                                    }
-                                } else {
-                                    emptyList()
-                                }
-                                items = mergeHomeworkItems(items + item.copy(attachments = attachments))
+                                items = mergeHomeworkItems(items + item.copy(attachments = emptyList()))
                                 emit(
                                     ProgressiveModuleState(
                                         envelope = currentEnvelope(),
@@ -309,6 +344,27 @@ class VeProvider(private val client: BjtuHttpClient) {
                                         errors = errors.toList(),
                                     )
                                 )
+                                if (includeAttachments && homeworkId != null) {
+                                    val attachments = attachmentCache.getOrPut(course.courseId to homeworkId) {
+                                        runCatching {
+                                            fetchHomeworkAttachmentsWithTrace(homeworkId, course.courseId, teacherId)
+                                        }.onFailure {
+                                            errors += "homeWorkAttachment:${course.courseId}:$homeworkId:${it.message}"
+                                        }.getOrDefault(emptyList())
+                                    }
+                                    if (attachments.isNotEmpty()) {
+                                        items = mergeHomeworkItems(items + item.copy(attachments = attachments))
+                                        emit(
+                                            ProgressiveModuleState(
+                                                envelope = currentEnvelope(),
+                                                loading = true,
+                                                loadedCount = items.size,
+                                                totalCount = null,
+                                                errors = errors.toList(),
+                                            )
+                                        )
+                                    }
+                                }
                             }
                         }.onFailure { errors += "homeWork:${course.courseId}:$subType:${it.message}" }
                     }
@@ -489,6 +545,7 @@ class VeProvider(private val client: BjtuHttpClient) {
                 sourceParams = buildJsonObject {
                     put("fallback_reason", "missing_current_term")
                     put("category_key", selectedCategoryKey)
+                    put("requested_course_id", courseId?.trim().orEmpty())
                 },
                 data = buildCourseResourcesData(
                     null,
@@ -519,6 +576,7 @@ class VeProvider(private val client: BjtuHttpClient) {
         val normalizedFolder = folderId.ifBlank { "0" }
         val sourceParams = buildJsonObject {
             put("term", currentTerm)
+            put("requested_course_id", requestedCourseId)
             put("course_id", requestedCourseId.ifBlank { selected?.courseId?.toString().orEmpty() })
             put("folder_id", normalizedFolder)
             put("search", search.orEmpty())
@@ -693,6 +751,7 @@ class VeProvider(private val client: BjtuHttpClient) {
                 sourceParams = buildJsonObject {
                     put("fallback_reason", "missing_current_term")
                     put("category_key", selectedCategoryKey)
+                    put("requested_course_id", courseId?.trim().orEmpty())
                 },
                 data = buildCourseResourcesData(
                     null,
@@ -725,6 +784,7 @@ class VeProvider(private val client: BjtuHttpClient) {
         val normalizedFolder = folderId.ifBlank { "0" }
         val sourceParams = buildJsonObject {
             put("term", currentTerm)
+            put("requested_course_id", requestedCourseId)
             put("course_id", requestedCourseId.ifBlank { selected?.courseId?.toString().orEmpty() })
             put("folder_id", normalizedFolder)
             put("search", search.orEmpty())
@@ -824,7 +884,7 @@ class VeProvider(private val client: BjtuHttpClient) {
         category: CourseResourceCategoryConfig,
         folderId: String,
         search: String?,
-    ): CourseResourceFetchResult {
+    ): CourseResourceFetchResult = PerfTrace.measureSuspend("VE.courseResources.category.${category.key}") {
         val context = openCourseResourcesContext(course, category.courseToPage)
         val baseParams = mapOf(
             "courseId" to context["courseId"],
@@ -851,7 +911,7 @@ class VeProvider(private val client: BjtuHttpClient) {
             category.key,
             category.label,
         )
-        return CourseResourceFetchResult(
+        CourseResourceFetchResult(
             tree = parseCourseResourceTree(treePayload, category.key, category.label),
             folders = folders,
             resources = resources,
@@ -955,7 +1015,10 @@ class VeProvider(private val client: BjtuHttpClient) {
                 module = "course_replay",
                 sourceSystem = "ve",
                 coverage = CoverageLevel.Provisional,
-                sourceParams = buildJsonObject { put("fallback_reason", "missing_current_term") },
+                sourceParams = buildJsonObject {
+                    put("fallback_reason", "missing_current_term")
+                    put("requested_course_id", courseId?.trim().orEmpty())
+                },
                 data = buildCourseReplayData(null, emptyList(), null, null, null, emptyList()),
             )
         }
@@ -969,6 +1032,7 @@ class VeProvider(private val client: BjtuHttpClient) {
         val selected = selectCourse(courses, courseId)
         val sourceParams = buildJsonObject {
             put("term", currentTerm)
+            put("requested_course_id", courseId?.trim().orEmpty())
             put("course_id", courseId?.trim().orEmpty().ifBlank { selected?.courseId?.toString().orEmpty() })
         }
         if (selected == null) {
@@ -1016,7 +1080,10 @@ class VeProvider(private val client: BjtuHttpClient) {
                 module = "course_replay",
                 sourceSystem = "ve",
                 coverage = CoverageLevel.Provisional,
-                sourceParams = buildJsonObject { put("fallback_reason", "missing_current_term") },
+                sourceParams = buildJsonObject {
+                    put("fallback_reason", "missing_current_term")
+                    put("requested_course_id", courseId?.trim().orEmpty())
+                },
                 data = buildCourseReplayData(null, emptyList(), null, null, null, emptyList()),
             )
             emit(ProgressiveModuleState(envelope = envelope, loading = false, complete = true))
@@ -1032,6 +1099,7 @@ class VeProvider(private val client: BjtuHttpClient) {
         val selected = selectCourse(courses, courseId)
         val sourceParams = buildJsonObject {
             put("term", currentTerm)
+            put("requested_course_id", courseId?.trim().orEmpty())
             put("course_id", courseId?.trim().orEmpty().ifBlank { selected?.courseId?.toString().orEmpty() })
         }
 
@@ -1214,7 +1282,11 @@ class VeProvider(private val client: BjtuHttpClient) {
 
     private suspend fun ensureStrictFlow(reason: String) {
         if (strictFlowReady && coursePlatformIndexReferer != ProviderConstants.VE_COURSE_PLATFORM_BASE_URL) return
-        val ok = bootstrapVeSession()
+        if (restoreCoursePlatformContextFromCache()) {
+            PerfTrace.mark("VE.bootstrap", "cache_hit reason=$reason")
+            return
+        }
+        val ok = PerfTrace.measureSuspend("VE.bootstrap") { bootstrapVeSession() }
         if (!ok) {
             val detail = lastBootstrapError?.let { "（$it）" }.orEmpty()
             throw IllegalStateException("VE 会话初始化失败：$reason$detail")
@@ -1222,7 +1294,7 @@ class VeProvider(private val client: BjtuHttpClient) {
     }
 
     private suspend fun bootstrapVeSession(): Boolean {
-        resetCoursePlatformContext()
+        resetCoursePlatformContext(clearSharedCache = false)
         lastBootstrapError = null
         return runCatching {
             strictFlowStep = "mis_module_104_entered"
@@ -1256,22 +1328,46 @@ class VeProvider(private val client: BjtuHttpClient) {
                 throw IllegalStateException("course platform index referer not initialized")
             }
             strictFlowReady = true
+            rememberCoursePlatformContextInCache()
             true
         }.getOrElse { error ->
             strictFlowReady = false
             lastBootstrapError = "step=$strictFlowStep ${error.message.orEmpty()}".trim()
+            VeSessionContextCache.clear()
             if (error is SessionExpiredException) throw error
             false
         }
     }
 
-    private fun resetCoursePlatformContext() {
+    private fun restoreCoursePlatformContextFromCache(): Boolean {
+        val context = VeSessionContextCache.getFresh() ?: return false
+        sessionId = context.sessionId
+        hasAjaxSession = context.hasAjaxSession && !context.sessionId.isNullOrBlank()
+        coursePlatformIndexReferer = context.coursePlatformIndexReferer
+        coursePlatformReferer = context.coursePlatformReferer
+        strictFlowReady = true
+        strictFlowStep = "cache"
+        lastBootstrapError = null
+        return true
+    }
+
+    private fun rememberCoursePlatformContextInCache() {
+        VeSessionContextCache.remember(
+            sessionId = sessionId,
+            hasAjaxSession = hasAjaxSession,
+            coursePlatformIndexReferer = coursePlatformIndexReferer,
+            coursePlatformReferer = coursePlatformReferer,
+        )
+    }
+
+    private fun resetCoursePlatformContext(clearSharedCache: Boolean = true) {
         sessionId = null
         hasAjaxSession = false
         coursePlatformIndexReferer = ProviderConstants.VE_COURSE_PLATFORM_BASE_URL
         coursePlatformReferer = ProviderConstants.VE_COURSE_PLATFORM_BASE_URL
         strictFlowReady = false
         strictFlowStep = "init"
+        if (clearSharedCache) VeSessionContextCache.clear()
     }
 
     private suspend fun getTextWithRetry(
@@ -1307,6 +1403,7 @@ class VeProvider(private val client: BjtuHttpClient) {
         payload.text("sessionId")?.let {
             sessionId = it
             hasAjaxSession = true
+            if (strictFlowReady) rememberCoursePlatformContextInCache()
         }
     }
 
@@ -1346,6 +1443,15 @@ class VeProvider(private val client: BjtuHttpClient) {
         )
         return parseHomeworkAttachments(payload)
     }
+
+    private suspend fun fetchHomeworkAttachmentsWithTrace(
+        homeworkId: Int,
+        courseId: Int,
+        teacherId: String,
+    ): List<HomeworkAttachment> = PerfTrace.measureSuspend("VE.homework.attachments") {
+        fetchHomeworkAttachments(homeworkId, courseId, teacherId)
+    }
+
     private suspend fun openCourseResourcesContext(course: CourseSummary, courseToPage: String): Map<String, String> {
         val coursePage = client.getText(
             ProviderConstants.VE_COURSE_PLATFORM_BASE_URL,
@@ -1459,6 +1565,7 @@ class VeProvider(private val client: BjtuHttpClient) {
                     ProviderConstants.VE_BASE_URL + path,
                     params = params,
                     headers = jsonHeaders(path, params),
+                    timeoutMillis = BjtuHttpClient.LIST_REQUEST_TIMEOUT_MILLIS,
                 )
                 rememberSession(response)
                 val payload = parseJsonObjectResponse(response, path)
@@ -1502,6 +1609,7 @@ class VeProvider(private val client: BjtuHttpClient) {
                 "X-Requested-With" to "XMLHttpRequest",
                 "Referer" to referer,
             ) + sessionHeader(),
+            timeoutMillis = BjtuHttpClient.LIST_REQUEST_TIMEOUT_MILLIS,
         )
         rememberSession(response)
         val payload = parseJsonObjectResponse(response, path)
@@ -1634,6 +1742,7 @@ class VeProvider(private val client: BjtuHttpClient) {
             if (url.contains("method=toCoursePlatformIndex")) coursePlatformIndexReferer = url
             coursePlatformReferer = url
         }
+        if (strictFlowReady) rememberCoursePlatformContextInCache()
     }
 
     private fun extractSessionId(value: String): String? =

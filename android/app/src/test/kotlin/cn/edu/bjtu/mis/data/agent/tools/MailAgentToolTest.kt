@@ -197,6 +197,88 @@ class MailAgentToolTest {
     }
 
     @Test
+    fun digestUsesReducedDefaultScanAndBodyLimits() = runBlocking {
+        val gateway = FakeMailGateway()
+        gateway.messages = (1..60).map { index ->
+            MailMessageSummary(
+                messageId = "m-$index",
+                folderId = "1",
+                subject = "Message $index",
+                read = false,
+                receivedAt = "2026-05-16T12:00:00Z",
+            )
+        }
+        gateway.messages.forEach { summary ->
+            gateway.details[summary.messageId] = MailMessageDetail(
+                messageId = summary.messageId,
+                folderId = "1",
+                subject = summary.subject,
+                htmlContent = "<p>Body ${summary.messageId}</p>",
+            )
+        }
+        val digest = MailAgentTool(gateway, fixedClock()).tools().single { it.name == "mail.digest_context" }
+
+        val output = digest.execute("", buildJsonObject { }).output
+
+        assertEquals(150, output["scan_limit"]!!.jsonPrimitive.int)
+        assertEquals(8, output["read_body_count"]!!.jsonPrimitive.int)
+    }
+
+    @Test
+    fun digestAllowsExplicitlyExpandedScanAndBodyLimits() = runBlocking {
+        val gateway = FakeMailGateway()
+        gateway.messages = (1..25).map { index ->
+            MailMessageSummary(
+                messageId = "m-$index",
+                folderId = "1",
+                subject = "Message $index",
+                read = false,
+                receivedAt = "2026-05-16T12:00:00Z",
+            )
+        }
+        gateway.messages.forEach { summary ->
+            gateway.details[summary.messageId] = MailMessageDetail(
+                messageId = summary.messageId,
+                folderId = "1",
+                subject = summary.subject,
+                htmlContent = "<p>Body ${summary.messageId}</p>",
+            )
+        }
+        val digest = MailAgentTool(gateway, fixedClock()).tools().single { it.name == "mail.digest_context" }
+
+        val output = digest.execute(
+            "",
+            buildJsonObject {
+                put("scan_limit", 500)
+                put("max_messages_with_body", 20)
+            },
+        ).output
+
+        assertEquals(500, output["scan_limit"]!!.jsonPrimitive.int)
+        assertEquals(20, output["read_body_count"]!!.jsonPrimitive.int)
+    }
+
+    @Test
+    fun digestReportsTruncatedWhenDefaultScanLimitIsReached() = runBlocking {
+        val gateway = FakeMailGateway()
+        gateway.messages = (1..200).map { index ->
+            MailMessageSummary(
+                messageId = "future-$index",
+                folderId = "1",
+                subject = "Future $index",
+                receivedAt = "2026-06-01T12:00:00Z",
+            )
+        }
+        val digest = MailAgentTool(gateway, fixedClock()).tools().single { it.name == "mail.digest_context" }
+
+        val output = digest.execute("", buildJsonObject { }).output
+
+        assertEquals(150, output["scanned_count"]!!.jsonPrimitive.int)
+        assertTrue(output["scan_truncated"]!!.jsonPrimitive.boolean)
+        assertEquals(0, output["items"]!!.jsonArray.size)
+    }
+
+    @Test
     fun saveDraftDoesNotSendAndSendReturnsSentResult() = runBlocking {
         val gateway = FakeMailGateway()
         val tools = MailAgentTool(gateway, fixedClock()).tools()
