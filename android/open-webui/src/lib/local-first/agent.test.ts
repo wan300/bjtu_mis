@@ -395,6 +395,117 @@ describe('requestLocalAgentChatCompletion', () => {
 		expect(content).toContain('The result is 4.');
 	});
 
+	it('keeps a workspace Agent loop running past the web search tool budget', async () => {
+		vi.mocked(supportsNativeWebSearch).mockReturnValue(true);
+		vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+		vi.mocked(listNativeAgentTools).mockResolvedValue([
+			{
+				type: 'function',
+				function: {
+					name: 'agent_file_read',
+					description: 'Read a workspace file.',
+					parameters: {
+						type: 'object',
+						properties: { path: { type: 'string' } },
+						required: ['path'],
+						additionalProperties: false
+					}
+				}
+			},
+			{
+				type: 'function',
+				function: {
+					name: 'agent_file_write',
+					description: 'Write a workspace file.',
+					parameters: {
+						type: 'object',
+						properties: {
+							path: { type: 'string' },
+							content: { type: 'string' }
+						},
+						required: ['path', 'content'],
+						additionalProperties: false
+					}
+				}
+			}
+		]);
+		vi.mocked(executeNativeAgentTool).mockImplementation(async ({ toolName, arguments: args }) => ({
+			output:
+				toolName === 'agent_file_write'
+					? { ok: true, path: args.path, size: String(args.content ?? '').length }
+					: { ok: true, path: args.path, content: 'attachment text' }
+		}));
+
+		const requests: Record<string, any>[] = [];
+		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+			requests.push(providerBody);
+			if (requests.length === 1) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content: null,
+						tool_calls: Array.from({ length: 6 }, (_, index) => ({
+							id: `call_read_${index}`,
+							type: 'function',
+							function: {
+								name: 'agent_file_read',
+								arguments: JSON.stringify({ path: `work/attachment-${index}.txt` })
+							}
+						}))
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+			if (requests.length === 2) {
+				return [
+					providerJsonResponse({
+						role: 'assistant',
+						content: null,
+						tool_calls: [
+							{
+								id: 'call_write',
+								type: 'function',
+								function: {
+									name: 'agent_file_write',
+									arguments: JSON.stringify({
+										path: 'output/answer.md',
+										content: 'Complete answer'
+									})
+								}
+							}
+						]
+					}),
+					new AbortController()
+				] as [Response, AbortController];
+			}
+
+			return [
+				providerJsonResponse({ role: 'assistant', content: 'Deliverable created.' }),
+				new AbortController()
+			] as [Response, AbortController];
+		});
+
+		const [res] = await requestLocalAgentChatCompletion({
+			body: reviewDisabledBody({
+				features: { web_search: true },
+				params: { agent_workspace_id: 'workspace-1', function_calling: 'native' }
+			}),
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+		const final = await res?.json();
+
+		expect(requestProvider).toHaveBeenCalledTimes(3);
+		expect(executeNativeAgentTool).toHaveBeenCalledTimes(7);
+		expect(executeNativeAgentTool).toHaveBeenCalledWith({
+			workspaceId: 'workspace-1',
+			toolName: 'agent_file_write',
+			arguments: { path: 'output/answer.md', content: 'Complete answer' }
+		});
+		expect(searchWeb).not.toHaveBeenCalled();
+		expect(final.choices[0].message.content).toContain('Deliverable created.');
+	});
+
 	it('passes provider reasoning back with assistant tool-call turns', async () => {
 		const requests: Record<string, any>[] = [];
 		const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
@@ -687,6 +798,28 @@ describe('requestLocalAgentChatCompletion', () => {
 
 		expect(requestProvider).toHaveBeenCalledTimes(1);
 		expect(final.choices[0].message.content).toContain('Direct final answer.');
+	});
+
+	it('does not meta-review clean workspace Agent final answers', async () => {
+		const requestProvider = vi.fn(async () => [
+			providerJsonResponse({
+				role: 'assistant',
+				content:
+					'作业已完成，结果位于 `output/results.zip`。\n\n```makefile\nall: main\n```\n\n不会自动提交作业。'
+			}),
+			new AbortController()
+		] as [Response, AbortController]);
+
+		const [res] = await requestLocalAgentChatCompletion({
+			body: { params: { agent_workspace_id: 'workspace-1' } },
+			providerBody: baseProviderBody(),
+			requestProvider
+		});
+		const final = await res?.json();
+
+		expect(requestProvider).toHaveBeenCalledTimes(1);
+		expect(final.choices[0].message.content).toContain('output/results.zip');
+		expect(final.choices[0].message.content).not.toContain('internal tool protocol text');
 	});
 
 	it('repairs final answers rejected by the default local Agent review', async () => {

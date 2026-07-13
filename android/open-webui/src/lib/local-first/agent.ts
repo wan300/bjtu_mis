@@ -1528,6 +1528,7 @@ export const requestLocalAgentChatCompletion = async ({
 		typeof body?.params?.agent_workspace_id === 'string' && body.params.agent_workspace_id.trim()
 			? body.params.agent_workspace_id.trim()
 			: null;
+	const webSearchFallbackEnabled = webSearchEnabled && !agentWorkspaceId;
 	const context: LocalAgentRunContext = {
 		webSearchEnabled,
 		webSearchSettings: normalizeLocalWebSearchSettings(localSettings?.localWebSearch ?? {}),
@@ -1542,10 +1543,10 @@ export const requestLocalAgentChatCompletion = async ({
 		webSearchUnavailable: false,
 		agentWorkspaceId
 	};
-	const maxModelRounds = webSearchEnabled
+	const maxModelRounds = webSearchFallbackEnabled
 		? DEFAULT_LOCAL_WEB_SEARCH_MAX_MODEL_ROUNDS
 		: maxRetries + 1;
-	const maxToolCalls = webSearchEnabled
+	const maxToolCalls = webSearchFallbackEnabled
 		? DEFAULT_LOCAL_WEB_SEARCH_MAX_TOOL_CALLS
 		: Number.POSITIVE_INFINITY;
 	const tools = (await getAvailableLocalTools({
@@ -1590,7 +1591,11 @@ export const requestLocalAgentChatCompletion = async ({
 		void releaseKeepAlive();
 	});
 
-	const reviewFinalAnswers = shouldReviewLocalAgentFinal(body);
+	// Workspace Agent answers already pass the deterministic protocol-leak gate above.
+	// Do not ask the same OpenAI-compatible model to meta-review those answers: in real
+	// homework runs it can reject ordinary file paths and code snippets as tool protocol,
+	// replacing an otherwise valid packaged result with a generic error.
+	const reviewFinalAnswers = shouldReviewLocalAgentFinal(body) && !agentWorkspaceId;
 	let repairAttempts = 0;
 	const enqueueRepairRetry = (reason: string) => {
 		if (repairAttempts >= 1) {
@@ -1698,7 +1703,7 @@ export const requestLocalAgentChatCompletion = async ({
 					res = providerResponse;
 					activeController = requestController;
 				} catch (error) {
-					if (webSearchEnabled) {
+					if (webSearchFallbackEnabled) {
 						const fallbackDecision = await prepareFinalTurn(await requestWebSearchFallbackTurn());
 						if (fallbackDecision.kind === 'retry') {
 							continue;
@@ -1720,7 +1725,7 @@ export const requestLocalAgentChatCompletion = async ({
 					try {
 						turn = await parseProviderTurn(res, Boolean(providerBody.stream));
 					} catch (error) {
-						if (webSearchEnabled) {
+						if (webSearchFallbackEnabled) {
 							const fallbackDecision = await prepareFinalTurn(await requestWebSearchFallbackTurn());
 							if (fallbackDecision.kind === 'retry') {
 								continue;
@@ -1745,7 +1750,7 @@ export const requestLocalAgentChatCompletion = async ({
 				}
 
 				if (decision.kind === 'final') {
-					if (webSearchEnabled && iteration === 0 && context.sources.length === 0) {
+					if (webSearchFallbackEnabled && iteration === 0 && context.sources.length === 0) {
 						const fallbackDecision = await prepareFinalTurn(await requestWebSearchFallbackTurn());
 						if (fallbackDecision.kind === 'retry') {
 							continue;
@@ -1762,7 +1767,7 @@ export const requestLocalAgentChatCompletion = async ({
 				turn = decision.kind === 'tool_calls' ? decision.turn : turn;
 				context.toolCallCount += turn.toolCalls.length;
 				if (context.toolCallCount > maxToolCalls || iteration >= maxModelRounds - 1) {
-					if (webSearchEnabled) {
+					if (webSearchFallbackEnabled) {
 						context.forceRagFallback = true;
 						const fallbackDecision = await prepareFinalTurn(await requestWebSearchFallbackTurn());
 						if (fallbackDecision.kind === 'retry') {
@@ -1818,7 +1823,7 @@ export const requestLocalAgentChatCompletion = async ({
 
 				messages.push(...toolMessages);
 
-				if (context.forceRagFallback) {
+				if (webSearchFallbackEnabled && context.forceRagFallback) {
 					const fallbackDecision = await prepareFinalTurn(await requestWebSearchFallbackTurn());
 					if (fallbackDecision.kind === 'retry') {
 						continue;
@@ -1832,7 +1837,7 @@ export const requestLocalAgentChatCompletion = async ({
 				}
 			}
 
-			if (webSearchEnabled) {
+			if (webSearchFallbackEnabled) {
 				const fallbackDecision = await prepareFinalTurn(await requestWebSearchFallbackTurn());
 				if (fallbackDecision.kind === 'final') {
 					return fallbackDecision.turn;

@@ -26,7 +26,8 @@ const pypiPackages = ['black', 'pathspec', 'mypy_extensions', 'pytokens'];
 
 import { loadPyodide } from 'pyodide';
 import { setGlobalDispatcher, ProxyAgent } from 'undici';
-import { writeFile, readFile, copyFile, readdir, rmdir, access } from 'fs/promises';
+import { writeFile, readFile, copyFile, readdir, rm, access, mkdir } from 'fs/promises';
+import { upsertLocalWheelPackage } from './pyodide-lock-utils.js';
 
 /**
  * Loading network proxy configurations from the environment variables.
@@ -71,21 +72,6 @@ async function downloadPackages() {
 		return;
 	}
 
-	const packageJson = JSON.parse(await readFile('package.json'));
-	const pyodideVersion = packageJson.dependencies.pyodide.replace('^', '');
-
-	try {
-		const pyodidePackageJson = JSON.parse(await readFile('static/pyodide/package.json'));
-		const pyodidePackageVersion = pyodidePackageJson.version.replace('^', '');
-
-		if (pyodideVersion !== pyodidePackageVersion) {
-			console.log('Pyodide version mismatch, removing static/pyodide directory');
-			await rmdir('static/pyodide', { recursive: true });
-		}
-	} catch (err) {
-		console.log('Pyodide package not found, proceeding with download.', err);
-	}
-
 	try {
 		console.log('Loading micropip package');
 		await pyodide.loadPackage('micropip');
@@ -114,6 +100,29 @@ async function downloadPackages() {
 	} catch (err) {
 		console.error('Failed to load or install micropip:', err);
 	}
+}
+
+async function preparePyodideCache() {
+	const installedPackage = JSON.parse(await readFile('node_modules/pyodide/package.json'));
+	const installedVersion = installedPackage.version;
+	let cachedVersion = null;
+
+	try {
+		const cachedPackage = JSON.parse(await readFile('static/pyodide/package.json'));
+		cachedVersion = cachedPackage.version;
+	} catch {
+		// A missing or incomplete cache is rebuilt from the installed package below.
+	}
+
+	if (cachedVersion && cachedVersion !== installedVersion) {
+		console.log(
+			`Pyodide version mismatch (${cachedVersion} != ${installedVersion}), removing cache`
+		);
+		await rm('static/pyodide', { recursive: true, force: true });
+	}
+
+	await mkdir('static/pyodide', { recursive: true });
+	await copyPyodide();
 }
 
 async function copyPyodide() {
@@ -174,21 +183,15 @@ async function downloadPyPIWheels() {
 			console.log(`  Saved: ${dest} (${buffer.length} bytes)`);
 		}
 
-		// Inject into pyodide-lock.json so micropip resolves locally
-		const normalizedName = pkg.replace(/-/g, '_');
-		if (!lockData.packages[normalizedName]) {
-			lockData.packages[normalizedName] = {
-				name: normalizedName,
-				version: version,
-				file_name: wheel.filename,
-				install_dir: 'site',
-				sha256: wheel.digests?.sha256 || '',
-				package_type: 'package',
-				imports: [normalizedName],
-				depends: []
-			};
-			console.log(`  Added ${normalizedName}==${version} to pyodide-lock.json`);
-		}
+		// micropip.freeze() may already contain this package with a remote PyPI URL.
+		// Keep its dependency metadata, but always point the lock entry at the local wheel.
+		const packageKey = upsertLocalWheelPackage(lockData.packages, {
+			requestedName: pkg,
+			version,
+			fileName: wheel.filename,
+			sha256: wheel.digests?.sha256 || ''
+		});
+		console.log(`  Updated ${packageKey}==${version} to use the local wheel`);
 	}
 
 	await writeFile(lockPath, JSON.stringify(lockData, null, 2));
@@ -196,6 +199,6 @@ async function downloadPyPIWheels() {
 }
 
 initNetworkProxyFromEnv();
+await preparePyodideCache();
 await downloadPackages();
-await copyPyodide();
 await downloadPyPIWheels();
