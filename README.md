@@ -93,6 +93,7 @@ npm run test:frontend -- --run
 ## 说明
 
 - Android 工程位于 `android/`。
+- `web/` 静态站点的生产部署布局、发布步骤和回滚前置条件见 `deploy/README.md`。
 - 项目原则以 `.specify/memory/constitution.md` 为权威来源；`AGENTS.md` 和 `PLANS.md` 提供代理执行细则与 ExecPlan 模板。
 - 本地 SDK 配置文件 `android/local.properties` 不应提交。
 - Open WebUI 构建产物、Android 构建产物、APK/AAB、Room schema 和本地缓存均不应提交。
