@@ -29,6 +29,7 @@
         <nav class="site-nav" aria-label="主导航">
           <a href="index.html#features">特色</a>
           <a href="index.html#modules">模块</a>
+          <a href="plugins/index.html">插件大厅</a>
           <a href="developers.html">开发者文档</a>
           <a href="index.html#download">下载</a>
           <a data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases/latest" target="_blank" rel="noreferrer">GitHub</a>
@@ -168,7 +169,7 @@
             <h2>Manifest</h2>
             <p><code>bjtu-service.json</code> 使用 snake_case。所有字段都必须存在，权限可为空数组。</p>
             <pre><code>{
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "bjtu.demo",
   "name": "Demo Service",
   "description": "A demo BJTU MIS service.",
@@ -177,10 +178,12 @@
   "icon": "icon.svg",
   "author": "Your Name",
   "permissions": {
-    "required": ["identity.profile.read"],
+    "required": ["identity.profile.read", "app.configuration.read"],
     "optional": ["academic.timetable.read"]
   },
-  "allowed_origins": ["https://api.example.com"]
+  "allowed_origins": ["https://api.example.com"],
+  "marketplace": { "category": "academic", "tags": ["课表", "示例"], "license": "MIT" },
+  "configuration": [{ "key": "API_TOKEN", "label": "API Token", "description": "第三方 API 的访问令牌", "type": "secret", "required": true }]
 }</code></pre>
             <div class="docs-table-wrap">
               <table class="docs-table">
@@ -193,7 +196,7 @@
                 <tbody>
                   <tr>
                     <td><code>schema_version</code></td>
-                    <td>当前必须为 <code>1</code>。</td>
+                    <td>高级直链兼容 <code>1</code>；投稿插件大厅必须为 <code>2</code>，且版本号使用 SemVer。</td>
                   </tr>
                   <tr>
                     <td><code>id</code></td>
@@ -219,6 +222,8 @@
                     <td><code>allowed_origins</code></td>
                     <td>只能填写 HTTP/HTTPS origin，例如 <code>https://api.example.com</code> 或 <code>http://127.0.0.1:8080</code>，不能带路径、查询、片段或用户名。声明的 origin 是受信任执行和联网来源，页面或 iframe 可调用已授权接口；<code>app.http_request</code> 的 <code>url</code> origin 也必须在该列表中。</td>
                   </tr>
+                  <tr><td><code>marketplace</code></td><td>v2 必填。分类为学业、校园、信息、效率、助手或其他；最多 5 个标签；许可证只展示。</td></tr>
+                  <tr><td><code>configuration</code></td><td>v2 最多 32 项。键使用大写字母、数字和下划线；类型为 text、secret、url、number、boolean、select。声明后必须把 <code>app.configuration.read</code> 放入必选权限。</td></tr>
                 </tbody>
               </table>
             </div>
@@ -238,6 +243,7 @@
                 </thead>
                 <tbody>
                   <tr><td><code>identity.profile.read</code></td><td>读取姓名、学号、学院、专业、邮箱等个人资料。</td></tr>
+                  <tr><td><code>app.configuration.read</code></td><td>仅从插件本地 sandbox origin 读取该插件声明的本机加密配置；远端页面不能读取。</td></tr>
                   <tr><td><code>identity.credentials.read</code></td><td>读取首次登录 BJTU MIS 时保存的登录名和明文密码。服务启用后，调用对应接口时宿主会弹出单次确认。</td></tr>
                   <tr><td><code>academic.timetable.read</code></td><td>读取当前课表和用户自定义课程。</td></tr>
                   <tr><td><code>academic.user_courses.write</code></td><td>新增、修改或删除用户手动创建的课程。</td></tr>
@@ -348,6 +354,7 @@ const remote = await window.BjtuService.invoke('app.http_request', {
                   <tr><td><code>mail.list_messages</code></td><td><code>mail.messages.read</code></td><td>可选 <code>folder_id</code> string，默认 <code>1</code>、<code>start</code> int，默认 <code>0</code>、<code>limit</code> int，默认 <code>20</code>，会限制在 1-100。</td><td><code>ModuleEnvelope&lt;MailMessagesData&gt;</code></td></tr>
                   <tr><td><code>mail.get_message</code></td><td><code>mail.message_detail.read</code></td><td><code>message_id</code> string 必填；可选 <code>mboxa</code> string。</td><td><code>ModuleEnvelope&lt;MailMessageDetail&gt;</code></td></tr>
                   <tr><td><code>mail.send</code></td><td><code>mail.send</code></td><td>可选 <code>compose_id</code> string、<code>account</code> string、<code>to</code> string[]、<code>cc</code> string[]、<code>bcc</code> string[]、<code>subject</code> string、<code>content</code> string、<code>body</code> string 兼容别名、<code>html_content</code> string、<code>is_html</code> boolean、<code>save_sent_copy</code> boolean，默认 <code>true</code>、<code>request_read_receipt</code> boolean，默认 <code>false</code>、<code>schedule_date</code> string、<code>show_one_rcpt</code> boolean，默认 <code>false</code>、<code>forbid_download</code> boolean，默认 <code>false</code>、<code>mboxa</code> string。当前不接受第三方附件列表。</td><td><code>MailComposeResponse</code></td></tr>
+                  <tr><td><code>app.get_configuration</code></td><td><code>app.configuration.read</code></td><td><code>key</code> string 必填；只允许插件本地 sandbox origin 读取已声明配置。</td><td>string</td></tr>
                   <tr><td><code>app.http_request</code></td><td>无</td><td><code>url</code> string 必填；可选 <code>method</code> <code>"GET" | "POST" | "PUT" | "DELETE"</code>，默认 <code>GET</code>、<code>data</code> JSON、<code>headers</code> object。</td><td><code>HttpBridgeResponse</code></td></tr>
                   <tr><td><code>app.close_service</code></td><td>无</td><td>无。</td><td><code>{}</code>，随后关闭当前第三方服务并返回服务列表。</td></tr>
                 </tbody>

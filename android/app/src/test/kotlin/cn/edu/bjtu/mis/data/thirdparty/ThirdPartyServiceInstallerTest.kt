@@ -140,6 +140,23 @@ class ThirdPartyServiceInstallerTest {
     }
 
     @Test
+    fun rejectsZipWithTooManyDirectoryEntries() {
+        val root = temp.newFolder("services")
+        val zip = directoryFloodZip(1001)
+
+        assertThrows(ThirdPartyServiceException::class.java) {
+            runBlocking {
+                installer(root).installPackageFromZip(
+                    source = GitHubRepositoryRef("alice", "demo", "https://github.com/alice/demo"),
+                    defaultBranch = "main",
+                    commitSha = "abcdef1",
+                    zipFile = zip,
+                )
+            }
+        }
+    }
+
+    @Test
     fun rejectsMissingDistEntrypoint() {
         val root = temp.newFolder("services")
         val zip = serviceZip(
@@ -246,6 +263,17 @@ class ThirdPartyServiceInstallerTest {
             entries.forEach { (name, content) ->
                 zip.putNextEntry(ZipEntry(name))
                 zip.write(content.toByteArray())
+                zip.closeEntry()
+            }
+        }
+        return file
+    }
+
+    private fun directoryFloodZip(entryCount: Int): File {
+        val file = temp.newFile("directory-flood-${System.nanoTime()}.zip")
+        ZipOutputStream(file.outputStream()).use { zip ->
+            repeat(entryCount) { index ->
+                zip.putNextEntry(ZipEntry("directory-$index/"))
                 zip.closeEntry()
             }
         }

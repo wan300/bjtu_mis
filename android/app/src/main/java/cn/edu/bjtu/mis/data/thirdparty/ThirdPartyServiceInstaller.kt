@@ -10,13 +10,14 @@ import okhttp3.Request
 import java.io.File
 import java.io.IOException
 import java.net.URI
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipInputStream
 
 private const val MaxDownloadBytes = 25L * 1024L * 1024L
 private const val MaxExtractedBytes = 50L * 1024L * 1024L
-private const val MaxExtractedFiles = 1000
+private const val MaxExtractedEntries = 1000
 private const val StagingMaxAgeMillis = 24L * 60L * 60L * 1000L
 
 data class PreparedThirdPartyServicePackage(
@@ -30,6 +31,8 @@ data class PreparedThirdPartyServicePackage(
     val packageFileCount: Int,
     val stagingDir: File,
     val createdAtMillis: Long,
+    val archiveSha256: String? = null,
+    val platformVerified: Boolean = false,
 )
 
 data class InstalledThirdPartyServicePackage(
@@ -43,6 +46,12 @@ data class InstalledThirdPartyServicePackage(
     val installDir: File,
 )
 
+data class StagedThirdPartyServiceDeletion(
+    val serviceId: String,
+    val originalDir: File,
+    val stagedDir: File,
+)
+
 class ThirdPartyServiceInstaller(
     private val client: BjtuHttpClient,
     servicesRoot: File,
@@ -53,6 +62,7 @@ class ThirdPartyServiceInstaller(
     private val root = servicesRoot.canonicalFile
     private val stagingRoot = File(root, "staging").canonicalFile
     private val installedRoot = File(root, "installed").canonicalFile
+    private val deletionRoot = File(root, "deletion").canonicalFile
     private val preparedPackages = ConcurrentHashMap<String, PreparedThirdPartyServicePackage>()
 
     suspend fun prepareFromGitHub(sourceUrl: String): PreparedThirdPartyServicePackage {
@@ -76,6 +86,35 @@ class ThirdPartyServiceInstaller(
     suspend fun installFromGitHub(sourceUrl: String): InstalledThirdPartyServicePackage {
         val prepared = prepareFromGitHub(sourceUrl)
         return commitPreparedImport(prepared.token)
+    }
+
+    suspend fun prepareFromCatalog(plugin: CatalogPlugin): PreparedThirdPartyServicePackage {
+        cleanupStalePreparedImports()
+        val source = parseGitHubRepositoryUrl(plugin.repositoryUrl)
+        val tempDir = File(root, "tmp/${UUID.randomUUID()}").canonicalFile.safeChildOf(root)
+        val zipFile = File(tempDir, "artifact.zip")
+        return try {
+            tempDir.mkdirs()
+            downloadZip(plugin.artifactUrl, zipFile, emptyMap(), "插件快照")
+            val archiveSha256 = fileSha256(zipFile)
+            if (!archiveSha256.equals(plugin.archiveSha256, ignoreCase = true)) {
+                throw ThirdPartyServiceException("插件快照 SHA-256 校验失败，已阻止安装")
+            }
+            val prepared = preparePackageFromZip(source, "platform-snapshot", plugin.commitSha, zipFile)
+            if (prepared.manifest.id != plugin.id || prepared.manifest.version != plugin.version) {
+                discardPreparedImport(prepared.token)
+                throw ThirdPartyServiceException("插件快照 manifest 与目录元数据不一致")
+            }
+            if (!prepared.packageDigestSha256.equals(plugin.packageDigestSha256, ignoreCase = true)) {
+                discardPreparedImport(prepared.token)
+                throw ThirdPartyServiceException("插件 dist digest 校验失败，已阻止安装")
+            }
+            prepared.copy(archiveSha256 = archiveSha256, platformVerified = true).also {
+                preparedPackages[it.token] = it
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
     }
 
     suspend fun preparePackageFromZip(
@@ -146,11 +185,6 @@ class ThirdPartyServiceInstaller(
             val serviceRoot = File(installedRoot, prepared.manifest.id).canonicalFile.safeChildOf(installedRoot)
             val finalDir = File(serviceRoot, prepared.commitSha).canonicalFile.safeChildOf(serviceRoot)
             serviceRoot.mkdirs()
-            serviceRoot.listFiles()?.forEach { child ->
-                if (!child.canonicalFile.safeChildOf(serviceRoot).deleteRecursively()) {
-                    throw IOException("无法清理旧版本目录：${child.absolutePath}")
-                }
-            }
             if (finalDir.exists() && !finalDir.deleteRecursively()) {
                 throw IOException("无法替换已安装目录：${finalDir.absolutePath}")
             }
@@ -177,6 +211,15 @@ class ThirdPartyServiceInstaller(
         }
     }
 
+    fun preparedPackage(token: String): PreparedThirdPartyServicePackage? = preparedPackages[token]
+
+    fun pruneInstalledVersions(serviceId: String, keepCommitSha: String) {
+        val serviceRoot = File(installedRoot, serviceId).canonicalFile.safeChildOf(installedRoot)
+        serviceRoot.listFiles().orEmpty().forEach { child ->
+            if (child.name != keepCommitSha) child.safeDeleteWithin(serviceRoot)
+        }
+    }
+
     fun discardPreparedImport(token: String) {
         val prepared = preparedPackages.remove(token)
         prepared?.stagingDir?.safeDeleteWithin(stagingRoot)
@@ -194,10 +237,38 @@ class ThirdPartyServiceInstaller(
     }
 
     fun deleteInstalledService(serviceId: String) {
+        requireValidServiceId(serviceId)
+        File(installedRoot, serviceId).safeDeleteWithin(installedRoot)
+    }
+
+    fun stageInstalledServiceDeletion(serviceId: String): StagedThirdPartyServiceDeletion? {
+        requireValidServiceId(serviceId)
+        val originalDir = File(installedRoot, serviceId).canonicalFile.safeChildOf(installedRoot)
+        if (!originalDir.exists()) return null
+        deletionRoot.mkdirs()
+        val stagedDir = File(deletionRoot, "$serviceId-${UUID.randomUUID()}").canonicalFile.safeChildOf(deletionRoot)
+        if (!originalDir.renameTo(stagedDir)) {
+            throw ThirdPartyServiceException("无法暂存待删除的第三方服务目录：${originalDir.absolutePath}")
+        }
+        return StagedThirdPartyServiceDeletion(serviceId, originalDir, stagedDir)
+    }
+
+    fun restoreStagedServiceDeletion(deletion: StagedThirdPartyServiceDeletion) {
+        if (!deletion.stagedDir.exists()) return
+        deletion.originalDir.parentFile?.mkdirs()
+        if (deletion.originalDir.exists() || !deletion.stagedDir.renameTo(deletion.originalDir)) {
+            throw ThirdPartyServiceException("无法恢复第三方服务目录：${deletion.serviceId}")
+        }
+    }
+
+    fun commitStagedServiceDeletion(deletion: StagedThirdPartyServiceDeletion) {
+        deletion.stagedDir.safeDeleteWithin(deletionRoot)
+    }
+
+    private fun requireValidServiceId(serviceId: String) {
         if (!serviceId.matches(Regex("^[a-z][a-z0-9_\\-.]{2,63}$"))) {
             throw ThirdPartyServiceException("第三方服务 id 格式无效：$serviceId")
         }
-        File(installedRoot, serviceId).safeDeleteWithin(installedRoot)
     }
 
     private suspend fun fetchRepository(source: GitHubRepositoryRef): GitHubRepoDto {
@@ -219,15 +290,20 @@ class ThirdPartyServiceInstaller(
             ?: throw ThirdPartyServiceException("无法识别 GitHub 默认分支 commit")
     }
 
-    private suspend fun downloadZip(url: String, target: File) = withContext(Dispatchers.IO) {
+    private suspend fun downloadZip(
+        url: String,
+        target: File,
+        headers: Map<String, String> = githubHeaders(),
+        sourceLabel: String = "GitHub",
+    ) = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(url)
-            .headers(okhttp3.Headers.headersOf(*githubHeaders().flatMap { listOf(it.key, it.value) }.toTypedArray()))
+            .headers(okhttp3.Headers.headersOf(*headers.flatMap { listOf(it.key, it.value) }.toTypedArray()))
             .get()
             .build()
         client.client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw ThirdPartyServiceException("GitHub 下载失败：HTTP ${response.code}")
-            val body = response.body ?: throw ThirdPartyServiceException("GitHub 下载内容为空")
+            if (!response.isSuccessful) throw ThirdPartyServiceException("$sourceLabel 下载失败：HTTP ${response.code}")
+            val body = response.body ?: throw ThirdPartyServiceException("$sourceLabel 下载内容为空")
             target.parentFile?.mkdirs()
             var total = 0L
             body.byteStream().use { input ->
@@ -245,14 +321,31 @@ class ThirdPartyServiceInstaller(
         }
     }
 
+    private fun fileSha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read == -1) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
     private fun extractZip(zipFile: File, targetDir: File) {
         val root = targetDir.canonicalFile
-        var fileCount = 0
+        var entryCount = 0
         var totalBytes = 0L
         root.mkdirs()
         ZipInputStream(zipFile.inputStream().buffered()).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
+                entryCount += 1
+                if (entryCount > MaxExtractedEntries) {
+                    throw ThirdPartyServiceException("第三方服务包条目数量超过 $MaxExtractedEntries")
+                }
                 val entryName = entry.name.replace('\\', '/')
                 if (entryName.startsWith("/") || entryName.split('/').any { it == ".." }) {
                     throw ThirdPartyServiceException("第三方服务包包含越界路径：${entry.name}")
@@ -260,10 +353,6 @@ class ThirdPartyServiceInstaller(
                 if (entry.isDirectory) {
                     File(root, entryName).safeChildOf(root).mkdirs()
                     continue
-                }
-                fileCount += 1
-                if (fileCount > MaxExtractedFiles) {
-                    throw ThirdPartyServiceException("第三方服务包文件数量超过 $MaxExtractedFiles")
                 }
                 val target = File(root, entryName).safeChildOf(root)
                 target.parentFile?.mkdirs()

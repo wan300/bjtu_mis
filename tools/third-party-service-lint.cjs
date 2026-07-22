@@ -18,7 +18,7 @@ function main() {
   const repoRoot = path.resolve(__dirname, '..');
   const result = { errors: [], warnings: [] };
   const manifestSchema = loadManifestSchema(repoRoot, result);
-  lintPlugin(root, result, manifestSchema.permissions);
+  lintPlugin(root, result, manifestSchema);
 
   result.warnings.forEach((warning) => console.warn(`WARN  ${warning}`));
   result.errors.forEach((error) => console.error(`ERROR ${error}`));
@@ -29,7 +29,7 @@ function main() {
   console.log(`BJTU service lint passed: ${result.warnings.length} warning(s).`);
 }
 
-function lintPlugin(root, result, knownPermissions) {
+function lintPlugin(root, result, manifestSchema) {
   const manifestPath = path.join(root, 'bjtu-service.json');
   if (!fs.existsSync(manifestPath)) {
     result.errors.push('Missing bjtu-service.json at plugin root.');
@@ -38,7 +38,7 @@ function lintPlugin(root, result, knownPermissions) {
   const manifest = readJson(manifestPath, result);
   if (!manifest) return result;
 
-  if (manifest.schema_version !== 1) result.errors.push('schema_version must be 1.');
+  if (![1, 2].includes(manifest.schema_version)) result.errors.push('schema_version must be 1 or 2.');
   if (!/^[a-z][a-z0-9_.-]{2,63}$/.test(stringField(manifest, 'id'))) {
     result.errors.push('id must be 3-64 chars, start with a lowercase letter, and contain only lowercase letters, digits, dot, underscore, or hyphen.');
   }
@@ -61,11 +61,13 @@ function lintPlugin(root, result, knownPermissions) {
   const optional = normalizeStringArray(permissions.optional, 'permissions.optional', result);
   const duplicated = required.filter((id) => optional.includes(id));
   if (duplicated.length) result.errors.push(`Permissions cannot be both required and optional: ${[...new Set(duplicated)].join(', ')}`);
-  if (knownPermissions.length) {
+  if (manifestSchema.permissions.length) {
     required.concat(optional).forEach((id) => {
-      if (!knownPermissions.includes(id)) result.errors.push(`Unknown permission: ${id}`);
+      if (!manifestSchema.permissions.includes(id)) result.errors.push(`Unknown permission: ${id}`);
     });
   }
+
+  validateMarketplaceAndConfiguration(manifest, required, result, manifestSchema);
 
   const allowedOrigins = normalizeStringArray(manifest.allowed_origins, 'allowed_origins', result).map((origin) =>
     normalizeOrigin(origin, result)
@@ -84,7 +86,7 @@ function loadManifestSchema(repoRoot, result) {
   const webSchema = path.join(repoRoot, 'web', 'assets', 'schemas', 'third-party-service-manifest.schema.json');
   if (!fs.existsSync(docsSchema) || !fs.existsSync(webSchema)) {
     result.errors.push('Missing docs/ or web/assets/schemas/ manifest schema.');
-    return { permissions: [] };
+    return { permissions: [], categories: [], configurationTypes: [] };
   }
   const docsText = fs.readFileSync(docsSchema, 'utf8');
   const webText = fs.readFileSync(webSchema, 'utf8');
@@ -93,7 +95,7 @@ function loadManifestSchema(repoRoot, result) {
   const schemaPermissions = schema?.$defs?.permission_array?.items?.enum;
   if (!Array.isArray(schemaPermissions)) {
     result.errors.push('Manifest schema is missing permission enum.');
-    return { permissions: [] };
+    return { permissions: [], categories: [], configurationTypes: [] };
   }
 
   const permissions = schemaPermissions
@@ -106,7 +108,101 @@ function loadManifestSchema(repoRoot, result) {
     result.errors.push('Manifest schema permission enum contains duplicates.');
   }
 
-  return { permissions };
+  const categories = schema?.$defs?.marketplace?.properties?.category?.enum;
+  const configurationTypes = schema?.$defs?.configuration?.properties?.type?.enum;
+  if (!Array.isArray(categories) || !Array.isArray(configurationTypes)) {
+    result.errors.push('Manifest schema is missing marketplace category or configuration type enums.');
+  }
+  return {
+    permissions,
+    categories: Array.isArray(categories) ? categories : [],
+    configurationTypes: Array.isArray(configurationTypes) ? configurationTypes : []
+  };
+}
+
+function validateMarketplaceAndConfiguration(manifest, requiredPermissions, result, manifestSchema) {
+  const configuration = Array.isArray(manifest.configuration) ? manifest.configuration : [];
+  if (manifest.schema_version === 1) {
+    if (manifest.marketplace !== undefined || configuration.length) {
+      result.errors.push('schema_version 1 cannot declare marketplace or configuration.');
+    }
+    return;
+  }
+  if (manifest.schema_version !== 2) return;
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(stringField(manifest, 'version').trim())) {
+    result.errors.push('schema_version 2 version must use semantic versioning.');
+  }
+  const marketplace = manifest.marketplace;
+  if (!marketplace || typeof marketplace !== 'object' || Array.isArray(marketplace)) {
+    result.errors.push('schema_version 2 requires marketplace metadata.');
+  } else {
+    const category = stringField(marketplace, 'category').trim().toLowerCase();
+    if (!manifestSchema.categories.includes(category)) result.errors.push(`Unknown marketplace category: ${category || '(blank)'}`);
+    const tags = normalizeStringArray(marketplace.tags, 'marketplace.tags', result);
+    if (tags.length > 5) result.errors.push('marketplace.tags cannot contain more than 5 entries.');
+    if (tags.some((tag) => tag.length > 20)) result.errors.push('marketplace tags must be 1-20 characters.');
+    if (tags.map((tag) => tag.toLowerCase()).length !== new Set(tags.map((tag) => tag.toLowerCase())).size) {
+      result.errors.push('marketplace.tags contains duplicates.');
+    }
+  }
+  if (!Array.isArray(manifest.configuration)) {
+    result.errors.push('schema_version 2 configuration must be an array.');
+    return;
+  }
+  if (configuration.length > 32) result.errors.push('configuration cannot contain more than 32 entries.');
+  if (configuration.length && !requiredPermissions.includes('app.configuration.read')) {
+    result.errors.push('configuration requires app.configuration.read in permissions.required.');
+  }
+  const keys = [];
+  configuration.forEach((definition, index) => {
+    const prefix = `configuration[${index}]`;
+    if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
+      result.errors.push(`${prefix} must be an object.`);
+      return;
+    }
+    const key = stringField(definition, 'key').trim();
+    keys.push(key);
+    if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(key)) result.errors.push(`${prefix}.key is invalid.`);
+    const label = stringField(definition, 'label').trim();
+    if (!label || label.length > 80) result.errors.push(`${prefix}.label must be 1-80 characters.`);
+    const description = stringField(definition, 'description').trim();
+    if (description.length > 240) result.errors.push(`${prefix}.description cannot exceed 240 characters.`);
+    const type = stringField(definition, 'type').trim().toLowerCase();
+    if (!manifestSchema.configurationTypes.includes(type)) result.errors.push(`${prefix}.type is unknown.`);
+    const options = definition.options === undefined ? [] : normalizeStringArray(definition.options, `${prefix}.options`, result);
+    if (type === 'select') {
+      if (!options.length || options.length > 20 || options.length !== new Set(options).size) {
+        result.errors.push(`${prefix}.options must contain 1-20 unique values for select.`);
+      }
+    } else if (options.length) {
+      result.errors.push(`${prefix}.options is only valid for select.`);
+    }
+    if (type === 'secret' && definition.default !== undefined) result.errors.push(`${prefix}.default is forbidden for secret.`);
+    validateConfigurationDefault(definition.default, type, options, prefix, result);
+    if (typeof definition.required !== 'boolean') result.errors.push(`${prefix}.required must be a boolean.`);
+  });
+  const duplicates = keys.filter((key, index) => key && keys.indexOf(key) !== index);
+  if (duplicates.length) result.errors.push(`configuration contains duplicate keys: ${[...new Set(duplicates)].join(', ')}`);
+}
+
+function validateConfigurationDefault(value, type, options, prefix, result) {
+  if (value === undefined) return;
+  if (typeof value !== 'string') {
+    result.errors.push(`${prefix}.default must be a string.`);
+    return;
+  }
+  const normalized = value.trim();
+  if (type === 'number' && !Number.isFinite(Number(normalized))) result.errors.push(`${prefix}.default must be a number.`);
+  if (type === 'boolean' && !['true', 'false'].includes(normalized)) result.errors.push(`${prefix}.default must be true or false.`);
+  if (type === 'select' && !options.includes(normalized)) result.errors.push(`${prefix}.default must be one of its options.`);
+  if (type === 'url') {
+    try {
+      const url = new URL(normalized);
+      if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) throw new Error('invalid');
+    } catch {
+      result.errors.push(`${prefix}.default must be an HTTP/HTTPS URL.`);
+    }
+  }
 }
 
 function readJson(file, result) {
@@ -127,7 +223,20 @@ function normalizeStringArray(value, field, result) {
     result.errors.push(`${field} must be an array.`);
     return [];
   }
-  return value.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean);
+  const normalized = [];
+  value.forEach((item, index) => {
+    if (typeof item !== 'string') {
+      result.errors.push(`${field}[${index}] must be a string.`);
+      return;
+    }
+    const text = item.trim();
+    if (!text) {
+      result.errors.push(`${field}[${index}] must be a non-empty string.`);
+      return;
+    }
+    normalized.push(text);
+  });
+  return normalized;
 }
 
 function validateAssetPath(value, field, result) {
@@ -190,4 +299,11 @@ function walk(root) {
   return out;
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = {
+  lintPlugin,
+  loadManifestSchema,
+  normalizeOrigin,
+  walk
+};

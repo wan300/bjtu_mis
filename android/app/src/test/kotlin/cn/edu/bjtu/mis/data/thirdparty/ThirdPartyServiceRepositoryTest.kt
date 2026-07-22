@@ -159,11 +159,62 @@ class ThirdPartyServiceRepositoryTest {
         }
     }
 
+    @Test
+    fun deleteRemovesDatabaseConfigurationAndInstalledDirectory() = runBlocking {
+        MockWebServer().use { server ->
+            val servicesRoot = temp.newFolder("services-${System.nanoTime()}")
+            val installedDir = File(servicesRoot, "installed/bjtu.demo/oldcommit").apply {
+                mkdirs()
+                resolve("index.html").writeText("<html></html>")
+            }
+            val dao = FakeThirdPartyServiceDao().apply {
+                saved["bjtu.demo"] = existingAuthorizedEntity().copy(installDir = installedDir.absolutePath)
+            }
+            val configurationStore = InMemoryThirdPartyConfigurationStore().apply {
+                save("bjtu.demo", mapOf("TOKEN" to "secret"))
+            }
+            val repository = repository(server, dao, servicesRoot, configurationStore = configurationStore)
+
+            repository.deleteService("bjtu.demo")
+
+            assertNull(dao.saved["bjtu.demo"])
+            assertTrue(configurationStore.load("bjtu.demo").isEmpty())
+            assertFalse(File(servicesRoot, "installed/bjtu.demo").exists())
+        }
+    }
+
+    @Test
+    fun deleteRestoresConfigurationAndDirectoryWhenDatabaseDeleteFails() = runBlocking {
+        MockWebServer().use { server ->
+            val servicesRoot = temp.newFolder("services-${System.nanoTime()}")
+            val installedDir = File(servicesRoot, "installed/bjtu.demo/oldcommit").apply {
+                mkdirs()
+                resolve("index.html").writeText("<html></html>")
+            }
+            val dao = FakeThirdPartyServiceDao().apply {
+                saved["bjtu.demo"] = existingAuthorizedEntity().copy(installDir = installedDir.absolutePath)
+                failDelete = true
+            }
+            val configurationStore = InMemoryThirdPartyConfigurationStore().apply {
+                save("bjtu.demo", mapOf("TOKEN" to "secret"))
+            }
+            val repository = repository(server, dao, servicesRoot, configurationStore = configurationStore)
+
+            val result = runCatching { repository.deleteService("bjtu.demo") }
+
+            assertTrue(result.isFailure)
+            assertTrue(dao.saved.containsKey("bjtu.demo"))
+            assertEquals(mapOf("TOKEN" to "secret"), configurationStore.load("bjtu.demo"))
+            assertTrue(File(servicesRoot, "installed/bjtu.demo/oldcommit/index.html").isFile)
+        }
+    }
+
     private fun repository(
         server: MockWebServer,
         dao: FakeThirdPartyServiceDao,
         servicesRoot: File = temp.newFolder("services-${System.nanoTime()}"),
         bundledProvider: ThirdPartyBundledServiceProvider? = null,
+        configurationStore: ThirdPartyConfigurationStore = InMemoryThirdPartyConfigurationStore(),
     ): ThirdPartyServiceRepository =
         ThirdPartyServiceRepository(
             dao = dao,
@@ -173,6 +224,7 @@ class ThirdPartyServiceRepositoryTest {
                 apiBaseUrl = server.url("/").toString().trimEnd('/'),
             ),
             bundledProvider = bundledProvider,
+            configurationStore = configurationStore,
         )
 
     private fun enqueueGithubPackage(server: MockWebServer) {
@@ -304,6 +356,7 @@ private object EmptyBundledProvider : ThirdPartyBundledServiceProvider {
 
 private class FakeThirdPartyServiceDao : ThirdPartyServiceDao {
     val saved = linkedMapOf<String, ThirdPartyServiceEntity>()
+    var failDelete = false
 
     override suspend fun saveService(service: ThirdPartyServiceEntity) {
         saved[service.serviceId] = service
@@ -316,6 +369,7 @@ private class FakeThirdPartyServiceDao : ThirdPartyServiceDao {
         saved[serviceId]
 
     override suspend fun deleteService(serviceId: String) {
+        if (failDelete) throw IllegalStateException("simulated database delete failure")
         saved.remove(serviceId)
     }
 

@@ -4,9 +4,11 @@ import cn.edu.bjtu.mis.data.security.CredentialStore
 import cn.edu.bjtu.mis.data.security.LoginCredentials
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -114,6 +116,34 @@ class ThirdPartyServiceApiRegistryTest {
         assertEquals("22123456", data["student_id"]!!.jsonPrimitive.contentOrNull)
         assertEquals("22123456", data["login_name"]!!.jsonPrimitive.contentOrNull)
         assertEquals("secret-password", data["password"]!!.jsonPrimitive.contentOrNull)
+    }
+
+    @Test
+    fun configurationCanOnlyBeReadFromTheLocalSandboxOrigin() = runBlocking {
+        val configured = service(grants = setOf("app.configuration.read")).copy(
+            manifest = service(grants = emptySet()).manifest.copy(
+                schemaVersion = 2,
+                permissions = ThirdPartyServicePermissionDeclaration(required = listOf("app.configuration.read")),
+                configuration = listOf(
+                    ThirdPartyConfigurationDefinition(key = "API_TOKEN", label = "Token", type = "secret", required = true),
+                ),
+            ),
+        )
+        val registry = ThirdPartyServiceApiRegistry(null, null, configurationReader = { _, key -> if (key == "API_TOKEN") "secret" else null })
+        val params = buildJsonObject { put("key", "API_TOKEN") }
+
+        val remote = registry.invoke(configured, "app.get_configuration", params, denyConfirmer(), "https://api.example.com/plugin")
+        assertEquals("origin_not_allowed", remote.errorCode())
+
+        val local = registry.invoke(
+            configured,
+            "app.get_configuration",
+            params,
+            denyConfirmer(),
+            ThirdPartyServiceSandbox.originFor(configured.serviceId, configured.commitSha) + "/index.html",
+        )
+        assertTrue(local["ok"]!!.jsonPrimitive.boolean)
+        assertEquals("secret", local["data"]!!.jsonPrimitive.contentOrNull)
     }
 
     private fun service(

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "bjtu.template.basic",
   "name": "Basic Template",
   "description": "A minimal BJTU MIS third-party service template.",
@@ -11,5 +11,11 @@
     "required": [],
     "optional": []
   },
-  "allowed_origins": []
+  "allowed_origins": [],
+  "marketplace": {
+    "category": "other",
+    "tags": ["template"],
+    "license": "MIT"
+  },
+  "configuration": []
 }

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="浏览并安装经过自动校验的 BJTU MIS Android 第三方插件。">
+    <title>插件大厅 · BJTU MIS Android</title>
+    <link rel="icon" href="../assets/icons/icon_services.png">
+    <link rel="stylesheet" href="../assets/css/styles.css">
+  </head>
+  <body data-plugin-page="catalog">
+    <header class="site-header"><div class="site-header__inner">
+      <a class="brand" href="../index.html"><img src="../assets/icons/icon_home.png" alt=""><span>BJTU MIS Android</span></a>
+      <nav class="site-nav" aria-label="插件导航"><a href="index.html" aria-current="page">插件大厅</a><a href="submit.html">投稿</a><a href="manage.html">我的插件</a></nav>
+    </div></header>
+    <main class="plugin-shell">
+      <section class="plugin-hero"><p class="eyebrow">Plugin marketplace</p><h1>插件大厅</h1><p>这里的插件经过自动结构与安全边界校验，但未经过人工代码审核。安装前请检查权限、远端来源与配置要求。</p></section>
+      <form class="plugin-filter" data-catalog-filter>
+        <label><span>搜索</span><input name="query" type="search" placeholder="名称、作者、描述或插件 ID"></label>
+        <label><span>分类</span><select name="category"><option value="">全部分类</option><option value="academic">学业学习</option><option value="campus">校园生活</option><option value="information">信息服务</option><option value="productivity">效率工具</option><option value="assistant">智能助手</option><option value="other">其他</option></select></label>
+        <button class="btn btn--primary" type="submit">筛选</button>
+      </form>
+      <p class="plugin-status" data-status role="status">正在读取插件目录…</p>
+      <section class="plugin-grid" data-plugin-list aria-live="polite"></section>
+      <button class="btn btn--ghost plugin-load-more" type="button" data-load-more hidden>加载更多</button>
+    </main>
+    <script src="../assets/js/plugins.js" defer></script>
+  </body>
+</html>

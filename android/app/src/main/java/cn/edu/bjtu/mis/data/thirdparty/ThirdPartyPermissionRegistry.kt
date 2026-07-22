@@ -10,6 +10,12 @@ data class ThirdPartyPermission(
 object ThirdPartyPermissionRegistry {
     val permissions: List<ThirdPartyPermission> = listOf(
         ThirdPartyPermission(
+            id = "app.configuration.read",
+            title = "读取插件配置",
+            description = "允许插件读取你在手机端为它填写的第三方配置。敏感值可能被插件发送到其声明的服务，请仅授权可信插件。",
+            highRisk = true,
+        ),
+        ThirdPartyPermission(
             id = "identity.profile.read",
             title = "读取个人身份信息",
             description = "允许第三方服务读取姓名、学号、学院、专业、邮箱等个人资料。",

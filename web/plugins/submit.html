@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>投稿插件 · BJTU MIS Android</title><link rel="stylesheet" href="../assets/css/styles.css"></head>
+  <body data-plugin-page="submit">
+    <header class="site-header"><div class="site-header__inner"><a class="brand" href="index.html"><img src="../assets/icons/icon_services.png" alt=""><span>插件投稿</span></a><nav class="site-nav"><a href="index.html">插件大厅</a><a href="manage.html">我的插件</a></nav></div></header>
+    <main class="plugin-shell plugin-shell--narrow">
+      <section class="plugin-hero"><p class="eyebrow">GitHub submission</p><h1>投稿公开插件</h1><p>只填写公开 GitHub 仓库根链接。名称、介绍、分类、标签、权限和配置要求均从 schema v2 manifest 读取；平台不会执行仓库脚本。</p></section>
+      <div class="plugin-notice" data-auth-panel></div>
+      <form class="plugin-form" data-submission-form hidden>
+        <label><span>GitHub 仓库根链接</span><input name="repositoryUrl" type="url" required placeholder="https://github.com/owner/repository" autocomplete="url"></label>
+        <label class="plugin-check"><input type="checkbox" required><span>我确认仓库公开、我拥有 push/admin 管理权限，并接受自动校验通过后立即公开。</span></label>
+        <button class="btn btn--primary" type="submit">提交自动校验</button>
+      </form>
+      <p class="plugin-status" data-status role="status"></p>
+    </main>
+    <script src="../assets/js/plugins.js" defer></script>
+  </body>
+</html>

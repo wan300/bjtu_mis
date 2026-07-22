@@ -18,7 +18,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "enum": [1, 2]
     },
     "id": {
       "type": "string",
@@ -71,8 +71,49 @@
         "type": "string",
         "pattern": "^https?://[A-Za-z0-9.-]+(:[0-9]+)?/?$"
       }
+    },
+    "marketplace": {
+      "$ref": "#/$defs/marketplace"
+    },
+    "configuration": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/configuration"
+      }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": { "const": 1 }
+        }
+      },
+      "then": {
+        "properties": {
+          "marketplace": false,
+          "configuration": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": { "const": 2 }
+        }
+      },
+      "then": {
+        "required": ["marketplace", "configuration"],
+        "properties": {
+          "version": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "asset_path": {
       "type": "string",
@@ -92,6 +133,7 @@
       "items": {
         "type": "string",
         "enum": [
+          "app.configuration.read",
           "identity.profile.read",
           "identity.credentials.read",
           "academic.timetable.read",
@@ -109,6 +151,69 @@
           "mail.message_detail.read",
           "mail.send"
         ]
+      }
+    },
+    "marketplace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "tags"],
+      "properties": {
+        "category": {
+          "enum": ["academic", "campus", "information", "productivity", "assistant", "other"]
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20
+          }
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "label", "description", "type", "required"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "type": {
+          "enum": ["text", "secret", "url", "number", "boolean", "select"]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "default": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       }
     }
   }

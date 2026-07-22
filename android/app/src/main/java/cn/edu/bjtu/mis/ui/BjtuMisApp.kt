@@ -549,6 +549,7 @@ fun BjtuMisApp(
                         )
                         THIRD_PARTY_SERVICES_ROUTE -> ThirdPartyServicesScreen(
                             repository = container.thirdPartyServiceRepository,
+                            catalogRepository = container.thirdPartyCatalogRepository,
                             onOpenService = ::navigateModule,
                         )
                         ModuleKeys.OpenWebUiAgent -> Unit

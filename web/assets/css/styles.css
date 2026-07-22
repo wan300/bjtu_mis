@@ -36,8 +36,61 @@ body {
 
 body,
 button,
-input {
+input,
+select,
+textarea {
   letter-spacing: 0;
+}
+
+.plugin-shell { width: min(var(--max), calc(100% - 32px)); margin: 0 auto; padding: 72px 0 96px; }
+.plugin-shell--narrow { max-width: 780px; }
+.plugin-hero { max-width: 760px; margin-bottom: 34px; }
+.plugin-hero h1, .plugin-detail__header h1 { margin: 6px 0 12px; font-size: clamp(2.4rem, 7vw, 4.8rem); line-height: .98; }
+.plugin-hero p, .plugin-detail__header p { color: var(--muted); line-height: 1.75; }
+.plugin-filter, .plugin-form { display: grid; grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr) auto; gap: 14px; align-items: end; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255, 253, 248, .84); box-shadow: var(--shadow); }
+.plugin-form { grid-template-columns: 1fr; }
+.plugin-filter label, .plugin-form label { display: grid; gap: 8px; font-weight: 700; }
+.plugin-filter input, .plugin-filter select, .plugin-form input { width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper-strong); color: var(--ink); font: inherit; }
+.plugin-check { grid-template-columns: auto 1fr !important; align-items: start; font-weight: 400 !important; }
+.plugin-check input { width: 20px; min-height: 20px; }
+.plugin-status { min-height: 24px; color: var(--muted); }
+.plugin-status.is-error, .plugin-error { color: var(--signal); }
+.plugin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.plugin-card, .plugin-row, .plugin-detail__grid > section, .plugin-digests, .plugin-notice, .plugin-admin { border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255, 253, 248, .9); box-shadow: 0 12px 34px rgba(41, 25, 14, .1); }
+.plugin-card { display: flex; flex-direction: column; gap: 14px; padding: 20px; }
+.plugin-card > .btn { margin-top: auto; }
+.plugin-card__head, .plugin-detail__header { display: flex; gap: 18px; align-items: flex-start; }
+.plugin-card__head img, .plugin-detail__header img { width: 64px; height: 64px; object-fit: contain; border: 1px solid var(--line); border-radius: var(--radius); background: white; }
+.plugin-detail__header img { width: 108px; height: 108px; }
+.plugin-card h2, .plugin-row h2 { margin: 2px 0; font-size: 1.22rem; }
+.plugin-card p, .plugin-row p { margin: 0; color: var(--muted); line-height: 1.55; }
+.plugin-kicker { color: var(--teal) !important; font-size: .82rem; font-weight: 800; text-transform: uppercase; }
+.plugin-tags, .plugin-card__meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.plugin-tags span, .plugin-warning { padding: 5px 8px; border-radius: 999px; background: rgba(18, 139, 144, .1); color: var(--teal); font-size: .78rem; font-weight: 800; }
+.plugin-warning { background: rgba(187, 47, 47, .1); color: var(--signal); }
+.plugin-load-more { display: block; margin: 24px auto 0; }
+.plugin-detail__header { margin-bottom: 30px; }
+.plugin-detail__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.plugin-detail__grid > section, .plugin-digests, .plugin-notice, .plugin-admin { padding: 24px; }
+.plugin-config-item { display: grid; gap: 5px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.plugin-config-item span { color: var(--muted); }
+.plugin-digests { margin-top: 18px; }
+.plugin-digests dl > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.plugin-digests dd { margin: 0; overflow-wrap: anywhere; }
+.plugin-stack, .plugin-admin { display: grid; gap: 14px; }
+.plugin-admin { margin-bottom: 18px; }
+.plugin-row { display: flex; justify-content: space-between; gap: 18px; align-items: center; padding: 18px; }
+.plugin-row__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+@media (max-width: 860px) {
+  .plugin-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plugin-filter { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 620px) {
+  .plugin-grid, .plugin-detail__grid { grid-template-columns: 1fr; }
+  .plugin-detail__header, .plugin-row { flex-direction: column; align-items: flex-start; }
+  .plugin-digests dl > div { grid-template-columns: 1fr; gap: 4px; }
 }
 
 img {

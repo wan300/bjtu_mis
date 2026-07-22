@@ -2,6 +2,7 @@ package cn.edu.bjtu.mis.di
 
 import android.content.Context
 import androidx.room.Room
+import cn.edu.bjtu.mis.BuildConfig
 import cn.edu.bjtu.mis.data.agent.document.DocumentTool
 import cn.edu.bjtu.mis.data.agent.runtime.RuntimeManager
 import cn.edu.bjtu.mis.data.agent.tools.ArchiveTool
@@ -47,6 +48,8 @@ import cn.edu.bjtu.mis.data.repository.ZhixingRepository
 import cn.edu.bjtu.mis.data.security.SecureCookieStore
 import cn.edu.bjtu.mis.data.security.SecureCredentialStore
 import cn.edu.bjtu.mis.data.thirdparty.AssetThirdPartyBundledServiceProvider
+import cn.edu.bjtu.mis.data.thirdparty.SecureThirdPartyConfigurationStore
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyCatalogRepository
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceApiRegistry
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceInstaller
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceRepository
@@ -197,6 +200,16 @@ class AppContainer(context: Context) {
             )
         }
     }
+    val thirdPartyConfigurationStore: SecureThirdPartyConfigurationStore by lazy {
+        SecureThirdPartyConfigurationStore(appContext)
+    }
+    val thirdPartyCatalogRepository: ThirdPartyCatalogRepository by lazy {
+        ThirdPartyCatalogRepository(
+            client = httpClient,
+            baseUrl = BuildConfig.PLUGIN_CATALOG_BASE_URL,
+            cacheRoot = thirdPartyServicesRoot,
+        )
+    }
     val thirdPartyServiceRepository: ThirdPartyServiceRepository by lazy {
         PerfTrace.measure("AppContainer.thirdPartyServiceRepository") {
             ThirdPartyServiceRepository(
@@ -207,6 +220,7 @@ class AppContainer(context: Context) {
                     installer = thirdPartyServiceInstaller,
                     servicesRoot = thirdPartyServicesRoot,
                 ),
+                configurationStore = thirdPartyConfigurationStore,
             )
         }
     }
@@ -216,6 +230,7 @@ class AppContainer(context: Context) {
                 moduleRepository = moduleRepository,
                 mailRepository = mailRepository,
                 credentialStore = credentialStore,
+                configurationReader = thirdPartyServiceRepository::configurationValue,
             )
         }
     }

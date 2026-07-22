@@ -99,3 +99,5 @@ htmlcov/
 test/
 !android/app/src/test/
 !android/app/src/test/**
+!platform/test/
+!platform/test/**

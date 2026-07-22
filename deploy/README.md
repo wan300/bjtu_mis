@@ -1,5 +1,16 @@
 # bjtu.cc 部署
 
+## 插件平台
+
+插件目录使用 `deploy/docker-compose.plugins.yml` 部署 PostgreSQL 16、迁移任务、Fastify API 和独立校验 worker。部署前：
+
+1. 将 `platform/.env.example` 复制到服务器 `/etc/bjtu-plugin-platform.env`，填写 GitHub OAuth、32 字节 AES-GCM 密钥、管理员 GitHub ID 和数据库密码；不要提交该文件。
+2. `/etc/bjtu-plugin-postgres-password` 只包含 PostgreSQL 密码，且必须与 `DATABASE_URL` 中的密码一致。
+3. 备份 PostgreSQL、插件 artifact 卷和当前 Nginx 配置，再运行 `docker compose -f deploy/docker-compose.plugins.yml up -d --build`。
+4. 安装 `deploy/nginx/bjtu.cc.conf` 后先执行 `nginx -t`，确认 `/api/v1/` 只反代至 `127.0.0.1:15020`。
+
+回滚时恢复旧 Nginx 配置并停止插件 Compose 服务；Android 会自动退化到目录缓存与已安装插件。数据库和 artifact 卷应保留以便恢复。
+
 生产站点是仓库 `web/` 下的纯静态文件，由 `my-server` 上的 Nginx 直接提供。Nginx 配置的仓库副本位于 `deploy/nginx/bjtu.cc.conf`。
 
 服务器布局：

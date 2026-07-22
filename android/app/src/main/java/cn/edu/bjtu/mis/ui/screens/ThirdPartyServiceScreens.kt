@@ -3,7 +3,6 @@
 import android.annotation.SuppressLint
 import android.net.Uri
 import android.util.Log
-import android.webkit.JavascriptInterface
 import android.webkit.MimeTypeMap
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -48,13 +47,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.WebMessageCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import cn.edu.bjtu.mis.data.AppJson
+import cn.edu.bjtu.mis.data.thirdparty.CatalogPlugin
+import cn.edu.bjtu.mis.data.thirdparty.CatalogPluginPage
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyPermissionRegistry
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartySandboxResourceResolution
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartySensitiveActionConfirmer
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyCatalogRepository
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyService
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceApiRegistry
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceImportPreview
@@ -85,7 +93,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request as OkHttpRequest
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.util.Locale
@@ -98,10 +105,16 @@ private val ThirdPartyBridgeHttpClient = OkHttpClient()
 @Composable
 fun ThirdPartyServicesScreen(
     repository: ThirdPartyServiceRepository,
+    catalogRepository: ThirdPartyCatalogRepository,
     onOpenService: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    var showInstalled by remember { mutableStateOf(false) }
     var servicesState by remember { mutableStateOf<LoadState<List<ThirdPartyService>>>(LoadState.Loading) }
+    var catalogState by remember { mutableStateOf<LoadState<CatalogPluginPage>>(LoadState.Loading) }
+    var catalogUpdates by remember { mutableStateOf<Map<String, CatalogPlugin>>(emptyMap()) }
+    var searchQuery by remember { mutableStateOf("") }
+    var categoryFilter by remember { mutableStateOf("") }
     var githubUrl by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -111,8 +124,23 @@ fun ThirdPartyServicesScreen(
         scope.launch {
             servicesState = LoadState.Loading
             runCatching { repository.listServices() }
-                .onSuccess { servicesState = LoadState.Data(it) }
+                .onSuccess { services ->
+                    servicesState = LoadState.Data(services)
+                    catalogUpdates = runCatching { catalogRepository.resolveUpdates(services) }
+                        .getOrDefault(emptyList())
+                        .filter { it.updateAvailable }
+                        .associateBy { it.id }
+                }
                 .onFailure { servicesState = LoadState.Error(it.message ?: "加载第三方服务失败") }
+        }
+    }
+
+    fun loadCatalog() {
+        scope.launch {
+            catalogState = LoadState.Loading
+            runCatching { catalogRepository.listPlugins(query = searchQuery, category = categoryFilter) }
+                .onSuccess { catalogState = LoadState.Data(it) }
+                .onFailure { catalogState = LoadState.Error(it.message ?: "插件大厅暂时不可用") }
         }
     }
 
@@ -126,6 +154,20 @@ fun ThirdPartyServicesScreen(
                     message = "预检完成，请确认权限和允许来源"
                 }
                 .onFailure { message = it.message ?: "预检失败" }
+            busy = false
+        }
+    }
+
+    fun prepareCatalogInstall(plugin: CatalogPlugin) {
+        scope.launch {
+            busy = true
+            message = null
+            runCatching { repository.prepareInstallFromCatalog(plugin) }
+                .onSuccess {
+                    pendingPreview = it
+                    message = "平台快照和双重 digest 校验完成，请确认安装风险"
+                }
+                .onFailure { message = it.message ?: "平台快照预检失败" }
             busy = false
         }
     }
@@ -155,6 +197,7 @@ fun ThirdPartyServicesScreen(
     LaunchedEffect(Unit) {
         repository.cleanupStalePreparedImports()
         load()
+        loadCatalog()
     }
 
     LazyColumn(
@@ -163,7 +206,63 @@ fun ThirdPartyServicesScreen(
         contentPadding = PaddingValues(14.dp),
     ) {
         item {
-            InfoCard(title = "导入服务", subtitle = "仓库根目录需包含 bjtu-service.json 和 dist/") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = { showInstalled = false }, enabled = showInstalled, modifier = Modifier.weight(1f)) {
+                    Text("插件大厅")
+                }
+                Button(onClick = { showInstalled = true }, enabled = !showInstalled, modifier = Modifier.weight(1f)) {
+                    Text("已安装")
+                }
+            }
+        }
+        if (!showInstalled) {
+            item {
+                InfoCard(title = "搜索插件", subtitle = "断网时自动展示最近一次成功目录快照") {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        label = { Text("名称、作者、描述或插件 ID") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = categoryFilter,
+                        onValueChange = { categoryFilter = it },
+                        label = { Text("分类（可选）") },
+                        placeholder = { Text("academic / campus / information / productivity / assistant / other") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Button(onClick = { loadCatalog() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("搜索") }
+                }
+            }
+            message?.let { currentMessage -> item {
+                Text(currentMessage, color = if (currentMessage.contains("失败")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            } }
+            pendingPreview?.let { preview -> item {
+                ThirdPartyImportPreviewCard(preview, busy, { commitPreview(preview) }, { cancelPreview(preview) })
+            } }
+            when (val current = catalogState) {
+                LoadState.Loading, is LoadState.Error -> item { LoadingOrError(current) }
+                is LoadState.Data -> {
+                    if (current.value.fromCache) item {
+                        Text("平台暂时不可用，当前展示本机缓存；已安装插件可继续运行。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (current.value.items.isEmpty()) item { InfoCard("暂无插件", subtitle = "可在 Web 插件大厅投稿公开 GitHub 仓库") {} }
+                    items(current.value.items, key = { it.id }) { plugin ->
+                        CatalogPluginCard(
+                            plugin = plugin,
+                            installed = (servicesState as? LoadState.Data<List<ThirdPartyService>>)?.value?.any { it.serviceId == plugin.id } == true,
+                            busy = busy,
+                            onInstall = { prepareCatalogInstall(plugin) },
+                        )
+                    }
+                }
+            }
+        }
+        if (showInstalled) {
+        item {
+            InfoCard(title = "高级 / 开发者导入", subtitle = "未经过平台自动校验；仓库根目录需包含 bjtu-service.json 和 dist/") {
                 OutlinedTextField(
                     value = githubUrl,
                     onValueChange = { githubUrl = it },
@@ -188,6 +287,11 @@ fun ThirdPartyServicesScreen(
                         color = if (it.contains("失败")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                Text(
+                    "警告：此方式直接下载 GitHub 内容，不具有平台归档 digest 背书。",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
         pendingPreview?.let { preview ->
@@ -213,9 +317,19 @@ fun ThirdPartyServicesScreen(
                     items(current.value, key = { it.serviceId }) { service ->
                         ThirdPartyServiceManagementCard(
                             service = service,
+                            updateAvailable = service.serviceId in catalogUpdates,
                             busy = busy,
                             onOpen = { onOpenService(thirdPartyServiceRoute(service.serviceId)) },
-                            onUpdate = { prepareImportOrUpdate(service.sourceUrl) },
+                            onUpdate = {
+                                catalogUpdates[service.serviceId]?.let { prepareCatalogInstall(it) }
+                                    ?: prepareImportOrUpdate(service.sourceUrl)
+                            },
+                            onConfigure = {
+                                scope.launch {
+                                    repository.requireReview(service.serviceId)
+                                    onOpenService(thirdPartyServiceRoute(service.serviceId))
+                                }
+                            },
                             onDelete = {
                                 scope.launch {
                                     busy = true
@@ -229,6 +343,39 @@ fun ThirdPartyServicesScreen(
                     }
                 }
             }
+        }
+        }
+    }
+}
+
+@Composable
+private fun CatalogPluginCard(
+    plugin: CatalogPlugin,
+    installed: Boolean,
+    busy: Boolean,
+    onInstall: () -> Unit,
+) {
+    InfoCard(
+        title = plugin.name,
+        subtitle = "${plugin.version} · ${plugin.repository} · 未人工审核",
+    ) {
+        Text(plugin.description, style = MaterialTheme.typography.bodyMedium)
+        Text("分类：${plugin.category} · 标签：${plugin.tags.joinToString().ifBlank { "无" }}", style = MaterialTheme.typography.bodySmall)
+        Text("Commit：${plugin.commitSha.take(12)}", style = MaterialTheme.typography.bodySmall)
+        Text("归档 SHA-256：${plugin.archiveSha256.take(12)}…", style = MaterialTheme.typography.bodySmall)
+        PermissionSummary("必须授权", plugin.permissions.required)
+        TrustedOriginsSummary(plugin.allowedOrigins)
+        if (plugin.configuration.isNotEmpty()) {
+            Text(
+                "配置：${plugin.configuration.joinToString { "${it.label}${if (it.required) "（必填）" else ""}" }}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        plugin.validationWarnings.forEach { warning ->
+            Text(warning, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+        Button(onClick = onInstall, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Text(if (installed) "下载并比较更新" else "下载并预检")
         }
     }
 }
@@ -248,6 +395,12 @@ private fun ThirdPartyImportPreviewCard(
         Text("版本：${preview.manifest.version}", style = MaterialTheme.typography.bodySmall)
         Text("作者：${preview.manifest.author}", style = MaterialTheme.typography.bodySmall)
         Text("Digest：${preview.packageDigestSha256.take(12)}", style = MaterialTheme.typography.bodySmall)
+        Text(
+            if (preview.platformVerified) "来源：平台不可变快照 · 未人工审核" else "来源：高级直链导入 · 未经平台校验",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        preview.archiveSha256?.let { Text("归档 SHA-256：${it.take(12)}…", style = MaterialTheme.typography.bodySmall) }
         Text(
             "包内容：${preview.packageFileCount} 个文件，${formatBytes(preview.packageBytes)}",
             style = MaterialTheme.typography.bodySmall,
@@ -309,9 +462,11 @@ private fun TrustedOriginsSummary(origins: List<String>) {
 @Composable
 private fun ThirdPartyServiceManagementCard(
     service: ThirdPartyService,
+    updateAvailable: Boolean,
     busy: Boolean,
     onOpen: () -> Unit,
     onUpdate: () -> Unit,
+    onConfigure: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val canUpdateFromGitHub = service.sourceUrl.startsWith("https://github.com/")
@@ -327,6 +482,8 @@ private fun ThirdPartyServiceManagementCard(
         Text(
             if (service.needsReview || !service.enabled) {
                 "需要确认权限 · ${service.packageDigestSha256.take(12)}"
+            } else if (updateAvailable) {
+                "发现平台快照更新 · 当前 ${service.commitSha.take(8)}"
             } else {
                 "已启用 · ${service.commitSha.take(8)} · ${service.packageDigestSha256.take(12)}"
             },
@@ -346,6 +503,11 @@ private fun ThirdPartyServiceManagementCard(
             }
             IconButton(onClick = onDelete, enabled = !busy) {
                 Icon(Icons.Filled.Delete, contentDescription = "删除")
+            }
+        }
+        if (service.manifest.configuration.isNotEmpty()) {
+            OutlinedButton(onClick = onConfigure, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                Text("配置插件环境变量")
             }
         }
     }
@@ -384,6 +546,7 @@ fun ThirdPartyServiceRoute(
             if (service.needsReview || !service.enabled) {
                 ThirdPartyPermissionReviewScreen(
                     service = service,
+                    repository = repository,
                     onGrant = { granted ->
                         scope.launch {
                             state = LoadState.Loading
@@ -409,15 +572,27 @@ fun ThirdPartyServiceRoute(
 @Composable
 private fun ThirdPartyPermissionReviewScreen(
     service: ThirdPartyService,
+    repository: ThirdPartyServiceRepository,
     onGrant: (Set<String>) -> Unit,
     onBackToServices: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     val required = service.manifest.permissions.required
     val optional = service.manifest.permissions.optional
     var selected by remember(service.serviceId, service.commitSha) {
         mutableStateOf((required + optional).toSet())
     }
-    val canEnable = selected.containsAll(required)
+    var configurationValues by remember(service.serviceId, service.commitSha) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var configurationError by remember(service.serviceId, service.commitSha) { mutableStateOf<String?>(null) }
+    LaunchedEffect(service.serviceId, service.commitSha) {
+        runCatching { repository.getConfiguration(service.serviceId) }
+            .onSuccess { configurationValues = it }
+            .onFailure { configurationError = it.message ?: "读取插件配置失败" }
+    }
+    val configurationComplete = service.manifest.configuration
+        .filter { it.required }
+        .all { !(configurationValues[it.key] ?: it.default).isNullOrBlank() }
+    val canEnable = selected.containsAll(required) && configurationComplete
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -462,6 +637,26 @@ private fun ThirdPartyPermissionReviewScreen(
                 )
             }
         }
+        if (service.manifest.configuration.isNotEmpty()) {
+            item {
+                InfoCard(title = "插件配置", subtitle = "配置值仅保存在本机，并使用 Android Keystore / AES-GCM 加密") {
+                    service.manifest.configuration.forEach { definition ->
+                        OutlinedTextField(
+                            value = configurationValues[definition.key].orEmpty(),
+                            onValueChange = { value -> configurationValues = configurationValues + (definition.key to value) },
+                            label = { Text("${definition.label}${if (definition.required) " *" else ""}") },
+                            supportingText = { Text("${definition.key} · ${definition.description}") },
+                            visualTransformation = if (definition.type == "secret") PasswordVisualTransformation() else VisualTransformation.None,
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    configurationError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
         item {
             InfoCard(title = "允许执行和联网来源", subtitle = "这些 HTTP/HTTPS origin 视为受信任插件代码来源") {
                 if (service.allowedOrigins.isEmpty()) {
@@ -482,7 +677,14 @@ private fun ThirdPartyPermissionReviewScreen(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     enabled = canEnable,
-                    onClick = { onGrant(selected) },
+                    onClick = {
+                        scope.launch {
+                            configurationError = null
+                            runCatching { repository.saveConfiguration(service.serviceId, configurationValues) }
+                                .onSuccess { onGrant(selected) }
+                                .onFailure { configurationError = it.message ?: "保存插件配置失败" }
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("同意并启用")
@@ -492,7 +694,7 @@ private fun ThirdPartyPermissionReviewScreen(
                 }
                 if (!canEnable) {
                     Text(
-                        "必须权限未全部同意，服务无法启用。",
+                        if (!configurationComplete) "请先填写全部必填配置。" else "必须权限未全部同意，服务无法启用。",
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -628,18 +830,51 @@ private fun ThirdPartyServiceWebViewScreen(
                 settings.allowUniversalAccessFromFileURLs = false
                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 webViewClient = ThirdPartyWebViewClient(service)
-                addJavascriptInterface(
-                    ThirdPartyNativeBridge(
+                if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+                    val nativeBridge = ThirdPartyNativeBridge(
                         service = service,
                         apiRegistry = apiRegistry,
                         confirmer = confirmer,
                         scope = bridgeScope,
-                        webViewProvider = { webViewRef },
                         onCloseService = onCloseService,
-                    ),
-                    "BjtuServiceNative",
-                )
-                loadUrl(ThirdPartyServiceSandbox.entrypointUrlFor(service))
+                    )
+                    val allowedBridgeOrigins = buildSet {
+                        add(ThirdPartyServiceSandbox.originFor(service.serviceId, service.commitSha))
+                        addAll(service.allowedOrigins)
+                    }
+                    WebViewCompat.addWebMessageListener(
+                        this,
+                        ThirdPartyBridgeObjectName,
+                        allowedBridgeOrigins,
+                        object : WebViewCompat.WebMessageListener {
+                            override fun onPostMessage(
+                                view: WebView,
+                                message: WebMessageCompat,
+                                sourceOrigin: Uri,
+                                isMainFrame: Boolean,
+                                replyProxy: JavaScriptReplyProxy,
+                            ) {
+                                if (message.type != WebMessageCompat.TYPE_STRING) {
+                                    Log.w(ThirdPartyBridgeLogTag, "Rejected non-string WebMessage from $sourceOrigin")
+                                    return
+                                }
+                                nativeBridge.invoke(
+                                    requestJson = message.data.orEmpty(),
+                                    callerUrl = sourceOrigin.toString(),
+                                    reply = replyProxy::postMessage,
+                                )
+                            }
+                        },
+                    )
+                    loadUrl(ThirdPartyServiceSandbox.entrypointUrlFor(service))
+                } else {
+                    Log.e(ThirdPartyBridgeLogTag, "System WebView does not support WEB_MESSAGE_LISTENER")
+                    loadData(
+                        "<html><body><h2>系统 WebView 版本过低</h2><p>无法安全启用第三方插件桥接，请更新 Android System WebView 后重试。</p></body></html>",
+                        "text/html",
+                        "UTF-8",
+                    )
+                }
             }
         },
     )
@@ -656,11 +891,13 @@ private class ThirdPartyNativeBridge(
     private val apiRegistry: ThirdPartyServiceApiRegistry,
     private val confirmer: ThirdPartySensitiveActionConfirmer,
     private val scope: CoroutineScope,
-    private val webViewProvider: () -> WebView?,
     private val onCloseService: () -> Unit,
 ) {
-    @JavascriptInterface
-    fun invoke(requestJson: String) {
+    fun invoke(
+        requestJson: String,
+        callerUrl: String,
+        reply: (String) -> Unit,
+    ) {
         scope.launch {
             val requestStart = System.currentTimeMillis()
             val parsedRequest = runCatching { AppJson.parseToJsonElement(requestJson).jsonObject }
@@ -682,12 +919,9 @@ private class ThirdPartyNativeBridge(
                 )
             } else {
                 runCatching {
-                    val currentPageUrl = withContext(Dispatchers.Main.immediate) {
-                        webViewProvider()?.url.orEmpty()
-                    }
                     val trace = "serviceId=${service.serviceId}, requestId=$traceRequestId, userIdentity=$userIdentity, platform=android_webview"
                     if (!ThirdPartyWebViewAccessPolicy.isTrustedRuntimeUrl(
-                            url = currentPageUrl,
+                            url = callerUrl,
                             serviceId = service.serviceId,
                             commitSha = service.commitSha,
                             allowedOrigins = service.allowedOrigins,
@@ -695,7 +929,7 @@ private class ThirdPartyNativeBridge(
                     ) {
                         Log.w(
                             ThirdPartyBridgeLogTag,
-                            "Third-party bridge blocked by policy: $trace, url=$currentPageUrl",
+                            "Third-party bridge blocked by policy: $trace, url=$callerUrl",
                         )
                         return@runCatching requestId to bridgeErrorResponse("bridge_failed", "当前页面不在第三方服务允许执行来源内")
                     }
@@ -718,7 +952,7 @@ private class ThirdPartyNativeBridge(
                         return@runCatching requestId to httpRequest(
                             requestId = traceRequestId,
                             params = params,
-                            requestUrl = currentPageUrl,
+                            requestUrl = callerUrl,
                             userIdentity = userIdentity,
                         )
                     }
@@ -727,7 +961,7 @@ private class ThirdPartyNativeBridge(
                         method = method,
                         params = params,
                         confirmer = confirmer,
-                        currentPageUrl = currentPageUrl,
+                        currentPageUrl = callerUrl,
                     )
                     val ok = result.second["ok"]?.jsonPrimitive?.booleanOrNull == true
                     Log.i(
@@ -745,18 +979,17 @@ private class ThirdPartyNativeBridge(
                 }
             }
             val callbackId = response.first
-            val payload = response.second.toString()
             val shouldClose = method == "app.close_service" &&
                 response.second["ok"]?.jsonPrimitive?.booleanOrNull == true
             Log.i(
                 ThirdPartyBridgeLogTag,
                 "Third-party bridge resolved: serviceId=${service.serviceId}, requestId=$traceRequestId, method=$method, ok=${response.second["ok"]?.jsonPrimitive?.booleanOrNull}",
             )
-            webViewProvider()?.post {
-                webViewProvider()?.evaluateJavascript(
-                    "window.BjtuService && window.BjtuService.__resolve(${JSONObject.quote(callbackId)}, $payload);",
-                    null,
-                )
+            withContext(Dispatchers.Main.immediate) {
+                reply(buildJsonObject {
+                    put("id", callbackId)
+                    put("payload", response.second)
+                }.toString())
                 if (shouldClose) onCloseService()
             }
         }
@@ -1049,7 +1282,12 @@ private val BjtuServiceBridgeScript = """
           return new Promise(function (resolve) {
             var id = String(Date.now()) + "-" + Math.random().toString(16).slice(2);
             callbacks[id] = resolve;
-            window.BjtuServiceNative.invoke(JSON.stringify({ id: id, method: method, params: params || {} }));
+            if (!window.BjtuServiceNative || typeof window.BjtuServiceNative.postMessage !== 'function') {
+              delete callbacks[id];
+              resolve({ ok: false, error: { code: 'bridge_unavailable', message: '第三方插件安全桥接不可用' } });
+              return;
+            }
+            window.BjtuServiceNative.postMessage(JSON.stringify({ id: id, method: method, params: params || {} }));
           });
         },
         __resolve: function (id, payload) {
@@ -1059,8 +1297,20 @@ private val BjtuServiceBridgeScript = """
           callback(payload);
         }
       };
+      if (window.BjtuServiceNative) {
+        window.BjtuServiceNative.onmessage = function (event) {
+          try {
+            var response = JSON.parse(event.data);
+            window.BjtuService.__resolve(response.id, response.payload);
+          } catch (_) {
+            // Ignore malformed native responses; native payloads are generated by the host.
+          }
+        };
+      }
     })();
 """.trimIndent()
+
+private const val ThirdPartyBridgeObjectName = "BjtuServiceNative"
 
 private fun formatBytes(bytes: Long): String =
     when {

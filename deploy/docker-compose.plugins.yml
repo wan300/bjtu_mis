@@ -1,0 +1,87 @@
+name: bjtu-plugin-platform
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bjtu_plugins
+      POSTGRES_USER: bjtu_plugins
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - plugin_database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bjtu_plugins -d bjtu_plugins"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: platform/Dockerfile
+    env_file: /etc/bjtu-plugin-platform.env
+    environment:
+      REPOSITORY_ROOT: /repo
+    command: ["node", "dist/src/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ..
+      dockerfile: platform/Dockerfile
+    restart: unless-stopped
+    env_file: /etc/bjtu-plugin-platform.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 15020
+      ARTIFACT_ROOT: /data/artifacts
+      REPOSITORY_ROOT: /repo
+    ports:
+      - "127.0.0.1:15020:15020"
+    volumes:
+      - plugin_artifacts:/data/artifacts
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+
+  worker:
+    build:
+      context: ..
+      dockerfile: platform/Dockerfile
+    restart: unless-stopped
+    env_file: /etc/bjtu-plugin-platform.env
+    environment:
+      ARTIFACT_ROOT: /data/artifacts
+      REPOSITORY_ROOT: /repo
+    command: ["node", "dist/src/worker.js"]
+    volumes:
+      - plugin_artifacts:/data/artifacts
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  plugin_database:
+  plugin_artifacts:
+
+secrets:
+  postgres_password:
+    file: /etc/bjtu-plugin-postgres-password

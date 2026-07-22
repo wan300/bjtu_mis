@@ -28,6 +28,7 @@ class ThirdPartyServiceApiRegistry(
     private val moduleRepository: ModuleRepository?,
     private val mailRepository: MailRepository?,
     private val credentialStore: CredentialStore? = null,
+    private val configurationReader: (ThirdPartyService, String) -> String? = { _, _ -> null },
 ) {
     suspend fun invoke(
         service: ThirdPartyService,
@@ -44,6 +45,19 @@ class ThirdPartyServiceApiRegistry(
         }
         if (spec.permission !in service.grantedPermissions) {
             return errorResponse("permission_denied", "第三方服务未获得权限：${spec.permission}")
+        }
+        if (spec.localSandboxOnly && !ThirdPartyServiceSandbox.isServiceSandboxUrl(currentPageUrl, service.serviceId, service.commitSha)) {
+            return errorResponse("origin_not_allowed", "该接口只允许插件本地 sandbox origin 调用")
+        }
+        if (normalizedMethod == "app.get_configuration") {
+            val key = params.string("key")
+                ?: return errorResponse("configuration_key_required", "缺少配置键 key")
+            if (service.manifest.configuration.none { it.key == key }) {
+                return errorResponse("configuration_key_not_declared", "插件未声明配置键：$key")
+            }
+            val value = configurationReader(service, key)
+                ?: return errorResponse("configuration_missing", "配置项尚未填写：$key")
+            return successResponse(JsonPrimitive(value))
         }
         if (spec.highRisk) {
             val confirmed = confirmer.confirm(spec.confirmTitle, spec.confirmMessage(service, currentPageUrl, params))
@@ -155,6 +169,11 @@ class ThirdPartyServiceApiRegistry(
 
     companion object {
         val methodSpecs: Map<String, ThirdPartyApiMethodSpec> = listOf(
+            ThirdPartyApiMethodSpec(
+                method = "app.get_configuration",
+                permission = "app.configuration.read",
+                localSandboxOnly = true,
+            ),
             ThirdPartyApiMethodSpec("identity.get_profile", "identity.profile.read"),
             ThirdPartyApiMethodSpec(
                 method = "identity.get_credentials",
@@ -204,6 +223,7 @@ data class ThirdPartyApiMethodSpec(
     val method: String,
     val permission: String,
     val highRisk: Boolean = false,
+    val localSandboxOnly: Boolean = false,
     val confirmTitle: String = "",
     val confirmMessage: (ThirdPartyService, String, JsonObject) -> String = { _, _, _ -> "" },
 )

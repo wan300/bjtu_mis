@@ -97,6 +97,8 @@ android {
         versionCode = 6
         versionName = "v1.3.1"
 
+        buildConfigField("String", "PLUGIN_CATALOG_BASE_URL", "\"https://bjtu.cc\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
@@ -113,6 +115,10 @@ android {
                 "proguard-rules.pro"
             )
         }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {

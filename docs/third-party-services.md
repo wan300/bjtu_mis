@@ -64,7 +64,7 @@ lint 的 `ERROR` 必须修复；`WARN` 用于提示可能的运行时远端引�
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "bjtu.demo",
   "name": "Demo Service",
   "description": "A demo BJTU MIS service.",
@@ -73,16 +73,28 @@ lint 的 `ERROR` 必须修复；`WARN` 用于提示可能的运行时远端引�
   "icon": "icon.svg",
   "author": "Your Name",
   "permissions": {
-    "required": ["identity.profile.read"],
+    "required": ["identity.profile.read", "app.configuration.read"],
     "optional": ["academic.timetable.read"]
   },
-  "allowed_origins": ["https://api.example.com"]
+  "allowed_origins": ["https://api.example.com"],
+  "marketplace": {
+    "category": "academic",
+    "tags": ["课表", "示例"],
+    "license": "MIT"
+  },
+  "configuration": [{
+    "key": "API_TOKEN",
+    "label": "API Token",
+    "description": "第三方 API 的访问令牌",
+    "type": "secret",
+    "required": true
+  }]
 }
 ```
 
 规则：
 
-- `schema_version` 当前必须为 `1`。
+- 高级直链导入兼容 `schema_version: 1`；投稿插件大厅必须使用 `schema_version: 2`，且 `version` 必须是 SemVer。
 - `id` 长度 3-64，以小写字母开头，只能包含小写字母、数字、点、下划线和短横线。
 - `name`、`description`、`version`、`author` 不能为空。
 - `entrypoint` 和 `icon` 必须是 `dist/` 内相对路径，不能包含 `..`、反斜杠、URL、盘符或绝对路径。
@@ -91,6 +103,8 @@ lint 的 `ERROR` 必须修复；`WARN` 用于提示可能的运行时远端引�
 - `required` 和 `optional` 不能声明重复权限。
 - `allowed_origins` 只能填写 HTTP/HTTPS origin，例如 `https://api.example.com` 或 `http://127.0.0.1:8080`，不能带路径、查询参数、片段或用户名。
 - `allowed_origins` 是受信任的执行和联网来源。来自这些 origin 的页面或 iframe 可作为插件代码运行，并可调用该插件已授权的接口；`app.http_request` 的 `url` origin 也必须在该列表中。
+- v2 的 `marketplace.category` 只能为 `academic`、`campus`、`information`、`productivity`、`assistant`、`other`；`tags` 最多 5 个，`license` 只展示、不作为上架条件。
+- v2 的 `configuration` 最多 32 项，键匹配 `[A-Z][A-Z0-9_]{0,63}`，类型为 `text | secret | url | number | boolean | select`。声明配置时，必须把 `app.configuration.read` 放入必选权限；`secret` 不允许默认值。
 
 Schema 文件：
 
@@ -104,6 +118,7 @@ Schema 文件：
 | 权限 ID | 能力 |
 | --- | --- |
 | `identity.profile.read` | 读取姓名、学号、学院、专业、邮箱等个人资料。 |
+| `app.configuration.read` | 从插件本地 sandbox origin 读取当前插件声明过的本机加密配置。远端页面不能读取。 |
 | `identity.credentials.read` | 读取首次登录 BJTU MIS 时保存的登录名和明文密码。服务启用后，调用对应接口时宿主会弹出单次确认。 |
 | `academic.timetable.read` | 读取当前课表和用户自定义课程。 |
 | `academic.user_courses.write` | 新增、修改或删除用户手动创建的课程。 |
@@ -205,6 +220,7 @@ await window.BjtuService.invoke('app.close_service');
 | `mail.list_messages` | `mail.messages.read` | 可选 `folder_id` string，默认 `1`、`start` int，默认 `0`、`limit` int，默认 `20`，会限制在 1-100。 | `ModuleEnvelope<MailMessagesData>` |
 | `mail.get_message` | `mail.message_detail.read` | `message_id` string 必填；可选 `mboxa` string。 | `ModuleEnvelope<MailMessageDetail>` |
 | `mail.send` | `mail.send` | 可选 `compose_id` string、`account` string、`to` string[]、`cc` string[]、`bcc` string[]、`subject` string、`content` string、`body` string 兼容别名、`html_content` string、`is_html` boolean、`save_sent_copy` boolean，默认 `true`、`request_read_receipt` boolean，默认 `false`、`schedule_date` string、`show_one_rcpt` boolean，默认 `false`、`forbid_download` boolean，默认 `false`、`mboxa` string。当前不接受第三方附件列表。 | `MailComposeResponse` |
+| `app.get_configuration` | `app.configuration.read` | `key` string 必填，只能读取 manifest 声明的键，且只允许本地 sandbox origin 调用。 | string |
 | `app.http_request` | 无 | `url` string 必填；可选 `method` `"GET" \| "POST" \| "PUT" \| "DELETE"`，默认 `GET`、`data` JSON、`headers` object。 | `HttpBridgeResponse` |
 | `app.close_service` | 无 | 无。 | `{}`，随后关闭当前第三方服务并返回服务列表。 |
 
