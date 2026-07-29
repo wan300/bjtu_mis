@@ -363,6 +363,26 @@ class SessionManager(
         }
     }
 
+    suspend fun <T> withCampusServiceClient(
+        serviceId: String,
+        block: suspend (BjtuHttpClient) -> T,
+    ): T = withAuthenticatedClient { client ->
+        when (serviceId.lowercase()) {
+            "mis" -> Unit
+            "aa" -> {
+                val ready = ensureAaSessionReady()
+                if (!ready.first) {
+                    throw SessionExpiredException(ready.second ?: "教学支撑平台会话初始化失败。")
+                }
+            }
+            "ve" -> if (!bootstrapVeSessionBestEffort()) {
+                throw SessionExpiredException("虚拟教学环境会话初始化失败。")
+            }
+            else -> throw IllegalArgumentException("未注册的校园服务：$serviceId")
+        }
+        block(client)
+    }
+
     fun logout() {
         inlineLoginState = null
         validationCache.clear()

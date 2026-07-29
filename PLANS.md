@@ -4,7 +4,7 @@
 
 项目原则以 `.specify/memory/constitution.md` 为权威来源；本文件只定义 ExecPlan 写作和维护规范。如两者冲突，以 constitution 为准，并同步修正本文件。
 
-适用场景：复杂功能、风险重构、Room 数据迁移、构建或依赖升级、Open WebUI 与 Android 桥接变化、权限/安全敏感改动、架构边界变化，或需求仍有歧义的任务。
+适用场景：复杂功能、风险重构、Room 数据迁移、构建或依赖升级、Open WebUI 与 Android 桥接变化、第三方插件身份/runtime/origin/存储/校园代理、权限/安全敏感改动、架构边界变化，或需求仍有歧义的任务。
 
 使用规则：
 
@@ -13,8 +13,10 @@
 - 所有歧义必须在计划里明确解决；不能解决的写成 `TODO: confirm` 并说明阻塞影响。
 - 使用苏格拉底式提问来澄清目标、约束和设计；不要假设任何未明确说明的事实。
 - 每个里程碑都必须包含预期可观察行为和验证命令。
-- constitution 第 VI 条列出的高风险变更必须先有 ExecPlan，并在计划中写明验证和回滚。
+- constitution 第 VI 条列出的高风险变更必须先有 ExecPlan，并在计划中写明验证和回滚；第三方插件变更还必须逐项通过原则 VII 的 Manifest v3 / P0-A 零信任基线。
+- 插件计划 MUST 以 `docs/third-party-services.md` 和 Manifest v3 schema 为规范输入；带 superseded/legacy 标记的旧 spec、plan 或 API 只能提供历史背景，不得授权恢复 v1/v2、聚合 origin、远程桥、明文凭据读取或通用原生 HTTP。
 - 默认验证命令按改动范围选择：Android 改动跑 `Set-Location android; .\gradlew.bat test`；构建/资源/打包相关跑 `Set-Location android; .\gradlew.bat assembleDebug`；Open WebUI 改动跑 `Set-Location android\open-webui; npm run test:frontend -- --run`；类型检查可跑 `npm run check`，但当前 Open WebUI 存在既有类型诊断基线失败，需记录。
+- 插件平台改动还需运行 `web/platform` typecheck/unit/integration/e2e、共享 Manifest lint 和适用的 Android WebView instrumentation；本机环境无法执行的阻塞项必须交由 CI 并记录。
 - 不要把执行计划当作一次性草稿；实现过程中要维护它。
 
 ## ExecPlan: <标题>
@@ -53,6 +55,7 @@
 - 不引入：
 - 不提交：
 - 安全/隐私限制：
+- 插件 Manifest v3 / publisher identity / origin / bridge / storage / campus proxy 基线：
 - 兼容性要求：
 - 非目标：
 
@@ -74,6 +77,7 @@
 - Android 数据流：
 - UI 行为：
 - Open WebUI/Capacitor 桥接：
+- 第三方插件 runtime 与信任边界：
 - Room/缓存/迁移影响：
 - 错误和空状态：
 - 与既有模式保持一致的点：
@@ -131,6 +135,10 @@
   - 接受标准：
 - Open WebUI 类型检查：`Set-Location android\open-webui; npm run check`
   - 接受标准或已知失败说明：
+- 插件平台验证：`Set-Location web\platform; npm run typecheck; npm test; npm run test:integration; npm run test:e2e`
+  - 接受标准：
+- Manifest/WebView 安全验证：共享 lint、schema 一致性、Android JVM 与 API 26/35 instrumentation
+  - 接受标准或外部环境说明：
 - 手动验证：
   - 设备/模拟器：
   - 网络/账号要求：
@@ -176,7 +184,7 @@
 - [ ] 已添加或更新必要测试和 fixture。
 - [ ] 已运行适当验证命令，并记录结果。
 - [ ] 已检查 `git status --short` 和 `git diff`。
-- [ ] 没有提交 secrets、本机配置、构建产物、APK/AAB、`node_modules`、Open WebUI build、Room schema 或缓存。
+- [ ] 没有提交 secrets、本机配置、构建产物、APK/AAB、`node_modules`、Open WebUI build、未批准的临时 schema 或缓存；如有 Room migration，已审查并提交 `android/app/schemas/` 对应版本历史。
 - [ ] 最终汇报包含变更文件、主要行为、验证结果、已知失败和剩余 TODO。
 
 ## ExecPlan: OpenWebUI Local Agent tool argument compatibility
@@ -204,7 +212,7 @@ Fix local-first OpenWebUI Agent tool calls that fail because models or OpenAI-co
 
 - Run `Set-Location android\open-webui; npm run test:frontend -- --run`.
 - Run `Set-Location android; .\gradlew.bat test`.
-- Inspect `git diff` and `git status --short` to ensure no secrets, local config, APK/AAB, build output, `node_modules`, Room schema, or Open WebUI generated assets were included.
+- Inspect `git diff` and `git status --short` to ensure no secrets, local config, APK/AAB, build output, `node_modules`, unreviewed temporary schema, or Open WebUI generated assets were included.
 
 ### 5. Rollback
 

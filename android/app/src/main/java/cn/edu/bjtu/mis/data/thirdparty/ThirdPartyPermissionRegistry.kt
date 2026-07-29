@@ -21,12 +21,6 @@ object ThirdPartyPermissionRegistry {
             description = "允许第三方服务读取姓名、学号、学院、专业、邮箱等个人资料。",
         ),
         ThirdPartyPermission(
-            id = "identity.credentials.read",
-            title = "读取登录凭据",
-            description = "允许第三方服务读取首次登录 BJTU MIS 时保存的学号和密码。该权限风险较高，仅授权给可信服务。",
-            highRisk = true,
-        ),
-        ThirdPartyPermission(
             id = "academic.timetable.read",
             title = "读取课表",
             description = "允许第三方服务读取当前课表和用户自定义课程。",

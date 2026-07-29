@@ -24,6 +24,7 @@ import cn.edu.bjtu.mis.data.db.MIGRATION_6_7
 import cn.edu.bjtu.mis.data.db.MIGRATION_7_8
 import cn.edu.bjtu.mis.data.db.MIGRATION_8_9
 import cn.edu.bjtu.mis.data.db.MIGRATION_9_10
+import cn.edu.bjtu.mis.data.db.MIGRATION_10_11
 import cn.edu.bjtu.mis.data.employment.EmploymentCalendarSyncStore
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderCoordinator
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderNotifier
@@ -50,12 +51,17 @@ import cn.edu.bjtu.mis.data.security.SecureCredentialStore
 import cn.edu.bjtu.mis.data.thirdparty.AssetThirdPartyBundledServiceProvider
 import cn.edu.bjtu.mis.data.thirdparty.SecureThirdPartyConfigurationStore
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyCatalogRepository
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyCampusProxy
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceApiRegistry
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceInstaller
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceRepository
+import cn.edu.bjtu.mis.data.thirdparty.FileThirdPartyKvStore
+import cn.edu.bjtu.mis.data.thirdparty.AndroidThirdPartyWebStorageCleaner
+import cn.edu.bjtu.mis.data.thirdparty.WebViewThirdPartyDataMigrationRunner
 import cn.edu.bjtu.mis.data.update.AppUpdateChecker
 import cn.edu.bjtu.mis.data.update.AppUpdatePreferenceStore
 import cn.edu.bjtu.mis.data.update.installedVersionName
+import cn.edu.bjtu.mis.ui.preferences.QuickActionsStore
 import cn.edu.bjtu.mis.ui.theme.AppThemeStore
 
 class AppContainer(context: Context) {
@@ -76,6 +82,7 @@ class AppContainer(context: Context) {
             MIGRATION_7_8,
             MIGRATION_8_9,
             MIGRATION_9_10,
+            MIGRATION_10_11,
         ).build()
     }
 
@@ -174,6 +181,9 @@ class AppContainer(context: Context) {
     val themeStore: AppThemeStore by lazy {
         PerfTrace.measure("AppContainer.themeStore") { AppThemeStore(appContext) }
     }
+    val quickActionsStore: QuickActionsStore by lazy {
+        PerfTrace.measure("AppContainer.quickActionsStore") { QuickActionsStore(appContext) }
+    }
     val agentWorkspaceManager: WorkspaceManager by lazy {
         PerfTrace.measure("AppContainer.agentWorkspaceManager") { WorkspaceManager(appContext) }
     }
@@ -203,6 +213,9 @@ class AppContainer(context: Context) {
     val thirdPartyConfigurationStore: SecureThirdPartyConfigurationStore by lazy {
         SecureThirdPartyConfigurationStore(appContext)
     }
+    val thirdPartyKvStore: FileThirdPartyKvStore by lazy {
+        FileThirdPartyKvStore(appContext)
+    }
     val thirdPartyCatalogRepository: ThirdPartyCatalogRepository by lazy {
         ThirdPartyCatalogRepository(
             client = httpClient,
@@ -221,6 +234,9 @@ class AppContainer(context: Context) {
                     servicesRoot = thirdPartyServicesRoot,
                 ),
                 configurationStore = thirdPartyConfigurationStore,
+                kvStore = thirdPartyKvStore,
+                migrationRunner = WebViewThirdPartyDataMigrationRunner(appContext),
+                webStorageCleaner = AndroidThirdPartyWebStorageCleaner(),
             )
         }
     }
@@ -229,7 +245,8 @@ class AppContainer(context: Context) {
             ThirdPartyServiceApiRegistry(
                 moduleRepository = moduleRepository,
                 mailRepository = mailRepository,
-                credentialStore = credentialStore,
+                kvStore = thirdPartyKvStore,
+                campusProxy = ThirdPartyCampusProxy(sessionManager),
                 configurationReader = thirdPartyServiceRepository::configurationValue,
             )
         }

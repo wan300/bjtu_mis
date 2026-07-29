@@ -48,17 +48,17 @@
             </p>
             <div class="hero__actions">
               <div class="hero__download">
-                <a class="btn btn--signal" data-download-button href="https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.3.1">
+                <a class="btn btn--signal" data-download-button href="https://github.com/wan300/bjtu_mis_Android/releases/latest">
                   <span class="btn__icon">↓</span>
                   <span class="btn__text">
                     <span data-download-label>查看发布页</span>
-                    <small class="btn__subtext">当前选择 <span data-release-version>v1.3.1</span></small>
+                    <small class="btn__subtext">当前选择 <span data-release-version>v1.4.0</span></small>
                   </span>
                 </a>
                 <p class="hero__download-note">
                   中国大陆地区如无法使用 GitHub Releases 下载，可通过
-                  <a href="https://pan.baidu.com/s/1a4Ijf02F5d-fhcoIFm22aQ?pwd=0721" target="_blank" rel="noreferrer">百度网盘备用下载</a>
-                  获取 app，提取码：<strong>0721</strong>。
+                  <a href="https://pan.baidu.com/s/1bfgaYYnw5P0xoOoVm7jLQg?pwd=0721" target="_blank" rel="noreferrer">百度网盘备用下载</a>
+                  获取 app-release.apk，提取码：<strong>0721</strong>。
                 </p>
               </div>
               <a class="btn btn--ghost" href="#modules">查看功能模块</a>
@@ -120,7 +120,7 @@
             <p class="eyebrow">Developer platform</p>
             <h2>第三方插件开发</h2>
             <p>
-              第三方插件是安装在应用内的静态 Web 服务，可以在用户授权后读取课表、成绩、考务、作业、课程资源和邮箱等受控数据，也可以通过 <code>allowed_origins</code> 与 <code>app.http_request</code> 访问声明过的远端 API、支付跳转或回调来源。开发者文档提供 manifest、权限、JavaScript API、预检 digest、lint 工具和发布检查清单。
+              第三方插件是安装在应用内的 Manifest v3 静态 Web 服务。插件通过细粒度权限读取受控校园数据，通过用途拆分的 connect、media、frame 与 navigation origin 使用远程资源；原生桥只对稳定本地 origin 的 main frame 开放。开发者文档覆盖 capability、加密 KV、事务迁移、只读校园代理、制品 digest、lint 和发布检查清单。
             </p>
             <div class="developer-panel__actions">
               <a class="btn btn--primary" href="developers.html">阅读开发者文档</a>
@@ -130,10 +130,10 @@
           <ul class="developer-panel__list" aria-label="第三方插件能力摘要">
             <li>公开 GitHub 仓库导入</li>
             <li>纯静态 Web 包运行</li>
-            <li>manifest 权限声明</li>
-            <li>受控 HTTP 请求</li>
+            <li>Manifest v3 capability 与权限</li>
+            <li>四类远程 origin 边界</li>
             <li>导入预检与 digest</li>
-            <li>WebView 桥接 API</li>
+            <li>稳定 main-frame WebView 桥</li>
           </ul>
         </div>
       </section>
@@ -149,30 +149,30 @@
             <label class="release-selector" for="release-select">
               <span>版本选择</span>
               <select id="release-select" data-release-select aria-describedby="release-select-help">
-                <option value="v1.3.1">v1.3.1 · 正式版 · 2026-06-24</option>
+                <option value="v1.4.0">v1.4.0 · 正式版 · --</option>
               </select>
             </label>
             <p class="download-panel__hint" id="release-select-help">
               当前选择会同时更新下载链接、文件大小和对应发布页。
             </p>
             <div class="download-panel__actions">
-              <a class="btn btn--signal" data-download-button href="https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.3.1">
+              <a class="btn btn--signal" data-download-button href="https://github.com/wan300/bjtu_mis_Android/releases/latest">
                 <span class="btn__icon">↓</span>
                 <span data-download-label>查看发布页</span>
               </a>
-              <a class="btn btn--ghost" data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases" target="_blank" rel="noreferrer">查看发布页</a>
+              <a class="btn btn--ghost" data-release-link href="https://github.com/wan300/bjtu_mis_Android/releases/latest" target="_blank" rel="noreferrer">查看发布页</a>
             </div>
             <p class="download-panel__mirror">
               中国大陆地区如无法使用 GitHub Releases 下载，可通过
-              <a href="https://pan.baidu.com/s/1a4Ijf02F5d-fhcoIFm22aQ?pwd=0721" target="_blank" rel="noreferrer">百度网盘备用下载</a>
-              获取 app，提取码：<strong>0721</strong>。
+              <a href="https://pan.baidu.com/s/1bfgaYYnw5P0xoOoVm7jLQg?pwd=0721" target="_blank" rel="noreferrer">百度网盘备用下载</a>
+              获取 app-release.apk，提取码：<strong>0721</strong>。
             </p>
             <p class="release-note">GitHub API 暂时不可用，当前显示内置版本快照。</p>
           </div>
           <div class="download-panel__status" aria-label="发布信息">
             <div class="ticket-row">
               <span>当前选择</span>
-              <strong data-release-version>v1.3.1</strong>
+              <strong data-release-version>v1.4.0</strong>
             </div>
             <div class="ticket-row">
               <span>发布类型</span>
@@ -180,7 +180,7 @@
             </div>
             <div class="ticket-row">
               <span>发布日期</span>
-              <strong data-release-published>2026-06-24</strong>
+              <strong data-release-published>--</strong>
             </div>
             <div class="ticket-row">
               <span>文件大小</span>
@@ -207,6 +207,6 @@
     </footer>
 
     <script src="assets/js/modules.js?v=2026062602"></script>
-    <script src="assets/js/site.js?v=2026062602"></script>
+    <script src="assets/js/site.js?v=2026072802"></script>
   </body>
 </html>

@@ -1,0 +1,8 @@
+# Copy this file to release-signing.properties and keep the real file uncommitted.
+# Relative storeFile paths are resolved from the android/ project directory.
+storeFile=path/to/original-bjtu-mis-release.jks
+storePassword=replace-with-local-secret
+keyAlias=replace-with-original-key-alias
+keyPassword=replace-with-local-secret
+# Use PKCS12 for .p12/.pfx stores. JKS is typical for .jks/.keystore files.
+storeType=JKS

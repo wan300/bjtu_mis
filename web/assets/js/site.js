@@ -3,16 +3,24 @@
   const releaseListingUrl = "https://github.com/wan300/bjtu_mis_Android/releases";
   const fallbackReleases = [
     {
+      tag_name: "v1.4.0",
+      html_url: "https://github.com/wan300/bjtu_mis_Android/releases/latest",
+      prerelease: false,
+      published_at: "",
+      release_page_only: true,
+      assets: []
+    },
+    {
       tag_name: "v1.3.1",
       html_url: "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.3.1",
       prerelease: false,
       published_at: "2026-06-24T17:08:04Z",
       assets: [
         {
-          name: "bjtu-mis-android-v1.3.1-release-unsigned.apk",
-          size: 212949118,
+          name: "app-release.apk",
+          size: 212961406,
           browser_download_url:
-            "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.3.1/bjtu-mis-android-v1.3.1-release-unsigned.apk"
+            "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.3.1/app-release.apk"
         }
       ]
     },
@@ -101,9 +109,9 @@
       ]
     }
   ];
-  const fallbackApk = "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.3.1";
-  const fallbackRelease = "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.3.1";
-  const fallbackTag = "v1.3.1";
+  const fallbackApk = "https://github.com/wan300/bjtu_mis_Android/releases/latest";
+  const fallbackRelease = "https://github.com/wan300/bjtu_mis_Android/releases/latest";
+  const fallbackTag = "v1.4.0";
   const fallbackSizeText = "--";
   const releaseRefreshInterval = 5 * 60 * 1000;
   const imageAssetQuery = "?v=2026062602";
@@ -320,7 +328,7 @@
       node.textContent = "正式版";
     });
     published.forEach((node) => {
-      node.textContent = "2026-06-24";
+      node.textContent = "--";
     });
     availability.forEach((node) => {
       node.textContent = "未提供 APK";
@@ -345,6 +353,7 @@
         tag,
         htmlUrl: release.html_url || `${releaseListingUrl}/tag/${tag}`,
         prerelease: Boolean(release.prerelease),
+        releasePageOnly: Boolean(release.release_page_only),
         publishedAt: release.published_at || release.created_at || "",
         apkUrl: apk && apk.browser_download_url ? apk.browser_download_url : "",
         apkSize: apk && Number.isFinite(apk.size) ? apk.size : 0,
@@ -391,17 +400,26 @@
 
     function setButtons(release) {
       const downloadUrl = release.hasApk ? release.apkUrl : release.htmlUrl || releaseListingUrl;
+      const isAvailable = release.hasApk || release.releasePageOnly;
       buttons.forEach((button) => {
         button.href = downloadUrl;
         button.dataset.version = release.tag;
-        button.setAttribute("aria-disabled", String(!release.hasApk));
-        button.classList.toggle("is-disabled", !release.hasApk);
+        button.setAttribute("aria-disabled", String(!isAvailable));
+        button.classList.toggle("is-disabled", !isAvailable);
       });
       buttonLabels.forEach((label) => {
-        label.textContent = release.hasApk ? "下载所选 APK" : "当前版本无 APK";
+        label.textContent = release.hasApk
+          ? "下载所选 APK"
+          : release.releasePageOnly
+            ? "查看最新发布页"
+            : "当前版本无 APK";
       });
       availability.forEach((node) => {
-        node.textContent = release.hasApk ? "可下载" : "未提供 APK";
+        node.textContent = release.hasApk
+          ? "可下载"
+          : release.releasePageOnly
+            ? "等待 GitHub 发布"
+            : "未提供 APK";
         node.classList.toggle("is-unavailable", !release.hasApk);
       });
     }
@@ -453,7 +471,11 @@
           return response.json();
         })
         .then((payload) => {
-          const liveReleases = normalizeReleases(payload);
+          const hasPreferredRelease = Array.isArray(payload)
+            ? payload.some((release) => release && release.tag_name === fallbackTag)
+            : false;
+          const source = hasPreferredRelease ? payload : [fallbackReleases[0], ...payload];
+          const liveReleases = normalizeReleases(source);
           if (!liveReleases.length) throw new Error("GitHub API returned no releases");
           releases = liveReleases;
           applyReleaseSet(releases, selectedTag, false);

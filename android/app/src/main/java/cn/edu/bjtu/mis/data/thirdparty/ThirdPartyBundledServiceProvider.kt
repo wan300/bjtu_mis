@@ -4,7 +4,6 @@ import android.content.Context
 import cn.edu.bjtu.mis.data.AppJson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import java.io.File
 import java.util.UUID
@@ -82,8 +81,8 @@ class AssetThirdPartyBundledServiceProvider(
     private fun readManifest(packageRoot: File): ThirdPartyServiceManifest {
         val manifestFile = File(packageRoot, "bjtu-service.json")
         if (!manifestFile.isFile) throw ThirdPartyServiceException("内置第三方服务缺少 bjtu-service.json")
-        return ThirdPartyManifestValidator.validate(
-            AppJson.decodeFromString<ThirdPartyServiceManifest>(manifestFile.readText(Charsets.UTF_8)),
+        return ThirdPartyManifestValidator.decodeAndValidate(
+            manifestFile.readText(Charsets.UTF_8),
             packageRoot,
         )
     }

@@ -19,6 +19,25 @@
 .\gradlew.bat assembleDebug
 ```
 
+正式版本当前为 `v1.4.0`（`versionCode = 7`）。构建 Release 前，将
+`release-signing.properties.example` 复制为本机的 `release-signing.properties`，
+并填写 `v1.3.1` 使用的原 keystore、alias 和口令：
+
+```powershell
+Copy-Item release-signing.properties.example release-signing.properties
+.\gradlew.bat assembleRelease
+```
+
+真实属性文件和 keystore 已由仓库忽略规则排除，不得提交。也可以改用
+`BJTU_RELEASE_STORE_FILE`、`BJTU_RELEASE_STORE_PASSWORD`、
+`BJTU_RELEASE_KEY_ALIAS`、`BJTU_RELEASE_KEY_PASSWORD` 和可选的
+`BJTU_RELEASE_STORE_TYPE` 环境变量。缺少完整签名配置时，Release 构建会明确失败，
+避免误上传未签名 APK。
+
+也可以直接使用 Android Studio 的 **Build > Generate Signed App Bundle or APK**；
+构建脚本会识别向导注入的临时签名参数，不要求额外创建
+`release-signing.properties`。选择与旧版相同的 keystore 和 alias，才能保持覆盖升级兼容。
+
 `assembleDebug` 和 `assembleRelease` 会在 `preBuild` 阶段自动构建嵌入的 Open WebUI 前端：
 
 1. 在 `open-webui/` 执行 `npm ci`。
@@ -34,6 +53,25 @@ npm ci
 npm run check
 npm run test:frontend -- --run
 ```
+
+## 第三方插件安全基线
+
+第三方插件只使用 Manifest v3 / P0-A。权威规则位于仓库根目录
+`docs/third-party-services.md` 和 constitution 原则 VII，并覆盖旧 v1/v2 spec、plan、
+API 与兼容说明。
+
+- 新客户端拒绝安装、更新和运行 v1/v2，拒绝 `allowed_origins`；旧数据只通过无桥、
+  无网络的救援 WebView 访问。
+- sandbox origin 由 plugin ID 与不可变 publisher subject 决定，不随 commit 改变；
+  bridge 只注入稳定本地 origin 的 main frame，并要求精确 source-origin 匹配。
+- WebView 同时支持 `DOCUMENT_START_SCRIPT` 与 `WEB_MESSAGE_LISTENER` 才允许运行 v3；
+  不使用 `onPageFinished` 降级注入。
+- connect/media/frame/navigation origin 独立声明，`bridge_origins` 只能为 `["self"]`；
+  远程 frame 无桥、第三方 Cookie、顶层导航、下载、弹窗或多窗口。
+- 插件重要数据使用 publisher+plugin 隔离的 AES-GCM `app.storage`；更新通过影子 KV
+  migration、上一版本包和快照完成原子切换与回滚。
+- 校园访问只允许 MIS/AA/VE 的 `campus.request` 只读 registry。运行时不提供
+  `identity.get_credentials`、`identity.credentials.read` 或 `app.http_request`。
 
 ## Agent 集成
 
@@ -71,10 +109,11 @@ npm run test:frontend -- --run
 
 ## 数据迁移
 
-- Room 数据库当前版本为 7。
-- `MIGRATION_6_7` 会删除旧原生 Agent 的 `agent_tasks`、`agent_steps`、`agent_artifacts` 和 `agent_messages` 表。
+- Room 数据库当前版本为 11。
+- `MIGRATION_10_11` 增加插件 publisher subject、data schema、兼容状态、验证级别、上一版本元数据和删除 tombstone；旧插件记录迁移为 `legacy_disabled`，不会自动删除旧包或数据。
+- `MIGRATION_6_7` 仍负责删除旧原生 Agent 的 `agent_tasks`、`agent_steps`、`agent_artifacts` 和 `agent_messages` 表。
 - 应用启动时会调用 `clearLegacyNativeAgentConfiguration`，清理旧 Agent API Key、DataStore 设置和 Android Keystore alias。
 
 ## 本地文件
 
-`local.properties`、Gradle 缓存、APK/AAB、release 输出、Room schema、`open-webui/node_modules/`、`open-webui/build/`、`.svelte-kit/` 和 `app/src/main/assets/public/` 都是本机或构建生成内容，不应提交。
+`local.properties`、`release-signing.properties`、keystore、Gradle 缓存、APK/AAB、release 输出、`open-webui/node_modules/`、`open-webui/build/`、`.svelte-kit/` 和 `app/src/main/assets/public/` 都是本机、秘密或构建生成内容，不应提交。`app/schemas/` 是例外：其中用于迁移验证且经审查的 Room schema 版本历史应随对应 migration 提交。

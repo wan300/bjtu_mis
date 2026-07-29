@@ -1,5 +1,10 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
+  "runtime_version": 1,
+  "min_runtime_version": 1,
+  "required_capabilities": ["runtime.lifecycle.v1"],
+  "optional_capabilities": [],
+  "data_schema_version": 1,
   "id": "bjtu.example.profile_timetable",
   "name": "Profile Timetable Example",
   "description": "Demonstrates profile and timetable reads through the BJTU MIS bridge.",
@@ -11,5 +16,15 @@
     "required": ["identity.profile.read"],
     "optional": ["academic.timetable.read"]
   },
-  "allowed_origins": []
+  "connect_origins": [],
+  "media_origins": [],
+  "frame_origins": [],
+  "navigation_origins": [],
+  "bridge_origins": ["self"],
+  "marketplace": {
+    "category": "academic",
+    "tags": ["example", "timetable"],
+    "license": "MIT"
+  },
+  "configuration": []
 }

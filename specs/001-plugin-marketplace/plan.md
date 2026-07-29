@@ -1,4 +1,28 @@
-# ExecPlan: 插件大厅、投稿平台与 Android 配置能力
+# Archived ExecPlan: 插件大厅、投稿平台与 Android 配置能力
+
+**Status**: Superseded on 2026-07-28
+
+> 本文件保留 2026-07-17 至 2026-07-22 的实现历史，不再定义当前安全策略。其 Manifest
+> v1/v2 兼容、`allowed_origins`、commit 绑定 sandbox、明文身份/通用 HTTP 桥、
+> 立即清理旧版本和“无 Room migration”等假设，均由 constitution 原则 VII、
+> `docs/third-party-services.md`、Manifest v3 schema 以及
+> `docs/plugin-platform-manifest-v3-p0a-execplan.md` 覆盖。后续实现、评审、发布和回滚
+> MUST 只使用上述当前基线；本文件中的冲突内容不得作为兼容承诺或安全例外。
+
+## 当前规范替代项
+
+- 新客户端只安装、更新和运行 Manifest v3；v1/v2 仅保留无桥、无网络的救援入口。
+- `/api/v2`、不可变 GitHub owner/repository 数值身份和稳定 publisher+plugin origin
+  替代旧目录与 commit origin 假设。
+- connect/media/frame/navigation origin 分离，`bridge_origins` 只能是 `["self"]`；
+  bridge 只服务稳定本地 main frame。
+- `app.storage`、影子 migration、上一版本包与 KV 快照、增量授权和 tombstone 清理
+  替代旧的非事务更新策略。
+- 校园访问只能使用 MIS/AA/VE 只读 `campus.request` registry；明文凭据读取和通用原生
+  HTTP bridge 被永久移除。
+
+<details>
+<summary>展开原始历史 ExecPlan（不可作为当前规范）</summary>
 
 ## 1. Title
 
@@ -15,7 +39,7 @@ ExecPlan: 为现有第三方服务增加可投稿、可校验、可分发、可�
 
 - Android 工程：`android/`，现有实现集中在 `data/thirdparty` 和 `ui/screens/ThirdPartyServiceScreens.kt`。
 - Web：`web/` 为 Nginx 直接提供的静态站点。
-- 平台：新增 `platform/`，独立管理 Node 依赖、API、worker、SQL migration 和测试。
+- 平台：`web/platform/` 独立管理 Node 依赖、API、worker、SQL migration 和测试，与静态前端统一位于 `web/`。
 - 部署：`deploy/nginx/bjtu.cc.conf` 现为纯静态配置；服务器具备 Docker、Node、1.6 GiB 内存和约 11 GiB 可用磁盘。
 - 禁止提交：环境文件、OAuth 密钥、数据库卷、插件快照、APK/AAB、Android 本机配置和生成的 WebView 资产。
 
@@ -48,12 +72,12 @@ ExecPlan: 为现有第三方服务增加可投稿、可校验、可分发、可�
 ## 7. Files and components to change
 
 - `docs/`、`web/assets/schemas/`、`tools/`：schema v2、开发者文档和共享 lint。
-- `platform/`、`deploy/`、`web/plugins/`：API、worker、数据库、容器、Nginx 和 Web 大厅。
+- `web/platform/`、`deploy/`、`web/plugins/`：API、worker、数据库、容器、Nginx 和 Web 大厅。
 - `android/app/src/main/java/.../thirdparty` 与相关 UI/测试：目录、安装、配置、安全存储和桥接。
 
 ## 8. Milestones
 
-### Milestone 1: 规格与 manifest v2
+### Milestone 1: 规格与 Manifest v3
 
 - 目标：v1 兼容、v2 校验、配置定义和同步 schema 测试。
 - 验证：Node lint fixtures 与 Android validator tests。
@@ -90,7 +114,7 @@ ExecPlan: 为现有第三方服务增加可投稿、可校验、可分发、可�
 
 ## 10. Validation plan
 
-- 平台：`Set-Location platform; npm ci; npm run typecheck; npm test; npm run test:integration; npm run test:e2e`。
+- 平台：`Set-Location web/platform; npm ci; npm run typecheck; npm test; npm run test:integration; npm run test:e2e`。
 - Android：`Set-Location android; .\gradlew.bat test; .\gradlew.bat assembleDebug`。
 - lint：`node tools/third-party-service-lint.cjs third-party-plugins/examples/profile-timetable`。
 - 部署：Compose config、PostgreSQL migration、API health、`nginx -t`。
@@ -102,7 +126,7 @@ ExecPlan: 为现有第三方服务增加可投稿、可校验、可分发、可�
 - 2026-07-17：完成 schema v2、共享 lint、平台 API/worker/PostgreSQL migration、Web 五个页面、Docker Compose 与 Nginx 反代；平台 typecheck、unit、health e2e 和 Compose config 通过。
 - 2026-07-17：完成 Android 目录缓存、平台双 digest 安装、旧版本延迟清理、加密配置、配置桥接和大厅/已安装 UI；Kotlin 编译通过，首次 310 项测试发现并修正一个新增 validator 测试用例。
 - 2026-07-17：复跑 Android 310 项 JVM 测试与 `assembleDebug` 均通过；平台 typecheck、6 项 unit、health e2e、Compose config、共享 lint/schema 校验通过。数据库 integration 因未设置 `TEST_DATABASE_URL` 跳过；Docker daemon 未运行，镜像构建与 `nginx -t` 留待部署机执行。
-- 2026-07-22：合并前评审发现 artifact 从 `/tmp` 跨卷 `rename`、平台测试被通用 ignore 规则排除、投稿并发去重竞态，以及损坏配置无法恢复删除。修正为 artifact 卷内临时文件原子替换、数据库部分唯一索引、跟踪 `platform/test/**`，并为 Android 删除流程增加目录暂存与失败恢复。
+- 2026-07-22：合并前评审发现 artifact 从 `/tmp` 跨卷 `rename`、平台测试被通用 ignore 规则排除、投稿并发去重竞态，以及损坏配置无法恢复删除。修正为 artifact 卷内临时文件原子替换、数据库部分唯一索引、跟踪平台测试，并为 Android 删除流程增加目录暂存与失败恢复。平台后续整理到 `web/platform/`。
 - 2026-07-22：复核后进一步修正 WebView 配置桥接来源验证、manifest 数组类型校验、平台与 Android ZIP 目录条目计数和目录缓存筛选回退；Android `test assembleDebug`、Open WebUI 89 项 Vitest、平台 typecheck/unit/e2e、共享 lint 与生产 Compose config 均通过，secret/产物检查无异常。数据库 integration 仍因未设置 `TEST_DATABASE_URL` 跳过。
 
 ## 12. Decision log
@@ -131,3 +155,5 @@ ExecPlan: 为现有第三方服务增加可投稿、可校验、可分发、可�
 - [x] 范围内测试与构建通过或记录外部环境限制。
 - [x] 部署、备份和回滚文档更新。
 - [x] 最终 `git status --short`、`git diff` 和 secret/产物检查完成。
+
+</details>

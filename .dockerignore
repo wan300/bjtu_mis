@@ -5,13 +5,14 @@ android
 specs
 third-party-plugins
 
-platform/node_modules
-platform/dist
-platform/.data
-platform/test
-platform/.env
-
 web/*
+!web/platform/
+!web/platform/**
+web/platform/node_modules
+web/platform/dist
+web/platform/.data
+web/platform/test
+web/platform/.env
 !web/assets/
 web/assets/*
 !web/assets/schemas/

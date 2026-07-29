@@ -21,7 +21,7 @@ services:
   migrate:
     build:
       context: ..
-      dockerfile: platform/Dockerfile
+      dockerfile: web/platform/Dockerfile
     env_file: /etc/bjtu-plugin-platform.env
     environment:
       REPOSITORY_ROOT: /repo
@@ -34,7 +34,7 @@ services:
   api:
     build:
       context: ..
-      dockerfile: platform/Dockerfile
+      dockerfile: web/platform/Dockerfile
     restart: unless-stopped
     env_file: /etc/bjtu-plugin-platform.env
     environment:
@@ -45,7 +45,7 @@ services:
     ports:
       - "127.0.0.1:15020:15020"
     volumes:
-      - plugin_artifacts:/data/artifacts
+      - plugin_artifacts:/data/artifacts:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -59,7 +59,7 @@ services:
   worker:
     build:
       context: ..
-      dockerfile: platform/Dockerfile
+      dockerfile: web/platform/Dockerfile
     restart: unless-stopped
     env_file: /etc/bjtu-plugin-platform.env
     environment:

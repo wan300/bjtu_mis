@@ -12,6 +12,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -35,12 +37,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.automirrored.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Grade
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AlertDialog
@@ -61,6 +72,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -78,13 +90,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import cn.edu.bjtu.mis.data.repository.CourseResourceRepository
@@ -174,7 +189,13 @@ import cn.edu.bjtu.mis.ui.components.ProgressiveStatus
 import cn.edu.bjtu.mis.ui.components.SectionTitle
 import cn.edu.bjtu.mis.ui.components.AppUpdateAvailableDialog
 import cn.edu.bjtu.mis.ui.components.AppUpdateDialogPreference
+import cn.edu.bjtu.mis.ui.theme.AppAppearancePreferences
+import cn.edu.bjtu.mis.ui.theme.AppEffectOverride
 import cn.edu.bjtu.mis.ui.theme.AppThemeOption
+import cn.edu.bjtu.mis.ui.theme.AppUiStyle
+import cn.edu.bjtu.mis.ui.theme.LocalAppDesign
+import cn.edu.bjtu.mis.ui.theme.LocalAppEffects
+import cn.edu.bjtu.mis.ui.theme.LocalAppUiStyle
 import cn.edu.bjtu.mis.widget.TimetableWidgetProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -391,6 +412,7 @@ fun ProfileScreen(
                         subtitle = "姓名、学号与身份资料",
                         iconLabel = "人",
                         iconColor = Color(0xFF58C7B4),
+                        icon = Icons.Filled.Person,
                         onClick = onOpenPersonalInfo,
                     ),
                     ProfileSettingsItem(
@@ -398,13 +420,15 @@ fun ProfileScreen(
                         subtitle = "学院、专业与学籍资料",
                         iconLabel = "培",
                         iconColor = Color(0xFF4D8EF7),
+                        icon = Icons.Filled.School,
                         onClick = onOpenTrainingInfo,
                     ),
                     ProfileSettingsItem(
-                        title = "主题",
-                        subtitle = "切换应用配色",
+                        title = "外观与显示",
+                        subtitle = "界面、配色与插件显示",
                         iconLabel = "题",
                         iconColor = Color(0xFFE4B96A),
+                        icon = Icons.Filled.Palette,
                         trailingText = themeOptionLabel(selectedTheme),
                         onClick = onOpenTheme,
                     ),
@@ -413,6 +437,7 @@ fun ProfileScreen(
                         subtitle = "设置普通和紧急提醒阈值",
                         iconLabel = "醒",
                         iconColor = Color(0xFF7C58C2),
+                        icon = Icons.Filled.Notifications,
                         onClick = onOpenHomeworkReminder,
                     ),
                     ProfileSettingsItem(
@@ -424,6 +449,7 @@ fun ProfileScreen(
                         },
                         iconLabel = "更",
                         iconColor = Color(0xFF39A86B),
+                        icon = Icons.Filled.SystemUpdate,
                         trailingText = if (updateCheckDialog == ProfileUpdateCheckDialog.Checking) "检测中" else null,
                         onClick = { startUpdateCheck() },
                     ),
@@ -438,6 +464,7 @@ fun ProfileScreen(
                         subtitle = "查看培养完成情况",
                         iconLabel = "进",
                         iconColor = Color(0xFF6E62D6),
+                        icon = Icons.AutoMirrored.Filled.TrendingUp,
                         onClick = { onNavigate(ModuleKeys.AcademicProgress) },
                     ),
                     ProfileSettingsItem(
@@ -445,6 +472,7 @@ fun ProfileScreen(
                         subtitle = "查看本学期成绩",
                         iconLabel = "绩",
                         iconColor = Color(0xFFE46B2D),
+                        icon = Icons.Filled.Grade,
                         onClick = { onNavigate(ModuleKeys.Scores) },
                     ),
                     ProfileSettingsItem(
@@ -452,6 +480,7 @@ fun ProfileScreen(
                         subtitle = "进入本周课程",
                         iconLabel = "课",
                         iconColor = Color(0xFF18B7D8),
+                        icon = Icons.Filled.CalendarMonth,
                         onClick = { onNavigate(ModuleKeys.Timetable) },
                     ),
                 ),
@@ -465,6 +494,7 @@ fun ProfileScreen(
                         subtitle = "退出当前校园账号",
                         iconLabel = "退",
                         iconColor = Color(0xFFD95B5B),
+                        icon = Icons.AutoMirrored.Filled.Logout,
                         destructive = true,
                         showChevron = false,
                         onClick = { showLogoutConfirm = true },
@@ -582,19 +612,51 @@ fun ProfileTrainingInfoScreen(
 
 @Composable
 fun ProfileThemeScreen(
-    selectedTheme: AppThemeOption,
+    appearance: AppAppearancePreferences,
     onThemeSelected: (AppThemeOption) -> Unit,
+    onUiStyleSelected: (AppUiStyle) -> Unit,
+    onReduceMotionSelected: (AppEffectOverride) -> Unit,
+    onReduceTransparencySelected: (AppEffectOverride) -> Unit,
+    onHideThirdPartyServiceTopBarChanged: (Boolean) -> Unit = {},
 ) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    val effects = LocalAppEffects.current
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(22.dp),
+        contentPadding = PaddingValues(bottom = 24.dp),
+    ) {
         item {
-            ProfileSettingsGroup(
-                items = listOf(
+            ThemeSettingsSection(
+                title = "界面",
+                subtitle = "界面样式与配色相互独立，切换后立即生效",
+            ) {
+                InterfaceStyleChoice(
+                    title = "经典界面",
+                    description = "保留原有导航、角色图标与页面布局",
+                    selected = appearance.uiStyle == AppUiStyle.Classic,
+                    style = AppUiStyle.Classic,
+                    onSelected = onUiStyleSelected,
+                )
+                InterfaceStyleChoice(
+                    title = "Apple 风格界面",
+                    description = "更清晰的层级、系统图标与自适应布局",
+                    selected = appearance.uiStyle == AppUiStyle.Apple,
+                    style = AppUiStyle.Apple,
+                    onSelected = onUiStyleSelected,
+                )
+            }
+        }
+        item {
+            ThemeSettingsSection(
+                title = "配色",
+                subtitle = "可与任一界面样式自由组合",
+            ) {
+                ProfileSettingsGroup(items = listOf(
                     ProfileSettingsItem(
                         title = "蓝白色",
                         subtitle = "浅色背景与蓝色主色",
                         iconLabel = "蓝",
                         iconColor = Color(0xFF0B74F6),
-                        trailingText = if (selectedTheme == AppThemeOption.Default) "当前" else null,
+                        trailingText = if (appearance.theme == AppThemeOption.Default) "当前" else null,
                         showChevron = false,
                         onClick = { onThemeSelected(AppThemeOption.Default) },
                     ),
@@ -603,7 +665,7 @@ fun ProfileThemeScreen(
                         subtitle = "深色背景与暖金主色",
                         iconLabel = "金",
                         iconColor = Color(0xFFE4B96A),
-                        trailingText = if (selectedTheme == AppThemeOption.MascotGold) "当前" else null,
+                        trailingText = if (appearance.theme == AppThemeOption.MascotGold) "当前" else null,
                         showChevron = false,
                         onClick = { onThemeSelected(AppThemeOption.MascotGold) },
                     ),
@@ -612,11 +674,301 @@ fun ProfileThemeScreen(
                         subtitle = "奶油背景与玫瑰茶棕主色",
                         iconLabel = "粉",
                         iconColor = Color(0xFFB86B63),
-                        trailingText = if (selectedTheme == AppThemeOption.IllustrationRose) "当前" else null,
+                        trailingText = if (appearance.theme == AppThemeOption.IllustrationRose) "当前" else null,
                         showChevron = false,
                         onClick = { onThemeSelected(AppThemeOption.IllustrationRose) },
                     ),
-                ),
+                ))
+            }
+        }
+        item {
+            ThemeSettingsSection(
+                title = "辅助效果",
+                subtitle = "默认跟随系统；也可只为本应用覆盖",
+            ) {
+                EffectPreferenceRow(
+                    title = "减少动态效果",
+                    description = "移除位移、弹簧和循环动画，只保留短暂淡化",
+                    override = appearance.reduceMotionOverride,
+                    effectiveValue = effects.reduceMotion,
+                    onOverrideChanged = onReduceMotionSelected,
+                )
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 18.dp),
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f),
+                )
+                EffectPreferenceRow(
+                    title = "降低透明效果",
+                    description = "使用实色表面，增强内容边界与对比度",
+                    override = appearance.reduceTransparencyOverride,
+                    effectiveValue = effects.reduceTransparency,
+                    onOverrideChanged = onReduceTransparencySelected,
+                )
+            }
+        }
+        item {
+            ThemeSettingsSection(
+                title = "插件显示",
+                subtitle = "调整第三方插件运行时的宿主界面",
+            ) {
+                PluginDisplayPreferenceRow(
+                    checked = appearance.hideThirdPartyServiceTopBar,
+                    onCheckedChange = onHideThirdPartyServiceTopBarChanged,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeSettingsSection(
+    title: String,
+    subtitle: String,
+    content: @Composable () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        content()
+    }
+}
+
+@Composable
+private fun InterfaceStyleChoice(
+    title: String,
+    description: String,
+    selected: Boolean,
+    style: AppUiStyle,
+    onSelected: (AppUiStyle) -> Unit,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("ui-style-${style.storageValue}")
+            .selectable(
+                selected = selected,
+                role = Role.RadioButton,
+                onClick = { onSelected(style) },
+            ),
+        shape = MaterialTheme.shapes.large,
+        color = if (selected) colorScheme.primaryContainer else colorScheme.surface,
+        border = BorderStroke(
+            width = if (selected) 2.dp else 1.dp,
+            color = if (selected) colorScheme.primary else colorScheme.outline.copy(alpha = 0.35f),
+        ),
+        tonalElevation = if (selected) 2.dp else 0.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            InterfaceStylePreview(style)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (selected) colorScheme.onPrimaryContainer else colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (selected) {
+                        colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+                    } else {
+                        colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            RadioButton(
+                selected = selected,
+                onClick = null,
+            )
+        }
+    }
+}
+
+@Composable
+private fun InterfaceStylePreview(style: AppUiStyle) {
+    val colorScheme = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier.size(width = 72.dp, height = 52.dp),
+        shape = if (style == AppUiStyle.Apple) {
+            MaterialTheme.shapes.medium
+        } else {
+            MaterialTheme.shapes.small
+        },
+        color = colorScheme.background,
+        border = BorderStroke(1.dp, colorScheme.outline.copy(alpha = 0.35f)),
+    ) {
+        Row(Modifier.padding(5.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (style == AppUiStyle.Apple) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(10.dp),
+                    shape = CircleShape,
+                    color = colorScheme.primary.copy(alpha = 0.18f),
+                ) {}
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth(if (style == AppUiStyle.Apple) 0.72f else 1f)
+                        .height(8.dp),
+                    shape = CircleShape,
+                    color = colorScheme.primary,
+                ) {}
+                repeat(2) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        shape = if (style == AppUiStyle.Apple) {
+                            MaterialTheme.shapes.small
+                        } else {
+                            MaterialTheme.shapes.extraSmall
+                        },
+                        color = colorScheme.surfaceVariant,
+                    ) {}
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EffectPreferenceRow(
+    title: String,
+    description: String,
+    override: AppEffectOverride,
+    effectiveValue: Boolean,
+    onOverrideChanged: (AppEffectOverride) -> Unit,
+) {
+    val isApple = LocalAppUiStyle.current == AppUiStyle.Apple
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        border = if (isApple) {
+            null
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
+        },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (override != AppEffectOverride.FollowSystem) {
+                    TextButton(
+                        onClick = { onOverrideChanged(AppEffectOverride.FollowSystem) },
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Text("恢复跟随系统")
+                    }
+                } else {
+                    Text(
+                        text = "当前跟随系统",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            Switch(
+                checked = effectiveValue,
+                onCheckedChange = { enabled ->
+                    onOverrideChanged(
+                        if (enabled) AppEffectOverride.Enabled else AppEffectOverride.Disabled,
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun PluginDisplayPreferenceRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val isApple = LocalAppUiStyle.current == AppUiStyle.Apple
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("hide-third-party-service-top-bar")
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            ),
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        border = if (isApple) {
+            null
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
+        },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = "隐藏插件页顶栏",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = "插件将占满应用内容区；使用系统返回键或返回手势浏览历史并退出",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = null,
             )
         }
     }
@@ -671,6 +1023,7 @@ private data class ProfileSettingsItem(
     val subtitle: String? = null,
     val iconLabel: String,
     val iconColor: Color,
+    val icon: ImageVector? = null,
     val trailingText: String? = null,
     val destructive: Boolean = false,
     val showChevron: Boolean = true,
@@ -679,12 +1032,17 @@ private data class ProfileSettingsItem(
 
 @Composable
 private fun ProfileSettingsGroup(items: List<ProfileSettingsItem>) {
+    val isApple = LocalAppUiStyle.current == AppUiStyle.Apple
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface,
         shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
-        tonalElevation = 1.dp,
+        border = if (isApple) {
+            null
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+        },
+        tonalElevation = if (isApple) 0.dp else 1.dp,
     ) {
         Column {
             items.forEachIndexed { index, item ->
@@ -703,6 +1061,7 @@ private fun ProfileSettingsGroup(items: List<ProfileSettingsItem>) {
 @Composable
 private fun ProfileSettingsRow(item: ProfileSettingsItem) {
     val colorScheme = MaterialTheme.colorScheme
+    val isApple = LocalAppUiStyle.current == AppUiStyle.Apple
     val titleColor = if (item.destructive) colorScheme.error else colorScheme.onSurface
     val subtitleColor = if (item.destructive) colorScheme.error.copy(alpha = 0.78f) else colorScheme.onSurfaceVariant
 
@@ -714,7 +1073,7 @@ private fun ProfileSettingsRow(item: ProfileSettingsItem) {
             .padding(horizontal = 18.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ProfileSettingsIcon(item.iconLabel, item.iconColor)
+        ProfileSettingsIcon(item.iconLabel, item.iconColor, item.icon)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
@@ -722,7 +1081,7 @@ private fun ProfileSettingsRow(item: ProfileSettingsItem) {
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = titleColor,
-                maxLines = 1,
+                maxLines = if (isApple) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
             )
             if (!item.subtitle.isNullOrBlank()) {
@@ -730,7 +1089,7 @@ private fun ProfileSettingsRow(item: ProfileSettingsItem) {
                     text = item.subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = subtitleColor,
-                    maxLines = 1,
+                    maxLines = if (isApple) 3 else 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -740,7 +1099,7 @@ private fun ProfileSettingsRow(item: ProfileSettingsItem) {
                 text = item.trailingText,
                 style = MaterialTheme.typography.bodyMedium,
                 color = colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                maxLines = if (isApple) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -759,6 +1118,7 @@ private fun ProfileSettingsRow(item: ProfileSettingsItem) {
 private fun ProfileSettingsIcon(
     label: String,
     color: Color,
+    icon: ImageVector?,
 ) {
     Box(
         modifier = Modifier
@@ -766,14 +1126,23 @@ private fun ProfileSettingsIcon(
             .background(color, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            color = Color.White,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (LocalAppUiStyle.current == AppUiStyle.Apple && icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(22.dp),
+            )
+        } else {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -5371,8 +5740,8 @@ private fun WeekNumberButton(
     ) {
         Surface(
             modifier = Modifier
-                .width(40.dp)
-                .height(40.dp)
+                .width(48.dp)
+                .height(48.dp)
                 .clickable(onClick = onClick),
             shape = CircleShape,
             color = containerColor,
@@ -5915,9 +6284,14 @@ private fun <T> DataScreen(
     leadingContent: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {},
     content: androidx.compose.foundation.lazy.LazyListScope.(ModuleEnvelope<T>) -> Unit,
 ) {
-    var state by remember(refreshKey) { mutableStateOf<LoadState<ModuleEnvelope<T>>>(LoadState.Loading) }
+    val isApple = LocalAppUiStyle.current == AppUiStyle.Apple
+    val design = LocalAppDesign.current
+    var retryVersion by remember(refreshKey) { mutableStateOf(0) }
+    var state by remember(refreshKey, retryVersion) {
+        mutableStateOf<LoadState<ModuleEnvelope<T>>>(LoadState.Loading)
+    }
     var initialLoadConsumed by remember { mutableStateOf(false) }
-    LaunchedEffect(refreshKey) {
+    LaunchedEffect(refreshKey, retryVersion) {
         val strategy = if (initialLoadConsumed) ModuleLoadStrategy.NetworkFirst else initialLoadStrategy
         initialLoadConsumed = true
         state = LoadState.Loading
@@ -5926,10 +6300,23 @@ private fun <T> DataScreen(
             .onFailure { state = LoadState.Error(it.message ?: "加载失败") }
     }
 
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(
+            if (isApple) design.itemSpacing else 14.dp,
+        ),
+    ) {
         leadingContent()
         when (val current = state) {
-            LoadState.Loading, is LoadState.Error -> item { LoadingOrError(current) }
+            LoadState.Loading, is LoadState.Error -> item {
+                LoadingOrError(
+                    state = current,
+                    onRetry = if (current is LoadState.Error) {
+                        { retryVersion += 1 }
+                    } else {
+                        null
+                    },
+                )
+            }
             is LoadState.Data -> content(current.value)
         }
     }
@@ -5944,9 +6331,14 @@ private fun <T> ProgressiveDataScreen(
     leadingContent: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {},
     content: androidx.compose.foundation.lazy.LazyListScope.(ProgressiveModuleState<T>, ModuleEnvelope<T>) -> Unit,
 ) {
-    var state by remember(refreshKey) { mutableStateOf(ProgressiveModuleState<T>()) }
+    val isApple = LocalAppUiStyle.current == AppUiStyle.Apple
+    val design = LocalAppDesign.current
+    var retryVersion by remember(refreshKey) { mutableStateOf(0) }
+    var state by remember(refreshKey, retryVersion) {
+        mutableStateOf(ProgressiveModuleState<T>())
+    }
     var initialLoadConsumed by remember { mutableStateOf(false) }
-    LaunchedEffect(refreshKey) {
+    LaunchedEffect(refreshKey, retryVersion) {
         val strategy = if (initialLoadConsumed) ModuleLoadStrategy.NetworkFirst else initialLoadStrategy
         initialLoadConsumed = true
         state = ProgressiveModuleState<T>()
@@ -5961,7 +6353,11 @@ private fun <T> ProgressiveDataScreen(
         }
     }
 
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(
+            if (isApple) design.itemSpacing else 14.dp,
+        ),
+    ) {
         leadingContent()
         val envelope = state.envelope
         if (envelope != null) {
@@ -5972,8 +6368,18 @@ private fun <T> ProgressiveDataScreen(
         } else {
             when {
                 state.loading -> item { LoadingOrError(LoadState.Loading) }
-                state.errors.isNotEmpty() -> item { LoadingOrError(LoadState.Error(state.errors.joinToString("；"))) }
-                else -> item { LoadingOrError(LoadState.Error("加载失败")) }
+                state.errors.isNotEmpty() -> item {
+                    LoadingOrError(
+                        LoadState.Error(state.errors.joinToString("；")),
+                        onRetry = { retryVersion += 1 },
+                    )
+                }
+                else -> item {
+                    LoadingOrError(
+                        LoadState.Error("加载失败"),
+                        onRetry = { retryVersion += 1 },
+                    )
+                }
             }
         }
     }

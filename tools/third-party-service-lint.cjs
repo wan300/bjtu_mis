@@ -6,6 +6,26 @@ const path = require('path');
 
 const TEXT_EXTENSIONS = new Set(['.html', '.js', '.mjs', '.css', '.json', '.txt']);
 const IGNORED_REFERENCE_ORIGINS = new Set(['http://www.w3.org']);
+const SUPPORTED_ICON_EXTENSIONS = new Set(['.svg', '.png', '.webp', '.jpg', '.jpeg']);
+const MAX_ICON_BYTES = 1024 * 1024;
+const RUNTIME_VERSION = 1;
+const CAMPUS_HOSTS = new Set([
+  '123.121.147.7',
+  'cas.bjtu.edu.cn',
+  'mis.bjtu.edu.cn',
+  'aa.bjtu.edu.cn',
+  'mail.bjtu.edu.cn',
+  'zhixing.bjtu.edu.cn',
+  'job.bjtu.edu.cn',
+  'bksycenter.bjtu.edu.cn'
+]);
+const MANIFEST_FIELDS = new Set([
+  'schema_version', 'id', 'name', 'description', 'version', 'runtime_version',
+  'min_runtime_version', 'required_capabilities', 'optional_capabilities',
+  'data_schema_version', 'migration_entrypoint', 'entrypoint', 'icon', 'author',
+  'permissions', 'connect_origins', 'media_origins', 'frame_origins',
+  'navigation_origins', 'bridge_origins', 'marketplace', 'configuration'
+]);
 
 function main() {
   const target = process.argv[2];
@@ -38,22 +58,109 @@ function lintPlugin(root, result, manifestSchema) {
   const manifest = readJson(manifestPath, result);
   if (!manifest) return result;
 
-  if (![1, 2].includes(manifest.schema_version)) result.errors.push('schema_version must be 1 or 2.');
+  Object.keys(manifest).filter((key) => !MANIFEST_FIELDS.has(key)).forEach((key) => {
+    result.errors.push(`Unknown manifest field: ${key}`);
+  });
+  validateObjectShape(
+    manifest.permissions,
+    'permissions',
+    new Set(['required', 'optional']),
+    new Set(['required', 'optional']),
+    result
+  );
+  validateObjectShape(
+    manifest.marketplace,
+    'marketplace',
+    new Set(['category', 'tags', 'license']),
+    new Set(['category', 'tags']),
+    result
+  );
+  if (Array.isArray(manifest.configuration)) {
+    manifest.configuration.forEach((definition, index) => {
+      validateObjectShape(
+        definition,
+        `configuration[${index}]`,
+        new Set(['key', 'label', 'description', 'type', 'required', 'default', 'options']),
+        new Set(['key', 'label', 'description', 'type', 'required']),
+        result
+      );
+    });
+  }
+  if (manifest.schema_version !== 3) result.errors.push('schema_version must be 3.');
   if (!/^[a-z][a-z0-9_.-]{2,63}$/.test(stringField(manifest, 'id'))) {
     result.errors.push('id must be 3-64 chars, start with a lowercase letter, and contain only lowercase letters, digits, dot, underscore, or hyphen.');
   }
-  ['name', 'description', 'version', 'author'].forEach((field) => {
-    if (!stringField(manifest, field).trim()) result.errors.push(`${field} must be a non-empty string.`);
+  const textLimits = { name: 80, description: 400, version: 40, author: 120 };
+  Object.entries(textLimits).forEach(([field, maxLength]) => {
+    const value = stringField(manifest, field).trim();
+    if (!value) result.errors.push(`${field} must be a non-empty string.`);
+    if (value.length > maxLength) result.errors.push(`${field} cannot exceed ${maxLength} characters.`);
+  });
+  if (!Number.isInteger(manifest.runtime_version) || manifest.runtime_version < 1) {
+    result.errors.push('runtime_version must be a positive integer.');
+  }
+  if (!Number.isInteger(manifest.min_runtime_version) || manifest.min_runtime_version < 1) {
+    result.errors.push('min_runtime_version must be a positive integer.');
+  }
+  if (
+    Number.isInteger(manifest.runtime_version) &&
+    Number.isInteger(manifest.min_runtime_version) &&
+    manifest.min_runtime_version > manifest.runtime_version
+  ) {
+    result.errors.push('min_runtime_version cannot exceed runtime_version.');
+  }
+  if (manifest.min_runtime_version > RUNTIME_VERSION) {
+    result.errors.push(`Plugin requires runtime ${manifest.min_runtime_version}; platform provides ${RUNTIME_VERSION}.`);
+  }
+  if (!Number.isInteger(manifest.data_schema_version) || manifest.data_schema_version < 1) {
+    result.errors.push('data_schema_version must be a positive integer.');
+  }
+
+  const requiredCapabilities = normalizeStringArray(
+    manifest.required_capabilities,
+    'required_capabilities',
+    result
+  );
+  const optionalCapabilities = normalizeStringArray(
+    manifest.optional_capabilities,
+    'optional_capabilities',
+    result
+  );
+  const duplicateCapabilities = requiredCapabilities.filter((name) => optionalCapabilities.includes(name));
+  if (duplicateCapabilities.length) {
+    result.errors.push(`Capabilities cannot be both required and optional: ${[...new Set(duplicateCapabilities)].join(', ')}`);
+  }
+  requiredCapabilities.concat(optionalCapabilities).forEach((name) => {
+    if (!manifestSchema.capabilities.includes(name)) result.errors.push(`Unknown capability: ${name}`);
   });
 
   const entrypoint = validateAssetPath(manifest.entrypoint, 'entrypoint', result);
   const icon = validateAssetPath(manifest.icon, 'icon', result);
+  const migrationEntrypoint = manifest.migration_entrypoint === undefined
+    ? ''
+    : validateAssetPath(manifest.migration_entrypoint, 'migration_entrypoint', result);
+  if (icon && !SUPPORTED_ICON_EXTENSIONS.has(path.extname(icon).toLowerCase())) {
+    result.errors.push('icon must use SVG, PNG, WebP, JPG, or JPEG format.');
+  }
   const dist = path.join(root, 'dist');
   if (!fs.existsSync(dist) || !fs.statSync(dist).isDirectory()) {
     result.errors.push('Missing dist/ directory.');
   } else {
     if (entrypoint && !fs.existsSync(path.join(dist, entrypoint))) result.errors.push(`entrypoint does not exist in dist/: ${entrypoint}`);
-    if (icon && !fs.existsSync(path.join(dist, icon))) result.errors.push(`icon does not exist in dist/: ${icon}`);
+    if (migrationEntrypoint && !fs.existsSync(path.join(dist, migrationEntrypoint))) {
+      result.errors.push(`migration_entrypoint does not exist in dist/: ${migrationEntrypoint}`);
+    }
+    if (icon) {
+      const iconFile = path.join(dist, icon);
+      if (!fs.existsSync(iconFile) || !fs.statSync(iconFile).isFile()) {
+        result.errors.push(`icon does not exist in dist/: ${icon}`);
+      } else {
+        const iconBytes = fs.statSync(iconFile).size;
+        if (iconBytes < 1 || iconBytes > MAX_ICON_BYTES) {
+          result.errors.push('icon must be between 1 byte and 1 MiB.');
+        }
+      }
+    }
   }
 
   const permissions = manifest.permissions || {};
@@ -69,13 +176,26 @@ function lintPlugin(root, result, manifestSchema) {
 
   validateMarketplaceAndConfiguration(manifest, required, result, manifestSchema);
 
-  const allowedOrigins = normalizeStringArray(manifest.allowed_origins, 'allowed_origins', result).map((origin) =>
-    normalizeOrigin(origin, result)
-  ).filter(Boolean);
-  if (allowedOrigins.length !== new Set(allowedOrigins).size) result.errors.push('allowed_origins contains duplicates.');
+  const originFields = ['connect_origins', 'media_origins', 'frame_origins', 'navigation_origins'];
+  const originsByField = Object.fromEntries(originFields.map((field) => {
+    const normalized = normalizeStringArray(manifest[field], field, result)
+      .map((origin) => normalizeOrigin(origin, result, field, field !== 'navigation_origins'))
+      .filter(Boolean);
+    if (normalized.length !== new Set(normalized).size) result.errors.push(`${field} contains duplicates.`);
+    return [field, normalized];
+  }));
+  if (!Array.isArray(manifest.bridge_origins) || manifest.bridge_origins.length !== 1 || manifest.bridge_origins[0] !== 'self') {
+    result.errors.push('bridge_origins must be exactly ["self"].');
+  }
+  if (originsByField.frame_origins.length && !requiredCapabilities.includes('remote.frame.v1')) {
+    result.errors.push('frame_origins requires remote.frame.v1 in required_capabilities.');
+  }
 
   if (fs.existsSync(dist) && fs.statSync(dist).isDirectory()) {
-    scanExternalOrigins(dist, new Set(allowedOrigins), result);
+    const allOrigins = new Set(originFields.flatMap((field) => originsByField[field]));
+    scanExternalOrigins(dist, allOrigins, result);
+    scanRemoteScripts(dist, result);
+    scanIframeSandboxes(dist, originsByField.frame_origins, result);
   }
 
   return result;
@@ -86,7 +206,7 @@ function loadManifestSchema(repoRoot, result) {
   const webSchema = path.join(repoRoot, 'web', 'assets', 'schemas', 'third-party-service-manifest.schema.json');
   if (!fs.existsSync(docsSchema) || !fs.existsSync(webSchema)) {
     result.errors.push('Missing docs/ or web/assets/schemas/ manifest schema.');
-    return { permissions: [], categories: [], configurationTypes: [] };
+    return { permissions: [], capabilities: [], categories: [], configurationTypes: [] };
   }
   const docsText = fs.readFileSync(docsSchema, 'utf8');
   const webText = fs.readFileSync(webSchema, 'utf8');
@@ -95,7 +215,7 @@ function loadManifestSchema(repoRoot, result) {
   const schemaPermissions = schema?.$defs?.permission_array?.items?.enum;
   if (!Array.isArray(schemaPermissions)) {
     result.errors.push('Manifest schema is missing permission enum.');
-    return { permissions: [], categories: [], configurationTypes: [] };
+    return { permissions: [], capabilities: [], categories: [], configurationTypes: [] };
   }
 
   const permissions = schemaPermissions
@@ -110,11 +230,13 @@ function loadManifestSchema(repoRoot, result) {
 
   const categories = schema?.$defs?.marketplace?.properties?.category?.enum;
   const configurationTypes = schema?.$defs?.configuration?.properties?.type?.enum;
-  if (!Array.isArray(categories) || !Array.isArray(configurationTypes)) {
-    result.errors.push('Manifest schema is missing marketplace category or configuration type enums.');
+  const capabilities = schema?.$defs?.capability_array?.items?.enum;
+  if (!Array.isArray(categories) || !Array.isArray(configurationTypes) || !Array.isArray(capabilities)) {
+    result.errors.push('Manifest schema is missing capability, marketplace category, or configuration type enums.');
   }
   return {
     permissions,
+    capabilities: Array.isArray(capabilities) ? capabilities : [],
     categories: Array.isArray(categories) ? categories : [],
     configurationTypes: Array.isArray(configurationTypes) ? configurationTypes : []
   };
@@ -122,19 +244,13 @@ function loadManifestSchema(repoRoot, result) {
 
 function validateMarketplaceAndConfiguration(manifest, requiredPermissions, result, manifestSchema) {
   const configuration = Array.isArray(manifest.configuration) ? manifest.configuration : [];
-  if (manifest.schema_version === 1) {
-    if (manifest.marketplace !== undefined || configuration.length) {
-      result.errors.push('schema_version 1 cannot declare marketplace or configuration.');
-    }
-    return;
-  }
-  if (manifest.schema_version !== 2) return;
+  if (manifest.schema_version !== 3) return;
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(stringField(manifest, 'version').trim())) {
-    result.errors.push('schema_version 2 version must use semantic versioning.');
+    result.errors.push('schema_version 3 version must use semantic versioning.');
   }
   const marketplace = manifest.marketplace;
   if (!marketplace || typeof marketplace !== 'object' || Array.isArray(marketplace)) {
-    result.errors.push('schema_version 2 requires marketplace metadata.');
+    result.errors.push('schema_version 3 requires marketplace metadata.');
   } else {
     const category = stringField(marketplace, 'category').trim().toLowerCase();
     if (!manifestSchema.categories.includes(category)) result.errors.push(`Unknown marketplace category: ${category || '(blank)'}`);
@@ -144,9 +260,15 @@ function validateMarketplaceAndConfiguration(manifest, requiredPermissions, resu
     if (tags.map((tag) => tag.toLowerCase()).length !== new Set(tags.map((tag) => tag.toLowerCase())).size) {
       result.errors.push('marketplace.tags contains duplicates.');
     }
+    if (marketplace.license !== undefined) {
+      const license = stringField(marketplace, 'license').trim();
+      if (!license || license.length > 80) {
+        result.errors.push('marketplace.license must be 1-80 characters when provided.');
+      }
+    }
   }
   if (!Array.isArray(manifest.configuration)) {
-    result.errors.push('schema_version 2 configuration must be an array.');
+    result.errors.push('schema_version 3 configuration must be an array.');
     return;
   }
   if (configuration.length > 32) result.errors.push('configuration cannot contain more than 32 entries.');
@@ -236,7 +358,24 @@ function normalizeStringArray(value, field, result) {
     }
     normalized.push(text);
   });
+  if (normalized.length !== new Set(normalized).size) {
+    result.errors.push(`${field} contains duplicates.`);
+  }
   return normalized;
+}
+
+function validateObjectShape(value, field, allowed, required, result) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    result.errors.push(`${field} must be an object.`);
+    return;
+  }
+  const keys = Object.keys(value);
+  keys.filter((key) => !allowed.has(key)).forEach((key) => {
+    result.errors.push(`${field} contains unknown field: ${key}`);
+  });
+  [...required].filter((key) => !Object.prototype.hasOwnProperty.call(value, key)).forEach((key) => {
+    result.errors.push(`${field} is missing required field: ${key}`);
+  });
 }
 
 function validateAssetPath(value, field, result) {
@@ -252,18 +391,128 @@ function validateAssetPath(value, field, result) {
   return normalized;
 }
 
-function normalizeOrigin(value, result) {
+function normalizeOrigin(value, result, field = 'origin', blockCampusHosts = true, allowDevelopmentOrigins = false) {
   try {
     const url = new URL(value);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== '/')) {
-      result.errors.push(`allowed_origins entry must be an HTTP/HTTPS origin without path/query/userinfo: ${value}`);
+    const host = url.hostname.toLowerCase();
+    const localDevelopmentOrigin =
+      allowDevelopmentOrigins &&
+      url.protocol === 'http:' &&
+      ['localhost', '127.0.0.1', '[::1]', '::1'].includes(host);
+    if (
+      (url.protocol !== 'https:' && !localDevelopmentOrigin) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.pathname && url.pathname !== '/')
+    ) {
+      result.errors.push(`${field} entry must be an HTTPS origin without path/query/userinfo: ${value}`);
+      return null;
+    }
+    if (!localDevelopmentOrigin && isPrivateOrLocalHost(host)) {
+      result.errors.push(`${field} cannot include private, loopback, link-local, or local hosts: ${host}`);
+      return null;
+    }
+    if (blockCampusHosts && isCampusHost(host)) {
+      result.errors.push(`${field} cannot include campus service hosts; use campus.request: ${host}`);
       return null;
     }
     return `${url.protocol}//${url.host.toLowerCase()}`;
   } catch {
-    result.errors.push(`Invalid allowed_origins entry: ${value}`);
+    result.errors.push(`Invalid ${field} entry: ${value}`);
     return null;
   }
+}
+
+function isCampusHost(host) {
+  return CAMPUS_HOSTS.has(host) || host.endsWith('.bjtu.edu.cn');
+}
+
+function isPrivateOrLocalHost(host) {
+  const normalized = host.replace(/^\[|\]$/g, '').toLowerCase();
+  if (
+    normalized === 'localhost' ||
+    normalized.endsWith('.localhost') ||
+    normalized.endsWith('.local') ||
+    normalized.endsWith('.internal') ||
+    normalized === '::' ||
+    normalized === '::1'
+  ) return true;
+  if (normalized.includes(':')) {
+    const firstHextet = normalized.startsWith('::')
+      ? null
+      : Number.parseInt(normalized.split(':', 1)[0], 16);
+    if (
+      Number.isInteger(firstHextet) &&
+      (
+        (firstHextet & 0xfe00) === 0xfc00 ||
+        (firstHextet & 0xffc0) === 0xfe80 ||
+        (firstHextet & 0xff00) === 0xff00
+      )
+    ) return true;
+  }
+  const parts = normalized.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  return parts[0] === 10 ||
+    parts[0] === 127 ||
+    (parts[0] === 169 && parts[1] === 254) ||
+    (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+    (parts[0] === 192 && parts[1] === 168) ||
+    parts[0] >= 224;
+}
+
+function scanRemoteScripts(dist, result) {
+  walk(dist).filter((file) => ['.html', '.htm'].includes(path.extname(file).toLowerCase())).forEach((file) => {
+    const content = fs.readFileSync(file, 'utf8');
+    if (/<script\b[^>]*\bsrc\s*=\s*["']https?:\/\//i.test(content)) {
+      result.errors.push(`${path.relative(dist, file)} loads remote executable JavaScript; v3 public artifacts must bundle scripts locally.`);
+    }
+  });
+}
+
+function scanIframeSandboxes(dist, frameOrigins, result) {
+  const declaredFrameOrigins = new Set(frameOrigins);
+  walk(dist).filter((file) => ['.html', '.htm'].includes(path.extname(file).toLowerCase())).forEach((file) => {
+    const content = fs.readFileSync(file, 'utf8');
+    for (const match of content.matchAll(/<iframe\b[^>]*>/gi)) {
+      const tag = match[0];
+      const src = /\bsrc\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1] || '';
+      const remoteOrigin = /^https?:\/\//i.test(src) ? normalizeOriginFromUrl(src) : null;
+      if (remoteOrigin && !declaredFrameOrigins.has(remoteOrigin)) {
+        result.errors.push(`${path.relative(dist, file)} embeds undeclared iframe origin ${remoteOrigin}.`);
+      }
+      if (!remoteOrigin) continue;
+      const hasSandbox = /\bsandbox(?:\s|=|>)/i.test(tag);
+      const sandboxValue = /\bsandbox\s*=\s*["']([^"']*)["']/i.exec(tag)?.[1] || '';
+      if (!hasSandbox) {
+        result.errors.push(`${path.relative(dist, file)} remote iframe must declare a sandbox attribute.`);
+        continue;
+      }
+      const tokens = new Set(sandboxValue.toLowerCase().split(/\s+/).filter(Boolean));
+      const unsafeTokens = [
+        'allow-downloads',
+        'allow-modals',
+        'allow-popups',
+        'allow-popups-to-escape-sandbox',
+        'allow-presentation',
+        'allow-top-navigation',
+        'allow-top-navigation-by-user-activation'
+      ].filter((token) => tokens.has(token));
+      if (unsafeTokens.length) {
+        result.errors.push(
+          `${path.relative(dist, file)} remote iframe sandbox grants forbidden tokens: ${unsafeTokens.join(', ')}.`
+        );
+      }
+      const missingTokens = ['allow-scripts', 'allow-forms', 'allow-same-origin']
+        .filter((token) => !tokens.has(token));
+      if (missingTokens.length) {
+        result.errors.push(
+          `${path.relative(dist, file)} remote iframe sandbox must include ${missingTokens.join(', ')}.`
+        );
+      }
+    }
+  });
 }
 
 function scanExternalOrigins(dist, allowedOrigins, result) {

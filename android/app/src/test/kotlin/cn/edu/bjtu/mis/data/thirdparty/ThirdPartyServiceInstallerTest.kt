@@ -184,7 +184,7 @@ class ThirdPartyServiceInstallerTest {
                 "repo-main/dist/index.html" to "<html></html>",
                 "repo-main/dist/icon.svg" to "<svg></svg>",
             )
-            server.enqueue(json("""{"default_branch":"main"}"""))
+            server.enqueue(json("""{"default_branch":"main","owner":{"id":12345}}"""))
             server.enqueue(json("""{"object":{"sha":"abc1234def5678"}}"""))
             server.enqueue(MockResponse().setResponseCode(200).setBody(Buffer().write(zip.readBytes())))
 
@@ -241,11 +241,15 @@ class ThirdPartyServiceInstallerTest {
     private fun validManifest(): String =
         AppJson.encodeToString(
             ThirdPartyServiceManifest(
-                schemaVersion = 1,
+                schemaVersion = 3,
                 id = "bjtu.demo",
                 name = "Demo",
                 description = "Demo service",
                 version = "1.0.0",
+                runtimeVersion = 1,
+                minRuntimeVersion = 1,
+                requiredCapabilities = listOf("runtime.lifecycle.v1"),
+                dataSchemaVersion = 1,
                 entrypoint = "index.html",
                 icon = "icon.svg",
                 author = "Alice",
@@ -253,7 +257,9 @@ class ThirdPartyServiceInstallerTest {
                     required = listOf("identity.profile.read"),
                     optional = listOf("academic.timetable.read"),
                 ),
-                allowedOrigins = listOf("https://api.example.com"),
+                connectOrigins = listOf("https://api.example.com"),
+                bridgeOrigins = listOf("self"),
+                marketplace = ThirdPartyMarketplaceMetadata(category = "other"),
             )
         )
 

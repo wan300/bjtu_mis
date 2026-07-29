@@ -1,0 +1,734 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 11,
+    "identityHash": "a49c2fcd99ce6af5367d8e8b5b40b25f",
+    "entities": [
+      {
+        "tableName": "sync_runs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `started_at` TEXT NOT NULL, `finished_at` TEXT, `status` TEXT NOT NULL, `module_summary_json` TEXT NOT NULL, `error_text` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "started_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finishedAt",
+            "columnName": "finished_at",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "moduleSummaryJson",
+            "columnName": "module_summary_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "errorText",
+            "columnName": "error_text",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "module_snapshots",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`module_key` TEXT NOT NULL, `synced_at` TEXT NOT NULL, `source_system` TEXT NOT NULL, `coverage` TEXT NOT NULL, `source_params_json` TEXT NOT NULL, `payload_json` TEXT NOT NULL, PRIMARY KEY(`module_key`))",
+        "fields": [
+          {
+            "fieldPath": "moduleKey",
+            "columnName": "module_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncedAt",
+            "columnName": "synced_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceSystem",
+            "columnName": "source_system",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "coverage",
+            "columnName": "coverage",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceParamsJson",
+            "columnName": "source_params_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payload_json",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "module_key"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "module_update_summaries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`module_key` TEXT NOT NULL, `synced_at` TEXT NOT NULL, `items_json` TEXT NOT NULL, PRIMARY KEY(`module_key`))",
+        "fields": [
+          {
+            "fieldPath": "moduleKey",
+            "columnName": "module_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncedAt",
+            "columnName": "synced_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemsJson",
+            "columnName": "items_json",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "module_key"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "user_courses",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `course_name` TEXT NOT NULL, `weekday` TEXT NOT NULL, `weekday_index` INTEGER NOT NULL, `period` TEXT NOT NULL, `period_number` INTEGER NOT NULL, `time_range` TEXT, `start_week` INTEGER NOT NULL, `end_week` INTEGER NOT NULL, `weeks_text` TEXT, `duration_type` TEXT NOT NULL, `teacher` TEXT, `location_text` TEXT, `remark` TEXT, `color_index` INTEGER NOT NULL, `created_at` TEXT NOT NULL, `updated_at` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "courseName",
+            "columnName": "course_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weekday",
+            "columnName": "weekday",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weekdayIndex",
+            "columnName": "weekday_index",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "period",
+            "columnName": "period",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "periodNumber",
+            "columnName": "period_number",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timeRange",
+            "columnName": "time_range",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "startWeek",
+            "columnName": "start_week",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endWeek",
+            "columnName": "end_week",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weeksText",
+            "columnName": "weeks_text",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "durationType",
+            "columnName": "duration_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "teacher",
+            "columnName": "teacher",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "locationText",
+            "columnName": "location_text",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "remark",
+            "columnName": "remark",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "colorIndex",
+            "columnName": "color_index",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "user_todos",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `date` TEXT NOT NULL, `note` TEXT, `done` INTEGER NOT NULL, `created_at` TEXT NOT NULL, `updated_at` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "date",
+            "columnName": "date",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "done",
+            "columnName": "done",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_user_todos_date",
+            "unique": false,
+            "columnNames": [
+              "date"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_user_todos_date` ON `${TABLE_NAME}` (`date`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "mail_folders",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`folder_id` TEXT NOT NULL, `name` TEXT NOT NULL, `message_count` INTEGER NOT NULL, `unread_count` INTEGER NOT NULL, `message_size` INTEGER NOT NULL, `unread_size` INTEGER NOT NULL, `system` INTEGER NOT NULL, `synced_at` TEXT NOT NULL, PRIMARY KEY(`folder_id`))",
+        "fields": [
+          {
+            "fieldPath": "folderId",
+            "columnName": "folder_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "messageCount",
+            "columnName": "message_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unreadCount",
+            "columnName": "unread_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "messageSize",
+            "columnName": "message_size",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unreadSize",
+            "columnName": "unread_size",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "system",
+            "columnName": "system",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncedAt",
+            "columnName": "synced_at",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "folder_id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "mail_message_summaries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`message_id` TEXT NOT NULL, `folder_id` TEXT NOT NULL, `subject` TEXT NOT NULL, `from_text` TEXT NOT NULL, `to_text` TEXT NOT NULL, `sender` TEXT, `sent_at` TEXT, `received_at` TEXT, `modified_at` TEXT, `size` INTEGER NOT NULL, `read` INTEGER NOT NULL, `attached` INTEGER NOT NULL, `priority` INTEGER, `summary` TEXT, `synced_at` TEXT NOT NULL, PRIMARY KEY(`message_id`))",
+        "fields": [
+          {
+            "fieldPath": "messageId",
+            "columnName": "message_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "folderId",
+            "columnName": "folder_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subject",
+            "columnName": "subject",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fromText",
+            "columnName": "from_text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "toText",
+            "columnName": "to_text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sender",
+            "columnName": "sender",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "sentAt",
+            "columnName": "sent_at",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "receivedAt",
+            "columnName": "received_at",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "modifiedAt",
+            "columnName": "modified_at",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "size",
+            "columnName": "size",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "read",
+            "columnName": "read",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attached",
+            "columnName": "attached",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "priority",
+            "columnName": "priority",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "summary",
+            "columnName": "summary",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "syncedAt",
+            "columnName": "synced_at",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "message_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_mail_message_summaries_folder_id_received_at",
+            "unique": false,
+            "columnNames": [
+              "folder_id",
+              "received_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_mail_message_summaries_folder_id_received_at` ON `${TABLE_NAME}` (`folder_id`, `received_at`)"
+          },
+          {
+            "name": "index_mail_message_summaries_folder_id_sent_at",
+            "unique": false,
+            "columnNames": [
+              "folder_id",
+              "sent_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_mail_message_summaries_folder_id_sent_at` ON `${TABLE_NAME}` (`folder_id`, `sent_at`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "third_party_services",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`service_id` TEXT NOT NULL, `name` TEXT NOT NULL, `description` TEXT NOT NULL, `version` TEXT NOT NULL, `author` TEXT NOT NULL, `source_url` TEXT NOT NULL, `github_owner` TEXT NOT NULL, `github_repo` TEXT NOT NULL, `default_branch` TEXT NOT NULL, `commit_sha` TEXT NOT NULL, `package_digest_sha256` TEXT NOT NULL, `manifest_json` TEXT NOT NULL, `granted_permissions_json` TEXT NOT NULL, `allowed_origins_json` TEXT NOT NULL, `publisher_subject_id` TEXT NOT NULL, `data_schema_version` INTEGER NOT NULL, `compatibility_state` TEXT NOT NULL, `verification_level` TEXT NOT NULL, `previous_version_json` TEXT, `install_dir` TEXT NOT NULL, `entrypoint` TEXT NOT NULL, `icon` TEXT NOT NULL, `enabled` INTEGER NOT NULL, `needs_review` INTEGER NOT NULL, `installed_at` TEXT NOT NULL, `updated_at` TEXT NOT NULL, PRIMARY KEY(`service_id`))",
+        "fields": [
+          {
+            "fieldPath": "serviceId",
+            "columnName": "service_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "author",
+            "columnName": "author",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceUrl",
+            "columnName": "source_url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "githubOwner",
+            "columnName": "github_owner",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "githubRepo",
+            "columnName": "github_repo",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "defaultBranch",
+            "columnName": "default_branch",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "commitSha",
+            "columnName": "commit_sha",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "packageDigestSha256",
+            "columnName": "package_digest_sha256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "manifestJson",
+            "columnName": "manifest_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "grantedPermissionsJson",
+            "columnName": "granted_permissions_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "allowedOriginsJson",
+            "columnName": "allowed_origins_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "publisherSubjectId",
+            "columnName": "publisher_subject_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dataSchemaVersion",
+            "columnName": "data_schema_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "compatibilityState",
+            "columnName": "compatibility_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "verificationLevel",
+            "columnName": "verification_level",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "previousVersionJson",
+            "columnName": "previous_version_json",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "installDir",
+            "columnName": "install_dir",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "entrypoint",
+            "columnName": "entrypoint",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "icon",
+            "columnName": "icon",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "needsReview",
+            "columnName": "needs_review",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "installedAt",
+            "columnName": "installed_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "service_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_third_party_services_github_owner_github_repo",
+            "unique": false,
+            "columnNames": [
+              "github_owner",
+              "github_repo"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_third_party_services_github_owner_github_repo` ON `${TABLE_NAME}` (`github_owner`, `github_repo`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "third_party_cleanup_tombstones",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`service_id` TEXT NOT NULL, `publisher_subject_id` TEXT NOT NULL, `web_storage_origin` TEXT NOT NULL, `created_at` TEXT NOT NULL, PRIMARY KEY(`service_id`))",
+        "fields": [
+          {
+            "fieldPath": "serviceId",
+            "columnName": "service_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "publisherSubjectId",
+            "columnName": "publisher_subject_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "webStorageOrigin",
+            "columnName": "web_storage_origin",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "service_id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a49c2fcd99ce6af5367d8e8b5b40b25f')"
+    ]
+  }
+}

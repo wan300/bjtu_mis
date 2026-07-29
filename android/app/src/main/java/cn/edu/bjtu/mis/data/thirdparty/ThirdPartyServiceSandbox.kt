@@ -21,8 +21,8 @@ sealed class ThirdPartySandboxResourceResolution {
 }
 
 object ThirdPartyServiceSandbox {
-    fun hostFor(serviceId: String, commitSha: String): String {
-        val hash = sha256("$serviceId@$commitSha").take(SandboxHashLength)
+    fun hostFor(serviceId: String, publisherSubjectId: String): String {
+        val hash = sha256("$serviceId@$publisherSubjectId").take(SandboxHashLength)
         val prefixLimit = 63 - hash.length - 1
         val prefix = serviceId
             .lowercase(Locale.US)
@@ -36,27 +36,27 @@ object ThirdPartyServiceSandbox {
         return "$prefix-$hash.$SandboxParentDomain"
     }
 
-    fun originFor(serviceId: String, commitSha: String): String =
-        "https://${hostFor(serviceId, commitSha)}"
+    fun originFor(serviceId: String, publisherSubjectId: String): String =
+        "https://${hostFor(serviceId, publisherSubjectId)}"
 
     fun entrypointUrlFor(service: ThirdPartyService): String =
-        originFor(service.serviceId, service.commitSha) + encodedAbsolutePath(service.manifest.entrypoint)
+        originFor(service.serviceId, service.publisherSubjectId) + encodedAbsolutePath(service.manifest.entrypoint)
 
-    fun isServiceSandboxUrl(url: String?, serviceId: String, commitSha: String): Boolean {
+    fun isServiceSandboxUrl(url: String?, serviceId: String, publisherSubjectId: String): Boolean {
         val uri = parseUrl(url) ?: return false
         return uri.scheme?.lowercase(Locale.US) == "https" &&
-            uri.host?.lowercase(Locale.US) == hostFor(serviceId, commitSha)
+            uri.host?.lowercase(Locale.US) == hostFor(serviceId, publisherSubjectId)
     }
 
     fun resolveLocalResource(
         url: String?,
         serviceId: String,
-        commitSha: String,
+        publisherSubjectId: String,
         installDir: File,
         entrypoint: String,
     ): ThirdPartySandboxResourceResolution {
         val uri = parseUrl(url) ?: return ThirdPartySandboxResourceResolution.NotSandboxUrl
-        if (!isServiceSandboxUrl(url, serviceId, commitSha)) {
+        if (!isServiceSandboxUrl(url, serviceId, publisherSubjectId)) {
             return ThirdPartySandboxResourceResolution.NotSandboxUrl
         }
 
@@ -86,6 +86,9 @@ object ThirdPartyServiceSandbox {
             ThirdPartySandboxResourceResolution.NotFound
         }
     }
+
+    fun legacyRescueOriginFor(serviceId: String): String =
+        "https://legacy-${sha256(serviceId).take(SandboxHashLength)}.$SandboxParentDomain"
 
     private fun relativePathFor(uri: URI, entrypoint: String): String? {
         val rawPath = uri.rawPath.orEmpty()

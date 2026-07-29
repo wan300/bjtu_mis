@@ -42,116 +42,90 @@ class ThirdPartyPackageSecurityTest {
     }
 
     @Test
-    fun webViewPolicyTrustsInstallDirAndAllowedOriginsOnly() {
-        val install = temp.newFolder("installed")
-        val index = File(install, "index.html").apply { writeText("<html></html>") }
-
-        assertTrue(
-            ThirdPartyWebViewAccessPolicy.isTrustedUrl(
-                index.toURI().toString(),
-                install,
-                listOf("https://api.example.com"),
-            )
-        )
-        assertTrue(
-            ThirdPartyWebViewAccessPolicy.isTrustedUrl(
-                "https://api.example.com/plugin.html",
-                install,
-                listOf("https://api.example.com"),
-            )
-        )
-        assertTrue(
-            ThirdPartyWebViewAccessPolicy.isTrustedUrl(
-                "http://47.95.238.140:8080/api/services",
-                install,
-                listOf("http://47.95.238.140:8080"),
-            )
-        )
-        assertFalse(
-            ThirdPartyWebViewAccessPolicy.isTrustedUrl(
-                "https://evil.example.com/plugin.html",
-                install,
-                listOf("https://api.example.com"),
-            )
-        )
-        assertFalse(
-            ThirdPartyWebViewAccessPolicy.isTrustedUrl(
-                "http://47.95.238.140:8080/api/services",
-                install,
-                listOf("https://api.example.com"),
-            )
-        )
-    }
-
-    @Test
-    fun runtimePolicyTrustsSandboxOriginAndAllowedOriginsOnly() {
+    fun runtimePolicyTrustsOnlyStableLocalSandboxOrigin() {
         val install = temp.newFolder("runtime")
         val index = File(install, "index.html").apply { writeText("<html></html>") }
         val serviceId = "bjtu.demo"
-        val commitSha = "abcdef1234567890"
-        val sandboxUrl = "${ThirdPartyServiceSandbox.originFor(serviceId, commitSha)}/index.html"
+        val publisherSubjectId = "github-owner:12345"
+        val sandboxUrl = "${ThirdPartyServiceSandbox.originFor(serviceId, publisherSubjectId)}/index.html"
 
         assertTrue(
             ThirdPartyWebViewAccessPolicy.isTrustedRuntimeUrl(
                 sandboxUrl,
                 serviceId,
-                commitSha,
-                listOf("https://api.example.com"),
+                publisherSubjectId,
             )
         )
-        assertTrue(
+        assertFalse(
             ThirdPartyWebViewAccessPolicy.isTrustedRuntimeUrl(
                 "https://api.example.com/plugin.html",
                 serviceId,
-                commitSha,
-                listOf("https://api.example.com"),
+                publisherSubjectId,
             )
         )
-        assertTrue(
+        assertFalse(
             ThirdPartyWebViewAccessPolicy.isTrustedRuntimeUrl(
                 "http://47.95.238.140:8080/api/services",
                 serviceId,
-                commitSha,
-                listOf("http://47.95.238.140:8080"),
+                publisherSubjectId,
             )
         )
         assertFalse(
             ThirdPartyWebViewAccessPolicy.isTrustedRuntimeUrl(
                 index.toURI().toString(),
                 serviceId,
-                commitSha,
-                listOf("https://api.example.com"),
+                publisherSubjectId,
             )
         )
         assertFalse(
             ThirdPartyWebViewAccessPolicy.isTrustedRuntimeUrl(
                 "https://evil.example.com/plugin.html",
                 serviceId,
-                commitSha,
-                listOf("https://api.example.com"),
-            )
-        )
-        assertFalse(
-            ThirdPartyWebViewAccessPolicy.isTrustedRuntimeUrl(
-                "http://47.95.238.140:8080/api/services",
-                serviceId,
-                commitSha,
-                listOf("https://api.example.com"),
+                publisherSubjectId,
             )
         )
     }
 
     @Test
+    fun bridgeRequiresMainFrameAndExactStableOrigin() {
+        val origin = ThirdPartyServiceSandbox.originFor("bjtu.demo", "github-owner:12345")
+
+        assertTrue(
+            ThirdPartyWebViewAccessPolicy.isTrustedBridgeMessage(
+                isMainFrame = true,
+                sourceOrigin = origin,
+                expectedOrigin = origin,
+            ),
+        )
+        assertFalse(
+            ThirdPartyWebViewAccessPolicy.isTrustedBridgeMessage(
+                isMainFrame = false,
+                sourceOrigin = origin,
+                expectedOrigin = origin,
+            ),
+        )
+        assertFalse(
+            ThirdPartyWebViewAccessPolicy.isTrustedBridgeMessage(
+                isMainFrame = true,
+                sourceOrigin = "https://example.com",
+                expectedOrigin = origin,
+            ),
+        )
+    }
+
+    @Test
     fun sandboxHostsAreIsolatedAndValidHostLabels() {
-        val first = ThirdPartyServiceSandbox.hostFor("com.example.campus-service", "abcdef1234567890")
-        val sameServiceNewCommit = ThirdPartyServiceSandbox.hostFor("com.example.campus-service", "1234567890abcdef")
-        val second = ThirdPartyServiceSandbox.hostFor("bjtu_other.service", "abcdef1234567890")
+        val first = ThirdPartyServiceSandbox.hostFor("com.example.campus-service", "github-owner:123")
+        val sameServiceNewCommit = ThirdPartyServiceSandbox.hostFor("com.example.campus-service", "github-owner:123")
+        val changedPublisher = ThirdPartyServiceSandbox.hostFor("com.example.campus-service", "github-owner:456")
+        val second = ThirdPartyServiceSandbox.hostFor("bjtu_other.service", "github-owner:123")
         val firstLabel = first.substringBefore('.')
 
         assertTrue(first.endsWith(".third-party.bjtu-mis.local"))
         assertTrue(firstLabel.length <= 63)
         assertTrue(firstLabel.matches(Regex("^[a-z0-9-]+$")))
-        assertNotEquals(first, sameServiceNewCommit)
+        assertEquals(first, sameServiceNewCommit)
+        assertNotEquals(first, changedPublisher)
         assertNotEquals(first, second)
     }
 
@@ -164,13 +138,13 @@ class ThirdPartyPackageSecurityTest {
             writeText("console.log('ok')")
         }
         val serviceId = "bjtu.demo"
-        val commitSha = "abcdef1234567890"
-        val origin = ThirdPartyServiceSandbox.originFor(serviceId, commitSha)
+        val publisherSubjectId = "github-owner:123"
+        val origin = ThirdPartyServiceSandbox.originFor(serviceId, publisherSubjectId)
 
         val asset = ThirdPartyServiceSandbox.resolveLocalResource(
             "$origin/assets/app.js",
             serviceId,
-            commitSha,
+            publisherSubjectId,
             install,
             "index.html",
         )
@@ -182,7 +156,7 @@ class ThirdPartyPackageSecurityTest {
         val root = ThirdPartyServiceSandbox.resolveLocalResource(
             "$origin/",
             serviceId,
-            commitSha,
+            publisherSubjectId,
             install,
             "index.html",
         )
@@ -194,7 +168,7 @@ class ThirdPartyPackageSecurityTest {
         val spaRoute = ThirdPartyServiceSandbox.resolveLocalResource(
             "$origin/orders/123",
             serviceId,
-            commitSha,
+            publisherSubjectId,
             install,
             "index.html",
         )
@@ -208,7 +182,7 @@ class ThirdPartyPackageSecurityTest {
             ThirdPartyServiceSandbox.resolveLocalResource(
                 "$origin/assets/missing.js",
                 serviceId,
-                commitSha,
+                publisherSubjectId,
                 install,
                 "index.html",
             ),
@@ -218,7 +192,7 @@ class ThirdPartyPackageSecurityTest {
             ThirdPartyServiceSandbox.resolveLocalResource(
                 "$origin/%2e%2e/secret.html",
                 serviceId,
-                commitSha,
+                publisherSubjectId,
                 install,
                 "index.html",
             ),
@@ -226,9 +200,9 @@ class ThirdPartyPackageSecurityTest {
         assertEquals(
             ThirdPartySandboxResourceResolution.NotSandboxUrl,
             ThirdPartyServiceSandbox.resolveLocalResource(
-                "${ThirdPartyServiceSandbox.originFor("bjtu.other", commitSha)}/assets/app.js",
+                "${ThirdPartyServiceSandbox.originFor("bjtu.other", publisherSubjectId)}/assets/app.js",
                 serviceId,
-                commitSha,
+                publisherSubjectId,
                 install,
                 "index.html",
             ),

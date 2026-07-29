@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -21,6 +23,72 @@ val npmExecutable = if (System.getProperty("os.name").lowercase().contains("wind
     "npm.cmd"
 } else {
     "npm"
+}
+
+val releaseSigningPropertiesFile = rootProject.file("release-signing.properties")
+val releaseSigningProperties = Properties().apply {
+    if (releaseSigningPropertiesFile.isFile) {
+        releaseSigningPropertiesFile.inputStream().use(::load)
+    }
+}
+
+fun releaseSigningValue(propertyName: String, environmentName: String): String? =
+    providers.environmentVariable(environmentName).orNull
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+        ?: releaseSigningProperties.getProperty(propertyName)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+
+val releaseStoreFilePath = releaseSigningValue("storeFile", "BJTU_RELEASE_STORE_FILE")
+val releaseStorePassword = releaseSigningValue("storePassword", "BJTU_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = releaseSigningValue("keyAlias", "BJTU_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = releaseSigningValue("keyPassword", "BJTU_RELEASE_KEY_PASSWORD")
+val releaseStoreType = releaseSigningValue("storeType", "BJTU_RELEASE_STORE_TYPE")
+val releaseStoreFile = releaseStoreFilePath?.let(rootProject::file)
+val releaseSigningConfigured =
+    releaseStoreFile?.isFile == true &&
+        releaseStorePassword != null &&
+        releaseKeyAlias != null &&
+        releaseKeyPassword != null
+val androidStudioInjectedSigningConfigured =
+    listOf(
+        "android.injected.signing.store.file",
+        "android.injected.signing.store.password",
+        "android.injected.signing.key.alias",
+        "android.injected.signing.key.password",
+    ).all { propertyName ->
+        providers.gradleProperty(propertyName).orNull
+            ?.trim()
+            ?.isNotEmpty() == true
+    }
+val releaseSigningAvailable =
+    releaseSigningConfigured || androidStudioInjectedSigningConfigured
+val missingReleaseSigningMessage =
+    "Release signing is not configured. Use Android Studio's Generate Signed App Bundle or APK " +
+        "wizard, copy release-signing.properties.example to " +
+        "release-signing.properties and provide the original release keystore, or set the " +
+        "BJTU_RELEASE_STORE_FILE, BJTU_RELEASE_STORE_PASSWORD, BJTU_RELEASE_KEY_ALIAS, and " +
+        "BJTU_RELEASE_KEY_PASSWORD environment variables."
+val guardedReleasePackagingTaskPaths =
+    setOf(
+        ":app:assembleRelease",
+        ":app:bundleRelease",
+        ":app:makeApkFromBundleForRelease",
+        ":app:packageRelease",
+        ":app:packageReleaseBundle",
+        ":app:packageReleaseUniversalApk",
+        ":app:signReleaseBundle",
+        ":app:zipApksForRelease",
+    )
+
+gradle.taskGraph.whenReady {
+    // Resource and unit-test tasks also contain "Release"; guard only final distributable producers.
+    val releasePackagingRequested =
+        allTasks.any { task -> task.path in guardedReleasePackagingTaskPaths }
+    if (releasePackagingRequested && !releaseSigningAvailable) {
+        throw GradleException(missingReleaseSigningMessage)
+    }
 }
 
 val npmCiOpenWebUi by tasks.registering(Exec::class) {
@@ -94,8 +162,8 @@ android {
         applicationId = "cn.edu.bjtu.mis"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "v1.3.1"
+        versionCode = 7
+        versionName = "v1.4.0"
 
         buildConfigField("String", "PLUGIN_CATALOG_BASE_URL", "\"https://bjtu.cc\"")
 
@@ -106,10 +174,33 @@ android {
         }
     }
 
+    sourceSets {
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
+
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                releaseStoreType?.let { storeType = it }
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -170,6 +261,9 @@ dependencies {
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.cordova.android)
     implementation(libs.commons.compress)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
+    implementation(libs.coil.svg)
 
     ksp(libs.androidx.room.compiler)
 
@@ -179,12 +273,19 @@ dependencies {
     implementation(libs.compose.material.icons.extended)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
+    debugImplementation(libs.compose.ui.test.manifest)
 
     testImplementation(libs.junit)
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.jsoup)
     testImplementation(libs.kotlinx.serialization.json)
     testImplementation(libs.androidx.room.testing)
+
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.room.testing)
 }
 
 tasks.named("preBuild") {

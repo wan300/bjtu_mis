@@ -6,10 +6,10 @@
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>第三方插件开发者文档 - BJTU MIS Android</title>
+    <title>Manifest v3 插件开发者文档 - BJTU MIS Android</title>
     <meta
       name="description"
-      content="BJTU MIS Android 第三方插件开发者文档，说明静态 Web 服务包、manifest、权限、JavaScript API、受控 HTTP 请求、错误码和发布检查清单。"
+      content="BJTU MIS Android Manifest v3 插件开发者文档：runtime、capability、origin、桥接、加密存储、数据迁移与校园只读代理。"
     >
     <link rel="icon" type="image/png" href="assets/icons/icon_home.png?v=2026062602">
     <link rel="stylesheet" href="assets/css/styles.css?v=2026062602">
@@ -22,9 +22,7 @@
           <span>BJTU MIS Android</span>
         </a>
         <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false" data-nav-toggle>
-          <span></span>
-          <span></span>
-          <span></span>
+          <span></span><span></span><span></span>
         </button>
         <nav class="site-nav" aria-label="主导航">
           <a href="index.html#features">特色</a>
@@ -41,716 +39,247 @@
       <section class="docs-hero" aria-labelledby="docs-title">
         <div class="docs-hero__copy reveal">
           <a class="back-link" href="index.html">返回主页</a>
-          <p class="eyebrow">Developer platform</p>
-          <h1 id="docs-title">第三方插件开发者文档</h1>
+          <p class="eyebrow">Developer platform · Manifest v3</p>
+          <h1 id="docs-title">安全静态 Web 插件开发</h1>
           <p>
-            BJTU MIS Android 第三方插件是安装在应用私有目录中的已构建 H5/SPA Web 服务。插件通过公开 GitHub 仓库导入，通过
-            <code>bjtu-service.json</code> 声明元数据、权限和允许执行/联网的 HTTP/HTTPS origin，并在应用内 WebView 的受控沙箱
-            origin 中调用受控的 <code>window.BjtuService</code> API。
+            插件以静态 H5/SPA 包运行在稳定的本地 HTTPS origin。Manifest v3 将 runtime
+            capability、联网、媒体、iframe、外部导航和原生桥拆分声明，远程页面永远不会
+            获得 BJTU 原生桥。
           </p>
           <div class="docs-hero__actions">
             <a class="btn btn--signal" href="#quickstart">开始开发</a>
-            <a class="btn btn--ghost" href="assets/schemas/third-party-service-manifest.schema.json" download>下载 manifest schema</a>
+            <a class="btn btn--ghost" href="assets/schemas/third-party-service-manifest.schema.json" download>下载 Manifest v3 schema</a>
           </div>
         </div>
         <div class="docs-hero__panel reveal" aria-label="平台约束摘要">
-          <div class="ticket-row">
-            <span>插件形态</span>
-            <strong>H5/SPA Web 包</strong>
-          </div>
-          <div class="ticket-row">
-            <span>导入来源</span>
-            <strong>公开 GitHub 仓库</strong>
-          </div>
-          <div class="ticket-row">
-            <span>运行容器</span>
-            <strong>应用内 WebView</strong>
-          </div>
-          <div class="ticket-row">
-            <span>Schema</span>
-            <strong>v1</strong>
-          </div>
+          <div class="ticket-row"><span>Manifest</span><strong>v3 only</strong></div>
+          <div class="ticket-row"><span>Runtime</span><strong>v1</strong></div>
+          <div class="ticket-row"><span>Bridge</span><strong>self + main frame</strong></div>
+          <div class="ticket-row"><span>发布主体</span><strong>GitHub owner 数值 ID</strong></div>
         </div>
       </section>
 
       <div class="docs-layout">
         <aside class="docs-toc reveal" aria-label="文档目录">
           <strong>目录</strong>
-          <a href="#overview">平台概览</a>
+          <a href="#compatibility">兼容规则</a>
           <a href="#quickstart">快速开始</a>
           <a href="#manifest">Manifest</a>
-          <a href="#permissions">权限</a>
-          <a href="#api">JavaScript API</a>
-          <a href="#methods">方法清单</a>
-          <a href="#security">安全限制</a>
+          <a href="#origins">Origin 边界</a>
+          <a href="#bridge">Bridge</a>
+          <a href="#storage">存储与迁移</a>
+          <a href="#campus">校园代理</a>
+          <a href="#lifecycle">生命周期</a>
           <a href="#release">发布检查</a>
         </aside>
 
         <div class="docs-content">
-          <section class="docs-section reveal" id="overview">
-            <p class="eyebrow">Overview</p>
-            <h2>平台概览</h2>
+          <section class="docs-section reveal" id="compatibility">
+            <p class="eyebrow">Compatibility</p>
+            <h2>Manifest v3 是破坏性基线</h2>
             <p>
-              第三方插件不会直接接触 Cookie、token 或原始 HTTP 客户端。校园数据由 BJTU MIS Android
-              的受控 Repository 返回；若插件声明并获得 <code>identity.credentials.read</code> 权限，并在调用时通过宿主单次确认，也可以通过桥接 API 读取首次登录 BJTU MIS 时保存的登录名和明文密码。
+              新客户端禁止安装、更新和运行 v1/v2。旧包和旧 WebStorage 不会自动删除，
+              用户可从无桥、无网络的只读救援入口查看数据或明确删除。
             </p>
-            <div class="docs-card-grid">
-              <article class="docs-card">
-                <h3>当前支持</h3>
-                <ul>
-                  <li>仓库根目录包含 <code>bjtu-service.json</code> 和 <code>dist/</code>。</li>
-                  <li>通过 <code>https://github.com/{owner}/{repo}</code> 公开仓库导入。</li>
-                  <li>导入前预检 manifest、权限、允许来源、内容 digest 和文件数量。</li>
-                  <li>安装时固定默认分支的 <code>commitSha</code>，并按该 commit 下载。</li>
-                  <li>安装后记录 <code>dist/</code> 内容 SHA-256 digest。</li>
-                  <li>安装后的 <code>dist/</code> 通过每服务隔离的虚拟 HTTPS origin 运行，支持 <code>/assets/...</code> 资源和 SPA fallback。</li>
-                  <li>通过 <code>window.BjtuService.invoke</code> 调用受控 API。</li>
-                  <li>通过 <code>app.http_request</code> 向 <code>allowed_origins</code> 中声明的远端 API 发起受控 HTTP/HTTPS 请求。</li>
-                </ul>
-              </article>
-              <article class="docs-card">
-                <h3>当前不支持</h3>
-                <ul>
-                  <li>私有仓库、release asset、仓库子目录安装。</li>
-                  <li>应用侧自动源码构建或静默更新。</li>
-                  <li>Android 端运行 Node、Vite dev server、<code>npm install</code> 或开发服务器。</li>
-                  <li>原生插件、后台常驻任务、直接读取 App 内部文件。</li>
-                  <li>调用 manifest 未声明或用户未授权的校园服务能力。</li>
-                </ul>
-              </article>
-            </div>
+            <p>
+              本页与公开 Manifest v3 schema 覆盖此前的 v1/v2、聚合 origin、凭据读取桥和
+              通用原生 HTTP 桥说明；旧文档只用于历史追踪，不构成兼容承诺。
+            </p>
+            <ul class="docs-checklist">
+              <li>运行 v3 需要 WebView 同时支持 document-start script 与 web message listener。</li>
+              <li>能力缺失时显示兼容错误，不使用页面加载完成后的注入回退。</li>
+              <li>插件大厅默认目录只返回兼容 v3 制品；旧 API 进入迁移期只读模式。</li>
+            </ul>
           </section>
 
           <section class="docs-section reveal" id="quickstart">
             <p class="eyebrow">Quickstart</p>
-            <h2>快速开始</h2>
-            <p>准备一个公开 GitHub 仓库，仓库根目录保持下面的结构。应用只会安装 <code>dist/</code> 内的静态文件，并在运行时映射到每服务隔离的虚拟 HTTPS origin。</p>
-            <p>v1 只接受 <code>https://github.com/{owner}/{repo}</code> 形式的仓库根地址。再次导入同一 <code>id</code> 的服务会作为更新处理，原有授权会被清空，服务需要重新确认后才会启用。</p>
-            <pre><code>your-repo/
-  bjtu-service.json
-  dist/
-    index.html
-    icon.svg
-    assets/
-      app.css
-      app.js</code></pre>
-            <p>最小页面可以直接调用注入 API。建议所有调用都判断 <code>ok</code>，并对权限不足和校园服务失败给出明确提示。</p>
-            <p>仓库内提供 <code>third-party-plugins/templates/basic/</code> 模板、<code>third-party-plugins/examples/profile-timetable/</code> 离线示例和 <code>third-party-plugins/examples/remote-origin-demo/</code> 远程来源语义示例。</p>
-            <pre><code>node tools/third-party-service-lint.cjs third-party-plugins/examples/profile-timetable</code></pre>
-            <p>lint 的 <code>ERROR</code> 必须修复；<code>WARN</code> 用于提示可能的运行时远端引用。若 warning 指向运行时会加载的页面、iframe、接口或资源，需要加入 <code>allowed_origins</code>，或改为本地打包/移除引用；若只是框架错误说明链接、开发占位字符串或不会触发的文本常量，可以保留，并在发布说明中记录原因。</p>
-            <pre><code>&lt;!doctype html&gt;
-&lt;html lang="zh-CN"&gt;
-  &lt;head&gt;
-    &lt;meta charset="utf-8"&gt;
-    &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
-    &lt;title&gt;Demo Service&lt;/title&gt;
-  &lt;/head&gt;
-  &lt;body&gt;
-    &lt;main id="app"&gt;加载中&lt;/main&gt;
-    &lt;script&gt;
-      async function main() {
-        const response = await window.BjtuService.invoke('identity.get_profile');
-        const app = document.querySelector('#app');
-        if (!response.ok) {
-          app.textContent = response.error.message;
-          return;
-        }
-        const profile = response.data.data;
-        app.textContent = `你好，${profile.name || profile.student_id || '同学'}`;
-      }
-      main();
-    &lt;/script&gt;
-  &lt;/body&gt;
-&lt;/html&gt;</code></pre>
+            <h2>创建与校验</h2>
+            <pre><code>bjtu-service.json
+dist/
+  index.html
+  icon.svg</code></pre>
+            <p>从仓库根目录运行：</p>
+            <pre><code>node tools/third-party-service-lint.cjs third-party-plugins/templates/basic</code></pre>
+            <p>
+              lint 会校验两份共享 schema 一致性、capability、四类 origin、HTTPS/私网规则、
+              远程脚本和 iframe sandbox。所有 <code>ERROR</code> 必须修复。
+            </p>
           </section>
 
           <section class="docs-section reveal" id="manifest">
-            <p class="eyebrow">Manifest</p>
-            <h2>Manifest</h2>
-            <p><code>bjtu-service.json</code> 使用 snake_case。所有字段都必须存在，权限可为空数组。</p>
+            <p class="eyebrow">Contract</p>
+            <h2>Manifest v3</h2>
             <pre><code>{
-  "schema_version": 2,
-  "id": "bjtu.demo",
-  "name": "Demo Service",
-  "description": "A demo BJTU MIS service.",
+  "schema_version": 3,
+  "runtime_version": 1,
+  "min_runtime_version": 1,
+  "required_capabilities": ["runtime.lifecycle.v1"],
+  "optional_capabilities": ["storage.kv.v1"],
+  "data_schema_version": 1,
+  "id": "bjtu.example.demo",
+  "name": "Demo",
+  "description": "Manifest v3 example.",
   "version": "1.0.0",
   "entrypoint": "index.html",
   "icon": "icon.svg",
-  "author": "Your Name",
-  "permissions": {
-    "required": ["identity.profile.read", "app.configuration.read"],
-    "optional": ["academic.timetable.read"]
+  "author": "Example",
+  "permissions": { "required": [], "optional": [] },
+  "connect_origins": [],
+  "media_origins": [],
+  "frame_origins": [],
+  "navigation_origins": [],
+  "bridge_origins": ["self"],
+  "marketplace": {
+    "category": "other",
+    "tags": ["example"],
+    "license": "MIT"
   },
-  "allowed_origins": ["https://api.example.com"],
-  "marketplace": { "category": "academic", "tags": ["课表", "示例"], "license": "MIT" },
-  "configuration": [{ "key": "API_TOKEN", "label": "API Token", "description": "第三方 API 的访问令牌", "type": "secret", "required": true }]
+  "configuration": []
 }</code></pre>
             <div class="docs-table-wrap">
-              <table class="docs-table">
-                <thead>
-                  <tr>
-                    <th>字段</th>
-                    <th>规则</th>
-                  </tr>
-                </thead>
+              <table>
+                <thead><tr><th>Capability</th><th>用途</th></tr></thead>
                 <tbody>
-                  <tr>
-                    <td><code>schema_version</code></td>
-                    <td>高级直链兼容 <code>1</code>；投稿插件大厅必须为 <code>2</code>，且版本号使用 SemVer。</td>
-                  </tr>
-                  <tr>
-                    <td><code>id</code></td>
-                    <td>3-64 位，以小写字母开头，只能包含小写字母、数字、点、下划线和短横线。</td>
-                  </tr>
-                  <tr>
-                    <td><code>name</code> / <code>description</code> / <code>version</code> / <code>author</code></td>
-                    <td>不能为空。名称、描述和作者会展示在授权页。</td>
-                  </tr>
-                  <tr>
-                    <td><code>entrypoint</code> / <code>icon</code></td>
-                    <td>必须是 <code>dist/</code> 内相对路径，不能包含 <code>..</code>、反斜杠、URL、盘符或绝对路径。</td>
-                  </tr>
-                  <tr>
-                    <td><code>permissions.required</code></td>
-                    <td>必须授权的权限。用户未全部同意时服务不能启用。</td>
-                  </tr>
-                  <tr>
-                    <td><code>permissions.optional</code></td>
-                    <td>可选权限。用户拒绝后服务仍可打开，但对应接口返回 <code>permission_denied</code>。</td>
-                  </tr>
-                  <tr>
-                    <td><code>allowed_origins</code></td>
-                    <td>只能填写 HTTP/HTTPS origin，例如 <code>https://api.example.com</code> 或 <code>http://127.0.0.1:8080</code>，不能带路径、查询、片段或用户名。声明的 origin 是受信任执行和联网来源，页面或 iframe 可调用已授权接口；<code>app.http_request</code> 的 <code>url</code> origin 也必须在该列表中。</td>
-                  </tr>
-                  <tr><td><code>marketplace</code></td><td>v2 必填。分类为学业、校园、信息、效率、助手或其他；最多 5 个标签；许可证只展示。</td></tr>
-                  <tr><td><code>configuration</code></td><td>v2 最多 32 项。键使用大写字母、数字和下划线；类型为 text、secret、url、number、boolean、select。声明后必须把 <code>app.configuration.read</code> 放入必选权限。</td></tr>
+                  <tr><td><code>runtime.lifecycle.v1</code></td><td>Runtime 信息、ready 和环境事件。</td></tr>
+                  <tr><td><code>storage.kv.v1</code></td><td>加密、配额化、可迁移的 JSON KV。</td></tr>
+                  <tr><td><code>campus.request.v1</code></td><td>宿主会话下的校园只读 registry。</td></tr>
+                  <tr><td><code>remote.frame.v1</code></td><td>受限远程 iframe。</td></tr>
                 </tbody>
               </table>
             </div>
+            <p>
+              <code>data_schema_version</code> 不得降低。提升时必须设置
+              <code>migration_entrypoint</code>，指向 <code>dist/</code> 内的本地页面。
+            </p>
           </section>
 
-          <section class="docs-section reveal" id="permissions">
-            <p class="eyebrow">Permissions</p>
-            <h2>权限</h2>
-            <p>插件必须先在 manifest 中声明权限，再调用对应接口。授权页展示中文说明，不展示裸权限 ID。</p>
+          <section class="docs-section reveal" id="origins">
+            <p class="eyebrow">Trust boundary</p>
+            <h2>按用途声明 origin</h2>
             <div class="docs-table-wrap">
-              <table class="docs-table docs-table--dense">
-                <thead>
-                  <tr>
-                    <th>权限 ID</th>
-                    <th>能力</th>
-                  </tr>
-                </thead>
+              <table>
+                <thead><tr><th>字段</th><th>用途</th></tr></thead>
                 <tbody>
-                  <tr><td><code>identity.profile.read</code></td><td>读取姓名、学号、学院、专业、邮箱等个人资料。</td></tr>
-                  <tr><td><code>app.configuration.read</code></td><td>仅从插件本地 sandbox origin 读取该插件声明的本机加密配置；远端页面不能读取。</td></tr>
-                  <tr><td><code>identity.credentials.read</code></td><td>读取首次登录 BJTU MIS 时保存的登录名和明文密码。服务启用后，调用对应接口时宿主会弹出单次确认。</td></tr>
-                  <tr><td><code>academic.timetable.read</code></td><td>读取当前课表和用户自定义课程。</td></tr>
-                  <tr><td><code>academic.user_courses.write</code></td><td>新增、修改或删除用户手动创建的课程。</td></tr>
-                  <tr><td><code>academic.scores.read</code></td><td>读取当前学期或指定学期主修成绩。</td></tr>
-                  <tr><td><code>academic.history_scores.read</code></td><td>读取历年成绩。</td></tr>
-                  <tr><td><code>academic.exams.read</code></td><td>读取考试时间、地点和考试方式。</td></tr>
-                  <tr><td><code>academic.calendar.read</code></td><td>读取校历、周次和学期安排。</td></tr>
-                  <tr><td><code>academic.progress.read</code></td><td>读取培养方案完成情况和学分进度。</td></tr>
-                  <tr><td><code>academic.homework.read</code></td><td>读取课程作业、截止时间和提交状态。</td></tr>
-                  <tr><td><code>academic.homework.submit</code></td><td>提交作业内容。服务启用后，调用对应接口时宿主会弹出单次确认。</td></tr>
-                  <tr><td><code>academic.course_resources.read</code></td><td>读取课程资料列表和课程资源元数据。</td></tr>
-                  <tr><td><code>mail.folders.read</code></td><td>读取邮箱文件夹和未读数量。</td></tr>
-                  <tr><td><code>mail.messages.read</code></td><td>读取邮件摘要列表。</td></tr>
-                  <tr><td><code>mail.message_detail.read</code></td><td>读取单封邮件正文、收发件人和附件信息。</td></tr>
-                  <tr><td><code>mail.send</code></td><td>发送邮件。服务启用后，调用对应接口时宿主会弹出单次确认。</td></tr>
+                  <tr><td><code>connect_origins</code></td><td>fetch/XHR 连接目标。</td></tr>
+                  <tr><td><code>media_origins</code></td><td>图片、音视频等资源。</td></tr>
+                  <tr><td><code>frame_origins</code></td><td>远程 iframe；同时声明 <code>remote.frame.v1</code>。</td></tr>
+                  <tr><td><code>navigation_origins</code></td><td>用户手势打开系统浏览器或 Custom Tab。</td></tr>
+                  <tr><td><code>bridge_origins</code></td><td>必须严格为 <code>["self"]</code>。</td></tr>
                 </tbody>
               </table>
             </div>
-          </section>
-
-          <section class="docs-section reveal" id="api">
-            <p class="eyebrow">Bridge API</p>
-            <h2>JavaScript API</h2>
-            <p>WebView 会在本服务沙箱 origin 和 <code>allowed_origins</code> 页面中注入下面的接口。</p>
-            <pre><code>window.BjtuService.invoke(
-  method: string,
-  params?: Record&lt;string, unknown&gt;
-): Promise&lt;{
-  ok: boolean;
-  data?: unknown;
-  error?: { code: string; message: string };
-}&gt;;</code></pre>
-            <ul>
-              <li>调用方必须检查 <code>ok</code>，不要假设接口一定成功。</li>
-              <li>业务读取接口返回 <code>{ ok: true, data: ModuleEnvelope&lt;T&gt; }</code>。真正的业务数据在 <code>response.data.data</code>。</li>
-              <li>除 <code>app.http_request</code> 的兼容字段 <code>statusCode</code> 外，业务接口的请求参数和返回字段都使用 snake_case。</li>
-              <li>可空字段没有值时通常会被省略，而不是返回 <code>null</code>。</li>
-              <li>字符串参数会 trim，空字符串按缺失处理；整数和布尔参数必须传 JSON number / boolean；<code>to</code>、<code>cc</code>、<code>bcc</code> 必须传字符串数组。</li>
-              <li>权限在服务授权页展示，用户批准后同一服务可调用已授权接口。<code>identity.get_credentials</code>、<code>academic.submit_homework</code> 和 <code>mail.send</code> 调用时需要宿主单次确认。</li>
-            </ul>
-            <pre><code>const profileResult = await window.BjtuService.invoke('identity.get_profile');
-if (!profileResult.ok) {
-  throw new Error(profileResult.error.message);
-}
-const profile = profileResult.data.data;
-console.log(profile.name, profile.student_id);
-
-const timetableResult = await window.BjtuService.invoke('academic.get_timetable');
-const timetable = timetableResult.ok ? timetableResult.data.data.entries : [];
-
-const saved = await window.BjtuService.invoke('academic.save_user_course', {
-  course_name: '自习',
-  weekday: '周一',
-  weekday_index: 0,
-  period: '第1-2节',
-  period_number: 1,
-  start_week: 1,
-  end_week: 16,
-  duration_type: 'LongTerm',
-  location_text: '图书馆'
-});
-
-if (!saved.ok) {
-  console.warn(saved.error.code, saved.error.message);
-}
-
-const remote = await window.BjtuService.invoke('app.http_request', {
-  url: 'https://api.example.com/v1/items',
-  method: 'GET',
-  headers: {
-    Accept: 'application/json'
-  }
-});</code></pre>
-            <div class="docs-callout">
-              <strong>授权语义</strong>
-              <p><code>identity.get_credentials</code>、<code>academic.submit_homework</code> 和 <code>mail.send</code> 需要服务先获得对应权限，并在每次调用时由宿主完成单次确认。</p>
-            </div>
-          </section>
-
-          <section class="docs-section reveal" id="methods">
-            <p class="eyebrow">Methods</p>
-            <h2>方法清单</h2>
-            <div class="docs-table-wrap">
-              <table class="docs-table docs-table--dense">
-                <thead>
-                  <tr>
-                    <th>方法</th>
-                    <th>权限</th>
-                    <th>参数</th>
-                    <th>成功时 <code>data</code></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr><td><code>identity.get_profile</code></td><td><code>identity.profile.read</code></td><td>无。</td><td><code>ModuleEnvelope&lt;StudentProfileData&gt;</code></td></tr>
-                  <tr><td><code>identity.get_credentials</code></td><td><code>identity.credentials.read</code></td><td>无。</td><td><code>{ login_name: string, loginName: string, student_id: string, studentId: string, account: string, password: string }</code>，其中 <code>password</code> 为已保存的明文密码。</td></tr>
-                  <tr><td><code>academic.get_timetable</code></td><td><code>academic.timetable.read</code></td><td>无。</td><td><code>ModuleEnvelope&lt;TimetableData&gt;</code></td></tr>
-                  <tr><td><code>academic.save_user_course</code></td><td><code>academic.user_courses.write</code></td><td><code>course_name</code> string、<code>weekday</code> string、<code>weekday_index</code> int、<code>period</code> string、<code>period_number</code> int、<code>start_week</code> int、<code>end_week</code> int 必填；可选 <code>id</code> number/string、<code>time_range</code> string、<code>weeks_text</code> string、<code>duration_type</code> <code>"Temporary" | "LongTerm"</code>、<code>teacher</code> string、<code>location_text</code> string、<code>remark</code> string、<code>color_index</code> int。</td><td><code>{ id: number }</code></td></tr>
-                  <tr><td><code>academic.delete_user_course</code></td><td><code>academic.user_courses.write</code></td><td><code>id</code> number/string 必填。</td><td><code>{ deleted: true }</code></td></tr>
-                  <tr><td><code>academic.get_scores</code></td><td><code>academic.scores.read</code></td><td>可选 <code>term</code> string、<code>ctype</code> string。</td><td><code>ModuleEnvelope&lt;ScoreData&gt;</code></td></tr>
-                  <tr><td><code>academic.get_history_scores</code></td><td><code>academic.history_scores.read</code></td><td>可选 <code>term</code> string。</td><td><code>ModuleEnvelope&lt;ScoreData&gt;</code></td></tr>
-                  <tr><td><code>academic.get_exams</code></td><td><code>academic.exams.read</code></td><td>可选 <code>term</code> string。</td><td><code>ModuleEnvelope&lt;ExamData&gt;</code></td></tr>
-                  <tr><td><code>academic.get_calendar</code></td><td><code>academic.calendar.read</code></td><td>可选 <code>month</code> string。</td><td><code>ModuleEnvelope&lt;CalendarData&gt;</code></td></tr>
-                  <tr><td><code>academic.get_academic_progress</code></td><td><code>academic.progress.read</code></td><td>无。</td><td><code>ModuleEnvelope&lt;AcademicProgressData&gt;</code></td></tr>
-                  <tr><td><code>academic.get_homework</code></td><td><code>academic.homework.read</code></td><td>可选 <code>status</code> string，默认 <code>all</code>。内置过滤值：<code>all</code>、<code>open</code>、<code>done</code>、<code>expired</code>、<code>expired_can_submit</code>、<code>expired_closed</code>；其他值会与上游原始 <code>item.status</code> 精确匹配。</td><td><code>ModuleEnvelope&lt;HomeworkData&gt;</code></td></tr>
-                  <tr><td><code>academic.submit_homework</code></td><td><code>academic.homework.submit</code></td><td><code>homework_id</code> int、<code>course_id</code> int 必填；可选 <code>content</code> string。当前不接受第三方文件列表。</td><td><code>HomeworkSubmitResponse</code></td></tr>
-                  <tr><td><code>academic.get_course_resources</code></td><td><code>academic.course_resources.read</code></td><td>可选 <code>term</code> string、<code>course_id</code> string、<code>folder_id</code> string，默认 <code>0</code>、<code>search</code> string、<code>category_key</code> string。</td><td><code>ModuleEnvelope&lt;CourseResourcesData&gt;</code></td></tr>
-                  <tr><td><code>mail.list_folders</code></td><td><code>mail.folders.read</code></td><td>无。</td><td><code>ModuleEnvelope&lt;MailFoldersData&gt;</code></td></tr>
-                  <tr><td><code>mail.list_messages</code></td><td><code>mail.messages.read</code></td><td>可选 <code>folder_id</code> string，默认 <code>1</code>、<code>start</code> int，默认 <code>0</code>、<code>limit</code> int，默认 <code>20</code>，会限制在 1-100。</td><td><code>ModuleEnvelope&lt;MailMessagesData&gt;</code></td></tr>
-                  <tr><td><code>mail.get_message</code></td><td><code>mail.message_detail.read</code></td><td><code>message_id</code> string 必填；可选 <code>mboxa</code> string。</td><td><code>ModuleEnvelope&lt;MailMessageDetail&gt;</code></td></tr>
-                  <tr><td><code>mail.send</code></td><td><code>mail.send</code></td><td>可选 <code>compose_id</code> string、<code>account</code> string、<code>to</code> string[]、<code>cc</code> string[]、<code>bcc</code> string[]、<code>subject</code> string、<code>content</code> string、<code>body</code> string 兼容别名、<code>html_content</code> string、<code>is_html</code> boolean、<code>save_sent_copy</code> boolean，默认 <code>true</code>、<code>request_read_receipt</code> boolean，默认 <code>false</code>、<code>schedule_date</code> string、<code>show_one_rcpt</code> boolean，默认 <code>false</code>、<code>forbid_download</code> boolean，默认 <code>false</code>、<code>mboxa</code> string。当前不接受第三方附件列表。</td><td><code>MailComposeResponse</code></td></tr>
-                  <tr><td><code>app.get_configuration</code></td><td><code>app.configuration.read</code></td><td><code>key</code> string 必填；只允许插件本地 sandbox origin 读取已声明配置。</td><td>string</td></tr>
-                  <tr><td><code>app.http_request</code></td><td>无</td><td><code>url</code> string 必填；可选 <code>method</code> <code>"GET" | "POST" | "PUT" | "DELETE"</code>，默认 <code>GET</code>、<code>data</code> JSON、<code>headers</code> object。</td><td><code>HttpBridgeResponse</code></td></tr>
-                  <tr><td><code>app.close_service</code></td><td>无</td><td>无。</td><td><code>{}</code>，随后关闭当前第三方服务并返回服务列表。</td></tr>
-                </tbody>
-              </table>
-            </div>
-            <h3>参数补充</h3>
-            <ul>
-              <li><code>academic.save_user_course</code> 会把 <code>weekday_index</code> 限制在 0-6、<code>period_number</code> 至少为 1、<code>start_week</code> / <code>end_week</code> 至少为 1 并自动排序、<code>color_index</code> 限制在 0-7。<code>duration_type</code> 缺失或非法时按 <code>Temporary</code> 处理。</li>
-              <li><code>identity.get_credentials</code>、<code>academic.submit_homework</code> 和 <code>mail.send</code> 需要服务先获得对应权限，并在每次调用时由宿主完成单次确认。</li>
-              <li><code>mail.send</code> 的 <code>to</code>、<code>cc</code>、<code>bcc</code> 是数组；传逗号分隔字符串不会被拆分。</li>
-              <li><code>app.http_request</code> 的 <code>headers</code> 会过滤 <code>host</code>、<code>connection</code>、<code>content-length</code>、<code>transfer-encoding</code>、<code>accept-encoding</code>、<code>cookie</code>、<code>origin</code> 等敏感或运行时控制头。</li>
-            </ul>
-            <h3>受控 HTTP 请求</h3>
-            <ul>
-              <li><code>app.http_request</code> 不需要权限 ID，但调用页面必须位于当前服务沙箱 origin 或 <code>allowed_origins</code> 中的 origin。</li>
-              <li><code>url</code> 只能是 HTTP/HTTPS URL，且其 origin 必须已经写入 <code>allowed_origins</code>。</li>
-              <li>非 <code>GET</code> 请求默认以 <code>application/json;charset=UTF-8</code> 发送 <code>data</code>；响应正文会优先解析为 JSON，解析失败则作为字符串返回。</li>
-              <li>响应超过 5 MiB 会返回 <code>bridge_failed</code>。</li>
-              <li>成功响应形状为 <code>{ ok: true, data: { statusCode, data, header } }</code>。这里的 <code>statusCode</code> 保持 WebView/uni-app 兼容命名，不转换为 snake_case。</li>
-            </ul>
-            <h3>返回数据模型</h3>
-            <p>下面的类型是运行时 JSON 形状，字段已按 snake_case 展示。可空字段在没有值时可能被省略。</p>
-            <pre><code>type CoverageLevel = 'verified' | 'provisional';
-
-type ModuleEnvelope&lt;T&gt; = {
-  module: string;
-  synced_at?: string;
-  source_system: string;
-  coverage: CoverageLevel;
-  source_params: Record&lt;string, unknown&gt;;
-  data: T;
-};
-
-type TermOption = { value: string; label: string; selected: boolean };
-type ProfileField = { label: string; value: string };
-type ProfileSection = { title: string; fields: ProfileField[] };
-
-type StudentProfileData = {
-  name?: string;
-  student_id?: string;
-  account?: string;
-  gender?: string;
-  birthday?: string;
-  name_pinyin?: string;
-  english_name?: string;
-  ethnicity?: string;
-  political_status?: string;
-  nationality?: string;
-  is_international_student?: string;
-  college?: string;
-  major?: string;
-  class_name?: string;
-  grade?: string;
-  education_level?: string;
-  has_student_status?: string;
-  student_status?: string;
-  student_category?: string;
-  change_status?: string;
-  cultivation_method?: string;
-  is_auditor?: string;
-  study_language?: string;
-  campus?: string;
-  phone?: string;
-  email?: string;
-  avatar_url?: string;
-  fields: ProfileField[];
-  sections: ProfileSection[];
-};
-
-type CourseEntry = {
-  weekday: string;
-  period: string;
-  time_range?: string;
-  course_code: string;
-  section?: string;
-  course_name: string;
-  teacher?: string;
-  weeks?: string;
-  campus?: string;
-  building?: string;
-  room?: string;
-  location_text?: string;
-  local_id?: number;
-  remark?: string;
-  color_index?: number;
-  is_user_created: boolean;
-};
-
-type TimetableData = {
-  days: string[];
-  periods: string[];
-  entries: CourseEntry[];
-  current_term?: string;
-  available_terms: TermOption[];
-};
-
-type ExamItem = {
-  term?: string;
-  course_name: string;
-  schedule?: string;
-  exam_mode?: string;
-  remark?: string;
-  registration?: string;
-  status?: string;
-};
-
-type ExamData = {
-  current_term?: string;
-  available_terms: TermOption[];
-  items: ExamItem[];
-};
-
-type ScoreItem = {
-  term?: string;
-  course_name: string;
-  credit?: string;
-  score?: string;
-  bonus_score?: string;
-  teacher?: string;
-  detail?: string;
-  detail_path?: string;
-};
-
-type ScoreData = {
-  current_term?: string;
-  available_terms: TermOption[];
-  items: ScoreItem[];
-};
-
-type CalendarItem = { date: string; week?: string; note?: string };
-
-type CalendarData = {
-  month: string;
-  current_week?: string;
-  current_term?: string;
-  available_terms: TermOption[];
-  items: CalendarItem[];
-};
-
-type CreditSummary = {
-  course_count: number;
-  passed_course_count: number;
-  failed_course_count: number;
-  attempted_credits: number;
-  passed_credits: number;
-  failed_credits: number;
-  target_credits?: number;
-  completion_rate: number;
-};
-
-type CreditBucket = {
-  name: string;
-  required_credits?: number;
-  earned_credits: number;
-  pending_credits?: number;
-  completion_rate?: number;
-  parent?: string;
-};
-
-type AcademicProgressCourse = {
-  term?: string;
-  course_code?: string;
-  course_name: string;
-  credit?: number;
-  exam_date?: string;
-  score?: string;
-  status: string;
-  detail?: string;
-  group_info?: string;
-  source: string;
-};
-
-type AcademicProgressData = {
-  current_term?: string;
-  summary: CreditSummary;
-  buckets: CreditBucket[];
-  merged_buckets: CreditBucket[];
-  detail_buckets: CreditBucket[];
-  courses: AcademicProgressCourse[];
-  replace_courses: Record&lt;string, unknown&gt;[];
-  fields: ProfileField[];
-};
-
-type CourseSummary = {
-  course_id: number;
-  course_name: string;
-  course_code?: string;
-  teacher_name?: string;
-  teacher_id?: string;
-  term?: string;
-  xq_code?: string;
-  xkh_id?: string;
-};
-
-type HomeworkAttachment = {
-  attachment_id: string;
-  filename: string;
-  url?: string;
-  size?: string;
-};
-
-type HomeworkItem = {
-  homework_id?: number;
-  course: string;
-  course_id: number;
-  course_code?: string;
-  title: string;
-  content_excerpt?: string;
-  requirement_text?: string;
-  opened_at?: string;
-  due_at?: string;
-  submitted_at?: string;
-  status: string;
-  sub_type: number;
-  submission_status?: string;
-  can_submit: boolean;
-  can_submit_explicit: boolean;
-  content_type: number;
-  is_group: boolean;
-  return_num: number;
-  attachments: HomeworkAttachment[];
-};
-
-type HomeworkData = {
-  current_term?: string;
-  courses: CourseSummary[];
-  items: HomeworkItem[];
-};
-
-type HomeworkSubmitResponse = {
-  status: string;
-  message?: string;
-  homework_id: number;
-  submitted_at?: string;
-  upstream: Record&lt;string, unknown&gt;;
-};
-
-type CourseResourceCategory = { key: string; label: string };
-
-type CourseResourceFolder = {
-  folder_id: string;
-  name: string;
-  parent_id?: string;
-  category_key: string;
-  category_label: string;
-};
-
-type CourseResourceItem = {
-  resource_id: string;
-  rp_id: string;
-  res_id?: string;
-  name: string;
-  extension?: string;
-  size?: string;
-  play_url?: string;
-  res_url?: string;
-  uploaded_at?: string;
-  teacher_name?: string;
-  download_count?: number;
-  click_count?: number;
-  can_download: boolean;
-  folder_id: string;
-  category_key: string;
-  category_label: string;
-};
-
-type CourseResourcesData = {
-  current_term?: string;
-  courses: CourseSummary[];
-  selected_course_id?: number;
-  folder_id: string;
-  categories: CourseResourceCategory[];
-  selected_category_key: string;
-  tree: CourseResourceFolder[];
-  folders: CourseResourceFolder[];
-  resources: CourseResourceItem[];
-};
-
-type MailFolder = {
-  folder_id: string;
-  name: string;
-  message_count: number;
-  unread_count: number;
-  message_size: number;
-  unread_size: number;
-  system: boolean;
-};
-
-type MailMessageSummary = {
-  message_id: string;
-  folder_id: string;
-  subject: string;
-  from_text: string;
-  to_text: string;
-  sender?: string;
-  sent_at?: string;
-  received_at?: string;
-  modified_at?: string;
-  size: number;
-  read: boolean;
-  attached: boolean;
-  priority?: number;
-  summary?: string;
-};
-
-type MailAttachment = {
-  attachment_id: string;
-  filename: string;
-  content_type?: string;
-  size: number;
-  part: string;
-};
-
-type MailMessageDetail = MailMessageSummary &amp; {
-  from_list: string[];
-  to_list: string[];
-  cc_list: string[];
-  bcc_list: string[];
-  html_content: string;
-  headers: Record&lt;string, unknown&gt;;
-  attachments: MailAttachment[];
-};
-
-type MailFoldersData = { folders: MailFolder[] };
-
-type MailMessagesData = {
-  folder_id: string;
-  start: number;
-  limit: number;
-  total: number;
-  messages: MailMessageSummary[];
-};
-
-type MailComposeResponse = {
-  status: string;
-  compose_id: string;
-  draft_id?: string;
-  sent_message_id?: string;
-  upstream: Record&lt;string, unknown&gt;;
-};
-
-type HttpBridgeResponse = {
-  statusCode: number;
-  data: unknown;
-  header: Record&lt;string, string&gt;;
-};</code></pre>
-            <h3>错误码</h3>
-            <div class="docs-table-wrap">
-              <table class="docs-table docs-table--dense">
-                <thead>
-                  <tr>
-                    <th>错误码</th>
-                    <th>含义</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr><td><code>service_not_enabled</code></td><td>服务尚未完成授权或更新后需要重新确认。</td></tr>
-                  <tr><td><code>unknown_method</code></td><td>接口不存在或方法名拼写错误。</td></tr>
-                  <tr><td><code>permission_denied</code></td><td>服务未获得该接口对应权限。</td></tr>
-                  <tr><td><code>api_failed</code></td><td>底层 BJTU MIS、教学服务或邮箱接口失败，或业务接口参数缺失、类型不正确。</td></tr>
-                  <tr><td><code>bridge_failed</code></td><td>WebView 桥接请求格式错误、当前页面不在允许执行来源内、HTTP 桥接校验失败、HTTP 响应超过 5 MiB 或运行时异常。</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="docs-section reveal" id="security">
-            <p class="eyebrow">Security</p>
-            <h2>安全限制</h2>
             <ul class="docs-checklist">
-              <li>WebView 通过每服务隔离的虚拟 HTTPS origin 加载已安装插件目录内的资源，例如 <code>https://&lt;service-sandbox-id&gt;.third-party.bjtu-mis.local/</code>。</li>
-              <li>该虚拟 origin 只映射当前服务安装目录，并支持缺失页面路径回落到入口文件以适配 SPA history 路由。</li>
-              <li>WebView 允许加载 manifest 中声明的 HTTP/HTTPS origin；这些 origin 同时作为执行来源和联网来源使用。</li>
-              <li><code>app.http_request</code> 的目标 origin 必须在 manifest 的 <code>allowed_origins</code> 中声明。</li>
-              <li>其他未声明 HTTP/HTTPS origin、content URL 和未声明本地路径会被拦截。</li>
-              <li>禁止通过 manifest 声明带路径、查询参数、片段、用户名或非 HTTP/HTTPS 协议的外联地址。</li>
-              <li>下载包最大 25 MiB，解压后最大 50 MiB，最多 1000 个文件。</li>
-              <li>Zip 包和 manifest 路径不能包含路径穿越、绝对路径或反斜杠。</li>
-              <li>插件更新会清空授权并进入重新确认状态。</li>
-              <li>导入确认页会展示 commitSha、内容 digest、权限和允许执行/联网来源。</li>
+              <li>公共制品只接受 HTTPS；开发者模式仅 localhost 可使用 HTTP。</li>
+              <li>校园、私网、回环、链路本地来源不能进入普通 connect 列表。</li>
+              <li>远程主 frame 始终阻止；远程 iframe 不获得桥、第三方 Cookie、下载、弹窗或顶层导航。</li>
             </ul>
+            <pre><code>&lt;iframe
+  src="https://example.com/embed"
+  sandbox="allow-scripts allow-forms allow-same-origin"
+&gt;&lt;/iframe&gt;</code></pre>
+          </section>
+
+          <section class="docs-section reveal" id="bridge">
+            <p class="eyebrow">Protocol v1</p>
+            <h2>统一请求与错误</h2>
+            <pre><code>{
+  "protocol_version": 1,
+  "request_id": "unique-id",
+  "method": "app.get_runtime_info",
+  "params": {}
+}</code></pre>
+            <pre><code>const runtime = await window.BjtuService.invoke('app.get_runtime_info', {});
+const storage = await window.BjtuService.invoke('app.storage.usage', {});
+await window.BjtuService.invoke('app.ready', {});</code></pre>
+            <p>
+              错误统一包含 <code>code</code>、<code>message</code>、
+              <code>request_id</code>、<code>retryable</code>，并可带
+              <code>http_status</code> 与安全的 <code>details</code>。
+            </p>
+            <div class="docs-table-wrap">
+              <table>
+                <thead><tr><th>方法</th><th>参数</th></tr></thead>
+                <tbody>
+                  <tr><td><code>app.get_runtime_info</code></td><td><code>{}</code></td></tr>
+                  <tr><td><code>app.has_capability</code></td><td><code>{ capability }</code></td></tr>
+                  <tr><td><code>app.ready</code></td><td><code>{}</code></td></tr>
+                  <tr><td><code>app.get_configuration</code></td><td><code>{ key }</code>；需要 <code>app.configuration.read</code></td></tr>
+                  <tr><td><code>app.storage.get/set/remove</code></td><td><code>{ key, value? }</code></td></tr>
+                  <tr><td><code>app.storage.keys/usage/clear</code></td><td><code>{}</code></td></tr>
+                  <tr><td><code>campus.request</code></td><td><code>{ service_id, method, path, query, accept }</code></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Runtime 不暴露明文登录凭据，也不提供通用原生 HTTP bridge。公网请求使用
+              浏览器 fetch，并受 CSP 与 <code>connect_origins</code> 限制。
+            </p>
+            <p>
+              <code>app.get_configuration</code> 只能读取 Manifest 已声明且保存在设备加密
+              存储中的配置 key，并受同一稳定本地 main-frame/source-origin 边界约束；
+              远程 frame 不得读取。
+            </p>
+          </section>
+
+          <section class="docs-section reveal" id="storage">
+            <p class="eyebrow">Transactional data</p>
+            <h2>加密 KV、迁移与回滚</h2>
+            <ul class="docs-checklist">
+              <li>按 publisher subject + plugin ID 隔离，使用 Android Keystore AES-GCM。</li>
+              <li>10 MiB 总配额、单项 256 KiB、最多 1024 keys。</li>
+              <li>同一 namespace 使用 Mutex；临时文件、fsync 和原子替换保证写入。</li>
+              <li>迁移 WebView 使用临时 origin、影子 KV、无网络且无校园权限。</li>
+              <li>30 秒内调用 <code>migration.commit</code> 后才切换包与数据；失败自动回滚。</li>
+              <li>LocalStorage/IndexedDB 跨 commit 保留，但不在 KV 回滚范围内。</li>
+            </ul>
+          </section>
+
+          <section class="docs-section reveal" id="campus">
+            <p class="eyebrow">Campus proxy</p>
+            <h2>只读校园会话代理</h2>
+            <pre><code>await window.BjtuService.invoke('campus.request', {
+  service_id: 'aa',
+  method: 'GET',
+  path: '/examine/examplanstudent/stulist/',
+  query: { term: '2026-2027-1' },
+  accept: 'application/json'
+});</code></pre>
+            <ul class="docs-checklist">
+              <li>只接受 GET/HEAD、注册 service ID、精确 path 和受控 query。</li>
+              <li>15 秒超时、5 MiB 流式上限，越出注册服务的重定向立即失败。</li>
+              <li>Cookie、Set-Cookie、认证头和不安全响应头不会暴露给插件。</li>
+              <li>MIS 仅开放 <code>/home/</code>；AA 与 VE 仅开放已验证的细粒度只读路径。</li>
+              <li>Coremail、知行、就业和全部写操作不进入代理。</li>
+            </ul>
+          </section>
+
+          <section class="docs-section reveal" id="lifecycle">
+            <p class="eyebrow">Environment</p>
+            <h2>生命周期与宿主环境</h2>
+            <p>
+              window 事件为 <code>pause</code>、<code>resume</code>、<code>back</code>、
+              <code>theme</code>、<code>resize</code>、<code>network</code>；同时发送
+              <code>bjtu:&lt;name&gt;</code> 兼容事件。
+            </p>
+            <p>
+              detail 包含 viewport、安全区、IME 高度、方向、font scale、主题、减少动态、
+              高对比度和网络状态。<code>back</code> 在 150 ms 内未
+              <code>preventDefault()</code> 时回退 Web 历史或关闭插件。
+            </p>
           </section>
 
           <section class="docs-section reveal" id="release">
             <p class="eyebrow">Release</p>
             <h2>发布检查清单</h2>
             <ul class="docs-checklist">
-              <li>仓库为公开 GitHub 仓库，导入链接只使用仓库根地址。</li>
-              <li><code>bjtu-service.json</code> 位于仓库根目录，字段完整且通过 schema 校验。</li>
-              <li><code>dist/</code> 包含入口文件、图标和所有静态资源。</li>
-              <li>已运行 <code>node tools/third-party-service-lint.cjs &lt;plugin-root&gt;</code>。</li>
-              <li>仅声明实际需要的权限，优先把非关键能力放到 <code>optional</code>。</li>
-              <li>只在 <code>allowed_origins</code> 中声明运行时确实需要加载的页面、iframe、接口或资源 origin。</li>
-              <li>所有 API 调用都处理 <code>ok: false</code> 和常用错误码。</li>
-              <li>页面在窄屏下可用，表格、按钮、长文本和代码片段不会遮挡内容。</li>
-              <li>没有把真实校园账号、Cookie、token、邮箱内容、验证码或个人隐私写入代码或示例数据。</li>
+              <li>Manifest v3、SemVer、最小权限与最小 capability。</li>
+              <li><code>bridge_origins</code> 仅 self；各远程 origin 按用途拆分。</li>
+              <li>所有可执行 JavaScript 本地打包，远程 iframe 使用规定 sandbox。</li>
+              <li>重要数据使用 <code>app.storage</code>，schema 提升提供幂等 migration。</li>
+              <li>写操作继续走领域 API；邮件与作业提交保留逐次确认。</li>
+              <li>代码、日志和 fixture 不含真实账号、密码、Cookie、token 或个人信息。</li>
+              <li>提交前运行 lint、平台测试和 Android 对应测试。</li>
             </ul>
           </section>
         </div>

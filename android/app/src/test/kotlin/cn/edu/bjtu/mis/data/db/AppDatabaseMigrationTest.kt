@@ -46,4 +46,32 @@ class AppDatabaseMigrationTest {
             assertTrue("Missing SQL fragment: $fragment", createSql.contains(fragment))
         }
     }
+
+    @Test
+    fun migrationTenToElevenAddsV3IdentityAndDisablesLegacyRows() {
+        val sql = MIGRATION_10_11_ADD_COLUMN_SQL.joinToString("\n")
+        listOf(
+            "`publisher_subject_id`",
+            "`data_schema_version`",
+            "`compatibility_state`",
+            "`verification_level`",
+            "`previous_version_json`",
+        ).forEach { fragment ->
+            assertTrue("Missing SQL fragment: $fragment", sql.contains(fragment))
+        }
+        assertTrue(MIGRATION_10_11_DISABLE_LEGACY_SQL.contains("`enabled` = 0"))
+        assertTrue(MIGRATION_10_11_DISABLE_LEGACY_SQL.contains("`needs_review` = 1"))
+        assertTrue(MIGRATION_10_11_DISABLE_LEGACY_SQL.contains("'legacy_disabled'"))
+        listOf(
+            "`service_id` TEXT NOT NULL",
+            "`publisher_subject_id` TEXT NOT NULL",
+            "`web_storage_origin` TEXT NOT NULL",
+            "PRIMARY KEY(`service_id`)",
+        ).forEach { fragment ->
+            assertTrue(
+                "Missing cleanup tombstone SQL fragment: $fragment",
+                CREATE_THIRD_PARTY_CLEANUP_TOMBSTONES_SQL.contains(fragment),
+            )
+        }
+    }
 }

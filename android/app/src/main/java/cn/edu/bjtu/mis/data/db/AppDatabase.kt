@@ -22,6 +22,7 @@ import cn.edu.bjtu.mis.model.UserTodoItem
 import cn.edu.bjtu.mis.model.formatUserCourseWeeks
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceDao
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceEntity
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyCleanupTombstoneEntity
 import kotlinx.serialization.encodeToString
 
 @Entity(tableName = "sync_runs")
@@ -298,8 +299,9 @@ interface BjtuMisDao {
         MailFolderEntity::class,
         MailMessageSummaryEntity::class,
         ThirdPartyServiceEntity::class,
+        ThirdPartyCleanupTombstoneEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -434,6 +436,39 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
         db.execSQL(CREATE_MODULE_UPDATE_SUMMARIES_SQL)
     }
 }
+
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        MIGRATION_10_11_ADD_COLUMN_SQL.forEach(db::execSQL)
+        db.execSQL(MIGRATION_10_11_DISABLE_LEGACY_SQL)
+        db.execSQL(CREATE_THIRD_PARTY_CLEANUP_TOMBSTONES_SQL)
+    }
+}
+
+internal val MIGRATION_10_11_ADD_COLUMN_SQL = listOf(
+    "ALTER TABLE `third_party_services` ADD COLUMN `publisher_subject_id` TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE `third_party_services` ADD COLUMN `data_schema_version` INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE `third_party_services` ADD COLUMN `compatibility_state` TEXT NOT NULL DEFAULT 'legacy_disabled'",
+    "ALTER TABLE `third_party_services` ADD COLUMN `verification_level` TEXT NOT NULL DEFAULT 'legacy'",
+    "ALTER TABLE `third_party_services` ADD COLUMN `previous_version_json` TEXT",
+)
+
+internal const val MIGRATION_10_11_DISABLE_LEGACY_SQL = """
+UPDATE `third_party_services`
+SET `enabled` = 0,
+    `needs_review` = 1,
+    `compatibility_state` = 'legacy_disabled'
+"""
+
+internal const val CREATE_THIRD_PARTY_CLEANUP_TOMBSTONES_SQL = """
+CREATE TABLE IF NOT EXISTS `third_party_cleanup_tombstones` (
+    `service_id` TEXT NOT NULL,
+    `publisher_subject_id` TEXT NOT NULL,
+    `web_storage_origin` TEXT NOT NULL,
+    `created_at` TEXT NOT NULL,
+    PRIMARY KEY(`service_id`)
+)
+"""
 
 internal const val CREATE_MODULE_UPDATE_SUMMARIES_SQL = """
 CREATE TABLE IF NOT EXISTS `module_update_summaries` (

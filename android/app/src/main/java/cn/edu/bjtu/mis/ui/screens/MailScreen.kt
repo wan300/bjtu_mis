@@ -74,6 +74,8 @@ import cn.edu.bjtu.mis.ui.components.KeyValue
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
 import cn.edu.bjtu.mis.ui.components.PageActionRow
+import cn.edu.bjtu.mis.ui.theme.AppHapticEvent
+import cn.edu.bjtu.mis.ui.theme.LocalAppHaptics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -640,6 +642,7 @@ private fun ComposeMailDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val haptics = LocalAppHaptics.current
     var composeId by remember { mutableStateOf<String?>(null) }
     var toText by remember { mutableStateOf("") }
     var ccText by remember { mutableStateOf("") }
@@ -650,6 +653,7 @@ private fun ComposeMailDialog(
     var suggestions by remember { mutableStateOf<List<MailContactSuggestion>>(emptyList()) }
     var busy by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var showSendConfirmation by remember { mutableStateOf(false) }
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
@@ -708,12 +712,49 @@ private fun ComposeMailDialog(
             runCatching {
                 if (saveDraft) repository.saveDraft(request) else repository.send(request)
             }.onSuccess {
+                haptics.perform(AppHapticEvent.Success)
                 onSent()
             }.onFailure {
+                haptics.perform(AppHapticEvent.Error)
                 error = it.message ?: if (saveDraft) "保存草稿失败" else "发送失败"
             }
             busy = null
         }
+    }
+
+    if (showSendConfirmation) {
+        val recipients = splitRecipients(toText)
+        AlertDialog(
+            onDismissRequest = { showSendConfirmation = false },
+            title = { Text("确认发送邮件") },
+            text = {
+                Text(
+                    "将向 ${recipients.size} 位收件人发送" +
+                        "“${subject.ifBlank { "（无主题）" }}”" +
+                        if (attachments.isEmpty()) {
+                            "。请确认收件人与正文无误。"
+                        } else {
+                            "，包含 ${attachments.size} 个附件。请确认收件人与正文无误。"
+                        },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSendConfirmation = false
+                        haptics.perform(AppHapticEvent.Commit)
+                        submit(saveDraft = false)
+                    },
+                ) {
+                    Text("确认发送")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSendConfirmation = false }) {
+                    Text("返回检查")
+                }
+            },
+        )
     }
 
     AlertDialog(
@@ -772,7 +813,7 @@ private fun ComposeMailDialog(
                         label = { Text("正文") },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(160.dp),
+                            .heightIn(min = 160.dp),
                         minLines = 5,
                     )
                 }
@@ -797,7 +838,7 @@ private fun ComposeMailDialog(
         confirmButton = {
             Button(
                 enabled = busy == null && splitRecipients(toText).isNotEmpty(),
-                onClick = { submit(saveDraft = false) },
+                onClick = { showSendConfirmation = true },
             ) { Text("发送") }
         },
         dismissButton = {

@@ -4,7 +4,16 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -12,26 +21,42 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,10 +70,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -95,8 +125,18 @@ import cn.edu.bjtu.mis.ui.screens.ZhixingScreen
 import cn.edu.bjtu.mis.ui.screens.navigationTargets
 import cn.edu.bjtu.mis.ui.components.AppUpdateAvailableDialog
 import cn.edu.bjtu.mis.ui.components.AppUpdateDialogPreference
+import cn.edu.bjtu.mis.ui.theme.AppAppearancePreferences
+import cn.edu.bjtu.mis.ui.theme.AppEffectOverride
+import cn.edu.bjtu.mis.ui.theme.AppHapticEvent
 import cn.edu.bjtu.mis.ui.theme.AppThemeOption
+import cn.edu.bjtu.mis.ui.theme.AppUiStyle
+import cn.edu.bjtu.mis.ui.theme.AppWindowWidthClass
 import cn.edu.bjtu.mis.ui.theme.BjtuMisSystemBars
+import cn.edu.bjtu.mis.ui.theme.LocalAppDesign
+import cn.edu.bjtu.mis.ui.theme.LocalAppHaptics
+import cn.edu.bjtu.mis.ui.theme.LocalAppMotion
+import cn.edu.bjtu.mis.ui.theme.LocalAppUiStyle
+import cn.edu.bjtu.mis.ui.theme.LocalAppWindowWidthClass
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -112,7 +152,7 @@ private val MainRoutes = setOf(RouteHome, RouteServices, ModuleKeys.OpenWebUiAge
 private val ProfileDetailRouteTitles = mapOf(
     RouteProfilePersonalInfo to "人员信息",
     RouteProfileTrainingInfo to "培养信息",
-    RouteProfileTheme to "主题",
+    RouteProfileTheme to "外观与显示",
     RouteProfileHomeworkReminder to "作业提醒",
 )
 
@@ -141,7 +181,8 @@ private val BottomTabs = listOf(
 @Composable
 fun BjtuMisApp(
     container: AppContainer,
-    themeOption: AppThemeOption = AppThemeOption.Default,
+    appearance: AppAppearancePreferences = AppAppearancePreferences(),
+    onAppearancePreview: (AppAppearancePreferences?) -> Unit = {},
     initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.CacheFirst,
     requestedRoute: String? = null,
     onRouteHandled: () -> Unit = {},
@@ -149,6 +190,12 @@ fun BjtuMisApp(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val themeOption = appearance.theme
+    val isApple = appearance.uiStyle == AppUiStyle.Apple
+    val windowWidthClass = LocalAppWindowWidthClass.current
+    val haptics = LocalAppHaptics.current
+    val motion = LocalAppMotion.current
+    val snackbarHostState = remember { SnackbarHostState() }
     var current by rememberSaveable { mutableStateOf(RouteHome) }
     var mainTab by rememberSaveable { mutableStateOf(RouteHome) }
     var ready by rememberSaveable { mutableStateOf<Boolean?>(null) }
@@ -166,6 +213,103 @@ fun BjtuMisApp(
     var homeworkDetailTarget by remember { mutableStateOf<HomeworkItem?>(null) }
     var homeworkDetailReturnRoute by rememberSaveable { mutableStateOf(ModuleKeys.Homework) }
     var initialLoadStrategyConsumed by rememberSaveable { mutableStateOf(false) }
+    var predictiveBackProgress by remember { mutableFloatStateOf(0f) }
+
+    fun selectTheme(nextTheme: AppThemeOption) {
+        if (nextTheme == appearance.theme) return
+        val nextAppearance = appearance.copy(theme = nextTheme)
+        onAppearancePreview(nextAppearance)
+        scope.launch {
+            try {
+                container.themeStore.saveTheme(nextTheme)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                onAppearancePreview(null)
+                haptics.perform(AppHapticEvent.Error)
+                snackbarHostState.showSnackbar("配色保存失败，已恢复原设置")
+            }
+        }
+    }
+
+    fun selectUiStyle(nextStyle: AppUiStyle) {
+        if (nextStyle == appearance.uiStyle) return
+        val previousAppearance = appearance
+        haptics.perform(AppHapticEvent.Selection)
+        scope.launch {
+            try {
+                val outcome = applyUiStyleChangeWithUndo(
+                    previousAppearance = previousAppearance,
+                    nextStyle = nextStyle,
+                    onPreview = onAppearancePreview,
+                    persist = container.themeStore::saveUiStyle,
+                    showUndo = { message ->
+                        snackbarHostState.showSnackbar(
+                            message = message,
+                            actionLabel = "撤销",
+                        ) == SnackbarResult.ActionPerformed
+                    },
+                )
+                if (outcome == UiStyleChangeOutcome.Undone) {
+                    haptics.perform(AppHapticEvent.Selection)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                onAppearancePreview(null)
+                haptics.perform(AppHapticEvent.Error)
+                snackbarHostState.showSnackbar("界面设置保存失败，已恢复原设置")
+            }
+        }
+    }
+
+    fun selectReduceMotion(next: AppEffectOverride) {
+        if (next == appearance.reduceMotionOverride) return
+        onAppearancePreview(appearance.copy(reduceMotionOverride = next))
+        scope.launch {
+            try {
+                container.themeStore.saveReduceMotionOverride(next)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                onAppearancePreview(null)
+                haptics.perform(AppHapticEvent.Error)
+                snackbarHostState.showSnackbar("动态效果设置保存失败")
+            }
+        }
+    }
+
+    fun selectReduceTransparency(next: AppEffectOverride) {
+        if (next == appearance.reduceTransparencyOverride) return
+        onAppearancePreview(appearance.copy(reduceTransparencyOverride = next))
+        scope.launch {
+            try {
+                container.themeStore.saveReduceTransparencyOverride(next)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                onAppearancePreview(null)
+                haptics.perform(AppHapticEvent.Error)
+                snackbarHostState.showSnackbar("透明效果设置保存失败")
+            }
+        }
+    }
+
+    fun setThirdPartyServiceTopBarHidden(hidden: Boolean) {
+        if (hidden == appearance.hideThirdPartyServiceTopBar) return
+        onAppearancePreview(appearance.copy(hideThirdPartyServiceTopBar = hidden))
+        scope.launch {
+            try {
+                container.themeStore.saveHideThirdPartyServiceTopBar(hidden)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                onAppearancePreview(null)
+                haptics.perform(AppHapticEvent.Error)
+                snackbarHostState.showSnackbar("插件显示设置保存失败，已恢复原设置")
+            }
+        }
+    }
 
     fun startBackgroundQuickSync() {
         scope.launch {
@@ -425,7 +569,106 @@ fun BjtuMisApp(
                 }
             }
 
-            BackHandler {
+            val routeContent: @Composable (String) -> Unit = { route ->
+                when (route) {
+                    RouteHome -> OverviewScreen(
+                        overviewRepository = container.overviewRepository,
+                        syncRepository = container.syncRepository,
+                        quickActionsStore = container.quickActionsStore,
+                        thirdPartyServiceRepository = container.thirdPartyServiceRepository,
+                        sessionDetail = sessionDetail,
+                        initialLoadStrategy = routeInitialLoadStrategy,
+                        onNavigate = ::navigateModule,
+                        onOpenServices = { navigateMain(RouteServices) },
+                        extendIntoStatusBar = !isApple && themeOption.isDark && route == RouteHome,
+                    )
+                    RouteServices -> ServicesScreen(
+                        moduleRepository = container.moduleRepository,
+                        thirdPartyServiceRepository = container.thirdPartyServiceRepository,
+                        onNavigate = ::navigateModule,
+                    )
+                    THIRD_PARTY_SERVICES_ROUTE -> ThirdPartyServicesScreen(
+                        repository = container.thirdPartyServiceRepository,
+                        catalogRepository = container.thirdPartyCatalogRepository,
+                        onOpenService = ::navigateModule,
+                    )
+                    ModuleKeys.OpenWebUiAgent -> Unit
+                    ModuleKeys.Profile -> MainScreenPadding {
+                        ProfileScreen(
+                            repository = container.moduleRepository,
+                            appUpdateChecker = container.appUpdateChecker,
+                            appUpdatePreferenceStore = container.appUpdatePreferenceStore,
+                            selectedTheme = themeOption,
+                            initialLoadStrategy = routeInitialLoadStrategy,
+                            onLogout = {
+                                container.sessionRepository.logout()
+                                SessionKeepAliveForegroundService.stop(context)
+                                hasOpenedOpenWebUiAgent = false
+                                ready = false
+                            },
+                            onOpenPersonalInfo = { navigateProfileDetail(RouteProfilePersonalInfo) },
+                            onOpenTrainingInfo = { navigateProfileDetail(RouteProfileTrainingInfo) },
+                            onOpenTheme = { navigateProfileDetail(RouteProfileTheme) },
+                            onOpenHomeworkReminder = { navigateProfileDetail(RouteProfileHomeworkReminder) },
+                            onNavigate = ::navigateModule,
+                        )
+                    }
+                    RouteProfilePersonalInfo -> MainScreenPadding {
+                        ProfilePersonalInfoScreen(container.moduleRepository, routeInitialLoadStrategy)
+                    }
+                    RouteProfileTrainingInfo -> MainScreenPadding {
+                        ProfileTrainingInfoScreen(container.moduleRepository, routeInitialLoadStrategy)
+                    }
+                    RouteProfileTheme -> MainScreenPadding {
+                        ProfileThemeScreen(
+                            appearance = appearance,
+                            onThemeSelected = ::selectTheme,
+                            onUiStyleSelected = ::selectUiStyle,
+                            onReduceMotionSelected = ::selectReduceMotion,
+                            onReduceTransparencySelected = ::selectReduceTransparency,
+                            onHideThirdPartyServiceTopBarChanged =
+                                ::setThirdPartyServiceTopBarHidden,
+                        )
+                    }
+                    RouteProfileHomeworkReminder -> MainScreenPadding {
+                        HomeworkReminderSettingsScreen(container.homeworkReminderPreferenceStore)
+                    }
+                    RouteHomeworkDetail -> MainScreenPadding {
+                        homeworkDetailTarget?.let { homework ->
+                            HomeworkDetailScreen(
+                                initialHomework = homework,
+                                repository = container.moduleRepository,
+                                attachmentRepository = container.homeworkAttachmentRepository,
+                                onOpenAgent = { navigateModule(ModuleKeys.OpenWebUiAgent) },
+                            )
+                        } ?: Text("作业详情不可用")
+                    }
+                    else -> {
+                        val thirdPartyServiceId = thirdPartyServiceIdFromRoute(route)
+                        if (thirdPartyServiceId != null) {
+                            ThirdPartyServiceRoute(
+                                serviceId = thirdPartyServiceId,
+                                repository = container.thirdPartyServiceRepository,
+                                apiRegistry = container.thirdPartyServiceApiRegistry,
+                                onBackToServices = { current = THIRD_PARTY_SERVICES_ROUTE },
+                                onBackHandlerChanged = { thirdPartyServiceBackHandler = it },
+                            )
+                        } else {
+                            MainScreenPadding {
+                                ModuleRoute(
+                                    route = route,
+                                    container = container,
+                                    initialLoadStrategy = routeInitialLoadStrategy,
+                                    onNavigate = ::navigateModule,
+                                    onOpenHomeworkDetail = ::openHomeworkDetail,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            fun handleAppBack() {
                 when {
                     current == ModuleKeys.OpenWebUiAgent && openWebUiBackHandler?.invoke() == true -> Unit
                     thirdPartyServiceIdFromRoute(current) != null &&
@@ -436,6 +679,26 @@ fun BjtuMisApp(
                     current != RouteHome -> navigateMain(RouteHome)
                     else -> showExitDialog = true
                 }
+            }
+
+            if (isApple) {
+                PredictiveBackHandler {
+                    try {
+                        it.collect { backEvent ->
+                            predictiveBackProgress = if (motion.reduceMotion) {
+                                0f
+                            } else {
+                                backEvent.progress.coerceIn(0f, 1f)
+                            }
+                        }
+                        predictiveBackProgress = 0f
+                        handleAppBack()
+                    } catch (_: CancellationException) {
+                        predictiveBackProgress = 0f
+                    }
+                }
+            } else {
+                BackHandler { handleAppBack() }
             }
 
             if (showExitDialog) {
@@ -461,11 +724,15 @@ fun BjtuMisApp(
                 )
             }
 
-            val useBackgroundStatusBar = current == RouteServices || current == ModuleKeys.Profile || current !in MainRoutes
+            val useBackgroundStatusBar = isApple ||
+                current == RouteServices ||
+                current == ModuleKeys.Profile ||
+                current !in MainRoutes
             val backgroundStatusBarColor = MaterialTheme.colorScheme.background
-            val extendHomeIntoStatusBar = themeOption.isDark && current == RouteHome
+            val extendHomeIntoStatusBar = !isApple && themeOption.isDark && current == RouteHome
             val isOpenWebUiAgent = current == ModuleKeys.OpenWebUiAgent
             val isLightAgentTheme = isOpenWebUiAgent && !themeOption.isDark
+            val useNavigationRail = isApple && windowWidthClass != AppWindowWidthClass.Compact
             BjtuMisSystemBars(
                 statusBarColor = when {
                     extendHomeIntoStatusBar -> Color.Transparent
@@ -484,10 +751,19 @@ fun BjtuMisApp(
                 decorFitsSystemWindows = !extendHomeIntoStatusBar,
             )
 
-            Scaffold(
-                containerColor = MaterialTheme.colorScheme.background,
-                contentWindowInsets = WindowInsets(0.dp),
-                topBar = {
+            Row(Modifier.fillMaxSize()) {
+                if (useNavigationRail) {
+                    AppNavigationRail(
+                        current = if (current in MainRoutes) current else mainTab,
+                        onSelect = ::navigateMain,
+                    )
+                }
+                Scaffold(
+                    modifier = Modifier.weight(1f),
+                    containerColor = MaterialTheme.colorScheme.background,
+                    contentWindowInsets = WindowInsets(0.dp),
+                    snackbarHost = { SnackbarHost(snackbarHostState) },
+                    topBar = {
                     when {
                         current == RouteServices -> CompactTitleBar("服务")
                         current == RouteHomeworkDetail -> DetailTitleBar(
@@ -498,10 +774,20 @@ fun BjtuMisApp(
                             title = "第三方服务",
                             onBack = { current = RouteServices },
                         )
-                        thirdPartyServiceIdFromRoute(current) != null -> DetailTitleBar(
-                            title = thirdPartyServiceTitle ?: "第三方服务",
-                            onBack = { current = THIRD_PARTY_SERVICES_ROUTE },
-                        )
+                        thirdPartyServiceIdFromRoute(current) != null -> {
+                            if (
+                                !shouldHideAppTopBarForThirdPartyService(
+                                    route = current,
+                                    hideThirdPartyServiceTopBar =
+                                        appearance.hideThirdPartyServiceTopBar,
+                                )
+                            ) {
+                                DetailTitleBar(
+                                    title = thirdPartyServiceTitle ?: "第三方服务",
+                                    onBack = { current = THIRD_PARTY_SERVICES_ROUTE },
+                                )
+                            }
+                        }
                         current in ProfileDetailRouteTitles -> DetailTitleBar(
                             title = ProfileDetailRouteTitles.getValue(current),
                             onBack = {
@@ -515,113 +801,98 @@ fun BjtuMisApp(
                         )
                     }
                 },
-                bottomBar = {
-                    if (current in MainRoutes) {
-                        AppBottomBar(
-                            current = current,
-                            useWindowInsets = extendHomeIntoStatusBar,
-                            onSelect = ::navigateMain,
-                        )
-                    }
-                },
-            ) { padding ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                ) {
+                    bottomBar = {
+                        if (current in MainRoutes && !useNavigationRail) {
+                            AppBottomBar(
+                                current = current,
+                                useWindowInsets = extendHomeIntoStatusBar,
+                                onSelect = ::navigateMain,
+                            )
+                        }
+                    },
+                ) { padding ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding)
+                            .graphicsLayer {
+                                val progress = if (
+                                    isApple &&
+                                    current !in MainRoutes &&
+                                    !motion.reduceMotion
+                                ) {
+                                    predictiveBackProgress
+                                } else {
+                                    0f
+                                }
+                                translationX = size.width * 0.08f * progress
+                                alpha = 1f - (0.06f * progress)
+                            },
+                    ) {
                     val showOpenWebUiAgent = current == ModuleKeys.OpenWebUiAgent
                     val keepOpenWebUiAgent = hasOpenedOpenWebUiAgent || showOpenWebUiAgent
-                    when (current) {
-                        RouteHome -> OverviewScreen(
-                            overviewRepository = container.overviewRepository,
-                            syncRepository = container.syncRepository,
-                            sessionDetail = sessionDetail,
-                            initialLoadStrategy = routeInitialLoadStrategy,
-                            onNavigate = ::navigateModule,
-                            onOpenServices = { navigateMain(RouteServices) },
-                            extendIntoStatusBar = extendHomeIntoStatusBar,
-                        )
-                        RouteServices -> ServicesScreen(
-                            moduleRepository = container.moduleRepository,
-                            thirdPartyServiceRepository = container.thirdPartyServiceRepository,
-                            onNavigate = ::navigateModule,
-                        )
-                        THIRD_PARTY_SERVICES_ROUTE -> ThirdPartyServicesScreen(
-                            repository = container.thirdPartyServiceRepository,
-                            catalogRepository = container.thirdPartyCatalogRepository,
-                            onOpenService = ::navigateModule,
-                        )
-                        ModuleKeys.OpenWebUiAgent -> Unit
-                        ModuleKeys.Profile -> MainScreenPadding {
-                            ProfileScreen(
-                                repository = container.moduleRepository,
-                                appUpdateChecker = container.appUpdateChecker,
-                                appUpdatePreferenceStore = container.appUpdatePreferenceStore,
-                                selectedTheme = themeOption,
-                                initialLoadStrategy = routeInitialLoadStrategy,
-                                onLogout = {
-                                    container.sessionRepository.logout()
-                                    SessionKeepAliveForegroundService.stop(context)
-                                    hasOpenedOpenWebUiAgent = false
-                                    ready = false
-                                },
-                                onOpenPersonalInfo = { navigateProfileDetail(RouteProfilePersonalInfo) },
-                                onOpenTrainingInfo = { navigateProfileDetail(RouteProfileTrainingInfo) },
-                                onOpenTheme = { navigateProfileDetail(RouteProfileTheme) },
-                                onOpenHomeworkReminder = { navigateProfileDetail(RouteProfileHomeworkReminder) },
-                                onNavigate = ::navigateModule,
-                            )
-                        }
-                        RouteProfilePersonalInfo -> MainScreenPadding {
-                            ProfilePersonalInfoScreen(container.moduleRepository, routeInitialLoadStrategy)
-                        }
-                        RouteProfileTrainingInfo -> MainScreenPadding {
-                            ProfileTrainingInfoScreen(container.moduleRepository, routeInitialLoadStrategy)
-                        }
-                        RouteProfileTheme -> MainScreenPadding {
-                            ProfileThemeScreen(
-                                selectedTheme = themeOption,
-                                onThemeSelected = { nextTheme ->
-                                    scope.launch { container.themeStore.save(nextTheme) }
-                                },
-                            )
-                        }
-                        RouteProfileHomeworkReminder -> MainScreenPadding {
-                            HomeworkReminderSettingsScreen(container.homeworkReminderPreferenceStore)
-                        }
-                        RouteHomeworkDetail -> MainScreenPadding {
-                            homeworkDetailTarget?.let { homework ->
-                                HomeworkDetailScreen(
-                                    initialHomework = homework,
-                                    repository = container.moduleRepository,
-                                    attachmentRepository = container.homeworkAttachmentRepository,
-                                    onOpenAgent = { navigateModule(ModuleKeys.OpenWebUiAgent) },
-                                )
-                            } ?: Text("作业详情不可用")
-                        }
-                        else -> {
-                            val thirdPartyServiceId = thirdPartyServiceIdFromRoute(current)
-                            if (thirdPartyServiceId != null) {
-                                ThirdPartyServiceRoute(
-                                    serviceId = thirdPartyServiceId,
-                                    repository = container.thirdPartyServiceRepository,
-                                    apiRegistry = container.thirdPartyServiceApiRegistry,
-                                    onBackToServices = { current = THIRD_PARTY_SERVICES_ROUTE },
-                                    onBackHandlerChanged = { thirdPartyServiceBackHandler = it },
-                                )
-                            } else {
-                                MainScreenPadding {
-                                    ModuleRoute(
-                                        route = current,
-                                        container = container,
-                                        initialLoadStrategy = routeInitialLoadStrategy,
-                                        onNavigate = ::navigateModule,
-                                        onOpenHomeworkDetail = ::openHomeworkDetail,
-                                    )
+                    if (isApple) {
+                        AnimatedContent(
+                            targetState = current,
+                            modifier = Modifier.fillMaxSize(),
+                            transitionSpec = {
+                                if (motion.reduceMotion) {
+                                    fadeIn(tween(motion.feedbackDurationMillis)) togetherWith
+                                        fadeOut(tween(motion.feedbackDurationMillis))
+                                } else {
+                                    when (
+                                        appRouteTransitionDirection(
+                                            initialState,
+                                            targetState,
+                                        )
+                                    ) {
+                                        AppRouteTransitionDirection.Crossfade ->
+                                            fadeIn(tween(160)) togetherWith fadeOut(tween(140))
+                                        AppRouteTransitionDirection.Forward ->
+                                            (
+                                                slideInHorizontally(
+                                                    animationSpec = spring(
+                                                        dampingRatio = motion.normalDampingRatio,
+                                                        stiffness = motion.normalStiffness,
+                                                    ),
+                                                    initialOffsetX = { width -> width / 10 },
+                                                ) + fadeIn(tween(140))
+                                            ) togetherWith (
+                                                slideOutHorizontally(
+                                                    animationSpec = spring(
+                                                        dampingRatio = motion.normalDampingRatio,
+                                                        stiffness = motion.normalStiffness,
+                                                    ),
+                                                    targetOffsetX = { width -> -width / 16 },
+                                                ) + fadeOut(tween(120))
+                                            )
+                                        AppRouteTransitionDirection.Backward ->
+                                            (
+                                                slideInHorizontally(
+                                                    animationSpec = spring(
+                                                        dampingRatio = motion.normalDampingRatio,
+                                                        stiffness = motion.normalStiffness,
+                                                    ),
+                                                    initialOffsetX = { width -> -width / 16 },
+                                                ) + fadeIn(tween(140))
+                                            ) togetherWith (
+                                                slideOutHorizontally(
+                                                    animationSpec = spring(
+                                                        dampingRatio = motion.normalDampingRatio,
+                                                        stiffness = motion.normalStiffness,
+                                                    ),
+                                                    targetOffsetX = { width -> width / 10 },
+                                                ) + fadeOut(tween(120))
+                                            )
+                                    }
                                 }
-                            }
+                            },
+                            label = "appRoute",
+                        ) { animatedRoute ->
+                            routeContent(animatedRoute)
                         }
+                    } else {
+                        routeContent(current)
                     }
                     if (keepOpenWebUiAgent) {
                         OpenWebUiAgentScreen(
@@ -634,6 +905,7 @@ fun BjtuMisApp(
                             onBackHandlerChanged = { openWebUiBackHandler = it },
                         )
                     }
+                    }
                 }
             }
         }
@@ -643,12 +915,31 @@ fun BjtuMisApp(
 private fun normalizeRoute(route: String): String =
     if (route == LegacyNativeAgentRoute) ModuleKeys.OpenWebUiAgent else route
 
+internal fun shouldHideAppTopBarForThirdPartyService(
+    route: String,
+    hideThirdPartyServiceTopBar: Boolean,
+): Boolean =
+    hideThirdPartyServiceTopBar && thirdPartyServiceIdFromRoute(route) != null
+
 @Composable
 private fun MainScreenPadding(content: @Composable () -> Unit) {
+    val design = LocalAppDesign.current
+    val widthClass = LocalAppWindowWidthClass.current
+    val horizontalPadding = if (
+        LocalAppUiStyle.current == AppUiStyle.Apple &&
+        widthClass == AppWindowWidthClass.Expanded
+    ) {
+        32.dp
+    } else {
+        design.pageHorizontalPadding
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(
+                horizontal = horizontalPadding,
+                vertical = design.pageVerticalPadding,
+            ),
     ) {
         content()
     }
@@ -718,12 +1009,20 @@ private fun DetailTitleBar(title: String, onBack: () -> Unit) {
 @Composable
 private fun CompactTitleBar(title: String, onBack: (() -> Unit)? = null) {
     val colorScheme = MaterialTheme.colorScheme
+    val isApple = LocalAppUiStyle.current == AppUiStyle.Apple
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(52.dp)
-            .background(colorScheme.background)
-            .padding(start = if (onBack == null) 20.dp else 4.dp, end = 16.dp),
+            .height(if (isApple) 60.dp else 52.dp)
+            .background(if (isApple) colorScheme.surface else colorScheme.background)
+            .padding(
+                start = if (onBack == null) {
+                    if (isApple) 24.dp else 20.dp
+                } else {
+                    4.dp
+                },
+                end = if (isApple) 20.dp else 16.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
@@ -731,13 +1030,20 @@ private fun CompactTitleBar(title: String, onBack: (() -> Unit)? = null) {
                 onClick = onBack,
                 modifier = Modifier.size(48.dp),
             ) {
-                ShellLineIcon(ShellIcon.Back, color = colorScheme.onBackground)
+                if (isApple) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "返回",
+                    )
+                } else {
+                    ShellLineIcon(ShellIcon.Back, color = colorScheme.onBackground)
+                }
             }
         }
         Text(
             text = title,
             color = colorScheme.onBackground,
-            fontSize = 20.sp,
+            fontSize = if (isApple) 22.sp else 20.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -747,20 +1053,30 @@ private fun CompactTitleBar(title: String, onBack: (() -> Unit)? = null) {
 }
 
 @Composable
-private fun AppBottomBar(
+internal fun AppBottomBar(
     current: String,
     useWindowInsets: Boolean,
     onSelect: (String) -> Unit,
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val isClassic = LocalAppUiStyle.current == AppUiStyle.Classic
     NavigationBar(
+        modifier = Modifier.testTag("app-bottom-navigation"),
         containerColor = colorScheme.surface,
-        tonalElevation = 8.dp,
+        tonalElevation = if (isClassic) 8.dp else 0.dp,
         windowInsets = if (useWindowInsets) NavigationBarDefaults.windowInsets else WindowInsets(0.dp),
     ) {
         BottomTabs.forEach { tab ->
             val selected = current == tab.route
+            val label = if (!isClassic && tab.route == ModuleKeys.OpenWebUiAgent) {
+                "助手"
+            } else {
+                tab.label
+            }
             NavigationBarItem(
+                modifier = Modifier.semantics {
+                    contentDescription = label
+                },
                 selected = selected,
                 onClick = { onSelect(tab.route) },
                 colors = NavigationBarItemDefaults.colors(
@@ -771,7 +1087,7 @@ private fun AppBottomBar(
                     unselectedTextColor = colorScheme.onSurfaceVariant,
                 ),
                 icon = {
-                    if (tab.imageRes != null) {
+                    if (isClassic && tab.imageRes != null) {
                         Image(
                             painter = painterResource(tab.imageRes),
                             contentDescription = null,
@@ -779,16 +1095,22 @@ private fun AppBottomBar(
                                 .size(28.dp)
                                 .alpha(if (selected) 1f else 0.48f),
                         )
-                    } else {
+                    } else if (isClassic) {
                         ShellLineIcon(
                             icon = tab.icon,
                             color = if (selected) colorScheme.primary else colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Icon(
+                            imageVector = tab.icon.materialIcon(),
+                            contentDescription = null,
+                            modifier = Modifier.size(25.dp),
                         )
                     }
                 },
                 label = {
                     Text(
-                        text = tab.label,
+                        text = label,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                     )
                 },
@@ -796,6 +1118,57 @@ private fun AppBottomBar(
         }
     }
 }
+
+@Composable
+internal fun AppNavigationRail(
+    current: String,
+    onSelect: (String) -> Unit,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    NavigationRail(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(92.dp)
+            .testTag("app-navigation-rail"),
+        containerColor = colorScheme.surface,
+    ) {
+        Spacer(Modifier.height(18.dp))
+        BottomTabs.forEach { tab ->
+            val selected = current == tab.route
+            val label = if (tab.route == ModuleKeys.OpenWebUiAgent) "助手" else tab.label
+            NavigationRailItem(
+                modifier = Modifier.semantics {
+                    contentDescription = label
+                },
+                selected = selected,
+                onClick = { onSelect(tab.route) },
+                icon = {
+                    Icon(
+                        imageVector = tab.icon.materialIcon(),
+                        contentDescription = null,
+                        modifier = Modifier.size(25.dp),
+                    )
+                },
+                label = {
+                    Text(
+                        text = label,
+                        maxLines = 1,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                },
+            )
+        }
+    }
+}
+
+private fun ShellIcon.materialIcon(): ImageVector =
+    when (this) {
+        ShellIcon.Home -> Icons.Filled.Home
+        ShellIcon.Grid -> Icons.Filled.Apps
+        ShellIcon.Agent -> Icons.Filled.SmartToy
+        ShellIcon.Person -> Icons.Filled.Person
+        ShellIcon.Back -> Icons.AutoMirrored.Filled.ArrowBack
+    }
 
 @Composable
 private fun ShellLineIcon(icon: ShellIcon, color: Color, modifier: Modifier = Modifier) {

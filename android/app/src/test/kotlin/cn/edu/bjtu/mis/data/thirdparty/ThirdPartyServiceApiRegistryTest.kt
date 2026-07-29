@@ -1,7 +1,5 @@
 package cn.edu.bjtu.mis.data.thirdparty
 
-import cn.edu.bjtu.mis.data.security.CredentialStore
-import cn.edu.bjtu.mis.data.security.LoginCredentials
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
@@ -73,56 +71,21 @@ class ThirdPartyServiceApiRegistryTest {
     }
 
     @Test
-    fun credentialsMethodRequiresPerCallConfirmation() = runBlocking {
-        var confirmationCalled = false
-        val registry = ThirdPartyServiceApiRegistry(
-            moduleRepository = null,
-            mailRepository = null,
-            credentialStore = FakeCredentialStore(LoginCredentials(" 22123456 ", "secret-password")),
-        )
-
+    fun credentialsMethodHasBeenRemoved() = runBlocking {
         val response = registry.invoke(
-            service = service(grants = setOf("identity.credentials.read")),
+            service = service(grants = emptySet()),
             method = "identity.get_credentials",
-            confirmer = ThirdPartySensitiveActionConfirmer { _, _ ->
-                confirmationCalled = true
-                false
-            },
-            currentPageUrl = "https://bjtu.demo.third-party.bjtu-mis.local/index.html",
+            confirmer = denyConfirmer(),
         )
 
         assertFalse(response["ok"]!!.jsonPrimitive.boolean)
-        assertTrue(confirmationCalled)
-        assertEquals("user_denied", response.errorCode())
-    }
-
-    @Test
-    fun credentialsMethodReturnsSavedLoginAfterPerCallConfirmation() = runBlocking {
-        val registry = ThirdPartyServiceApiRegistry(
-            moduleRepository = null,
-            mailRepository = null,
-            credentialStore = FakeCredentialStore(LoginCredentials(" 22123456 ", "secret-password")),
-        )
-
-        val response = registry.invoke(
-            service = service(grants = setOf("identity.credentials.read")),
-            method = "identity.get_credentials",
-            confirmer = ThirdPartySensitiveActionConfirmer { _, _ -> true },
-            currentPageUrl = "https://bjtu.demo.third-party.bjtu-mis.local/index.html",
-        )
-
-        assertTrue(response["ok"]!!.jsonPrimitive.boolean)
-        val data = response["data"]!!.jsonObject
-        assertEquals("22123456", data["student_id"]!!.jsonPrimitive.contentOrNull)
-        assertEquals("22123456", data["login_name"]!!.jsonPrimitive.contentOrNull)
-        assertEquals("secret-password", data["password"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("unknown_method", response.errorCode())
     }
 
     @Test
     fun configurationCanOnlyBeReadFromTheLocalSandboxOrigin() = runBlocking {
         val configured = service(grants = setOf("app.configuration.read")).copy(
             manifest = service(grants = emptySet()).manifest.copy(
-                schemaVersion = 2,
                 permissions = ThirdPartyServicePermissionDeclaration(required = listOf("app.configuration.read")),
                 configuration = listOf(
                     ThirdPartyConfigurationDefinition(key = "API_TOKEN", label = "Token", type = "secret", required = true),
@@ -140,7 +103,7 @@ class ThirdPartyServiceApiRegistryTest {
             "app.get_configuration",
             params,
             denyConfirmer(),
-            ThirdPartyServiceSandbox.originFor(configured.serviceId, configured.commitSha) + "/index.html",
+            ThirdPartyServiceSandbox.originFor(configured.serviceId, configured.publisherSubjectId) + "/index.html",
         )
         assertTrue(local["ok"]!!.jsonPrimitive.boolean)
         assertEquals("secret", local["data"]!!.jsonPrimitive.contentOrNull)
@@ -154,18 +117,24 @@ class ThirdPartyServiceApiRegistryTest {
         ThirdPartyService(
             serviceId = "bjtu.demo",
             manifest = ThirdPartyServiceManifest(
-                schemaVersion = 1,
+                schemaVersion = 3,
                 id = "bjtu.demo",
                 name = "Demo",
                 description = "Demo",
                 version = "1.0.0",
+                runtimeVersion = 1,
+                minRuntimeVersion = 1,
+                requiredCapabilities = listOf("runtime.lifecycle.v1"),
+                dataSchemaVersion = 1,
                 entrypoint = "index.html",
                 icon = "icon.svg",
                 author = "Alice",
                 permissions = ThirdPartyServicePermissionDeclaration(
                     required = listOf("identity.profile.read"),
-                    optional = listOf("identity.credentials.read", "mail.send"),
+                    optional = listOf("mail.send"),
                 ),
+                bridgeOrigins = listOf("self"),
+                marketplace = ThirdPartyMarketplaceMetadata(category = "other"),
             ),
             sourceUrl = "https://github.com/alice/demo",
             githubOwner = "alice",
@@ -180,6 +149,9 @@ class ThirdPartyServiceApiRegistryTest {
             needsReview = needsReview,
             installedAt = "2026-06-06T00:00:00Z",
             updatedAt = "2026-06-06T00:00:00Z",
+            publisherSubjectId = "github-owner:123",
+            dataSchemaVersion = 1,
+            compatibilityState = ThirdPartyCompatibilityState.Compatible.value,
         )
 
     private fun denyConfirmer(): ThirdPartySensitiveActionConfirmer =
@@ -187,14 +159,4 @@ class ThirdPartyServiceApiRegistryTest {
 
     private fun kotlinx.serialization.json.JsonObject.errorCode(): String =
         this["error"]!!.jsonObject["code"]!!.jsonPrimitive.contentOrNull.orEmpty()
-}
-
-private class FakeCredentialStore(
-    private val credentials: LoginCredentials?,
-) : CredentialStore {
-    override fun save(credentials: LoginCredentials) = Unit
-
-    override fun load(): LoginCredentials? = credentials
-
-    override fun clear() = Unit
 }

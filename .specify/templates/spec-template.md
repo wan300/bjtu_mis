@@ -50,6 +50,7 @@
 - Persistence:
 - External systems:
 - Public API, schema, route, or tool changes:
+- Third-party plugin contract and compatibility impact:
 
 ### Security and Privacy Requirements
 
@@ -57,6 +58,7 @@
 - User confirmation requirements:
 - Workspace, file, archive, or generated output boundaries:
 - Logging and fixture privacy rules:
+- Plugin identity, origin, bridge, storage, migration and campus-proxy boundaries:
 
 ## Constitution Alignment
 
@@ -66,6 +68,7 @@
 - Testable parser/provider/repository/Agent tool changes:
 - Minimal dependencies and clean artifacts:
 - ExecPlan requirement for high-risk changes:
+- Manifest v3 / P0-A zero-trust baseline:
 
 ## Acceptance Criteria
 

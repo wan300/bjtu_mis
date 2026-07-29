@@ -2,7 +2,8 @@
 
 **Branch**: `[###-feature-name]`  
 **Spec**: [link-to-spec]  
-**Constitution Version**: 1.0.0  
+**Constitution Version**: 1.1.0
+
 **Created**: [DATE]
 
 ## Summary
@@ -17,6 +18,7 @@
 - Open WebUI areas:
 - Data, Room, DataStore, or file impacts:
 - External systems:
+- Third-party plugin, Manifest, WebView, origin, bridge, storage, or campus-proxy impacts:
 - Existing patterns to reuse:
 - Unknowns: use `TODO: confirm` for unresolved facts.
 
@@ -30,6 +32,7 @@ Complete this check before implementation starts. Any FAIL must be resolved or d
 - Testing strategy: PASS/FAIL - parser fixtures, MockWebServer/fakes, Android JVM tests, Vitest, or Agent tool boundary tests match the change risk.
 - Dependencies and artifacts: PASS/FAIL - no unnecessary dependency or generated/local/secret artifact will be committed.
 - Rollback and ExecPlan: PASS/FAIL - high-risk changes have rollback steps and a maintained ExecPlan.
+- Plugin zero-trust baseline: PASS/FAIL/N/A - plugin work uses Manifest v3 only, stable publisher identity, self/main-frame bridge, split origins, transactional storage and the read-only campus registry; legacy documents are not treated as authority.
 
 ## Design
 
@@ -38,6 +41,7 @@ Complete this check before implementation starts. Any FAIL must be resolved or d
 - Error and empty states:
 - Background work or sync behavior:
 - Open WebUI/Capacitor behavior:
+- Third-party plugin runtime and trust-boundary behavior:
 - Room/cache/migration behavior:
 
 ## Files and Components
@@ -63,6 +67,8 @@ Complete this check before implementation starts. Any FAIL must be resolved or d
 - Android build or asset packaging:
 - Open WebUI frontend tests:
 - Open WebUI type check:
+- Plugin platform typecheck/unit/integration/e2e:
+- Manifest schema/lint and Android WebView instrumentation:
 - Manual verification:
 - Known baseline failures:
 

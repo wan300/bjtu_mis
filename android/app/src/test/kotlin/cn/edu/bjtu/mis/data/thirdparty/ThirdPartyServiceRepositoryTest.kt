@@ -5,6 +5,7 @@ import cn.edu.bjtu.mis.data.network.AppCookieJar
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
@@ -47,7 +48,7 @@ class ThirdPartyServiceRepositoryTest {
     }
 
     @Test
-    fun updateResetsExistingAuthorization() = runBlocking {
+    fun updateRetainsStillDeclaredAuthorizationAndRevokesRemovedPermissions() = runBlocking {
         MockWebServer().use { server ->
             val dao = FakeThirdPartyServiceDao()
             dao.saved["bjtu.demo"] = existingAuthorizedEntity()
@@ -58,9 +59,9 @@ class ThirdPartyServiceRepositoryTest {
             val result = repository.commitPreparedImport(preview.token)
 
             assertTrue(result.updatedExisting)
-            assertTrue(result.service.needsReview)
-            assertFalse(result.service.enabled)
-            assertTrue(result.service.grantedPermissions.isEmpty())
+            assertFalse(result.service.needsReview)
+            assertTrue(result.service.enabled)
+            assertEquals(setOf("identity.profile.read"), result.service.grantedPermissions)
             assertEquals("2026-06-01T00:00:00Z", result.service.installedAt)
         }
     }
@@ -206,6 +207,135 @@ class ThirdPartyServiceRepositoryTest {
             assertTrue(dao.saved.containsKey("bjtu.demo"))
             assertEquals(mapOf("TOKEN" to "secret"), configurationStore.load("bjtu.demo"))
             assertTrue(File(servicesRoot, "installed/bjtu.demo/oldcommit/index.html").isFile)
+            assertTrue(dao.cleanupTombstones.isEmpty())
+        }
+    }
+
+    @Test
+    fun failedPhysicalCleanupLeavesTombstoneAndRetriesOnNextStartup() = runBlocking {
+        MockWebServer().use { server ->
+            val servicesRoot = temp.newFolder("services-${System.nanoTime()}")
+            val installedDir = File(servicesRoot, "installed/bjtu.demo/oldcommit").apply {
+                mkdirs()
+                resolve("index.html").writeText("<html></html>")
+            }
+            val dao = FakeThirdPartyServiceDao().apply {
+                saved["bjtu.demo"] = existingAuthorizedEntity().copy(installDir = installedDir.absolutePath)
+            }
+            val cleaner = FakeThirdPartyWebStorageCleaner(fail = true)
+            val repository = repository(
+                server = server,
+                dao = dao,
+                servicesRoot = servicesRoot,
+                webStorageCleaner = cleaner,
+            )
+
+            repository.deleteService("bjtu.demo")
+
+            assertNull(dao.saved["bjtu.demo"])
+            assertTrue(dao.cleanupTombstones.containsKey("bjtu.demo"))
+            assertEquals(
+                ThirdPartyServiceSandbox.originFor("bjtu.demo", "github-owner:12345"),
+                cleaner.origins.single(),
+            )
+
+            cleaner.fail = false
+            repository.listServices()
+
+            assertTrue(dao.cleanupTombstones.isEmpty())
+            assertEquals(2, cleaner.origins.size)
+        }
+    }
+
+    @Test
+    fun dataSchemaMigrationUsesShadowKvAndRollbackRestoresPreviousPackageAndData() = runBlocking {
+        MockWebServer().use { server ->
+            val servicesRoot = temp.newFolder("services-${System.nanoTime()}")
+            val dao = FakeThirdPartyServiceDao().apply {
+                saved["bjtu.demo"] = existingAuthorizedEntity()
+            }
+            val kvStore = FileThirdPartyKvStore(
+                temp.newFolder("repository-migration-kv"),
+                PassthroughKvCipher,
+            )
+            val namespace = ThirdPartyKvNamespace("github-owner:12345", "bjtu.demo")
+            kvStore.set(namespace, "schema", JsonPrimitive(1))
+            val migrationRunner = ThirdPartyDataMigrationRunner { _, migrationNamespace, store ->
+                store.set(
+                    migrationNamespace,
+                    "schema",
+                    JsonPrimitive(2),
+                    ThirdPartyKvSpace.Shadow,
+                )
+                true
+            }
+            val repository = repository(
+                server = server,
+                dao = dao,
+                servicesRoot = servicesRoot,
+                kvStore = kvStore,
+                migrationRunner = migrationRunner,
+            )
+            enqueueGithubPackage(
+                server,
+                manifest = validManifest(
+                    version = "2.0.0",
+                    dataSchemaVersion = 2,
+                    migrationEntrypoint = "migration.html",
+                ),
+                includeMigration = true,
+            )
+
+            val preview = repository.prepareImportFromGitHub("https://github.com/alice/demo")
+            val updated = repository.commitPreparedImport(preview.token).service
+
+            assertEquals(2, updated.dataSchemaVersion)
+            assertEquals("2", (kvStore.get(namespace, "schema") as JsonPrimitive).content)
+            assertEquals("1.0.0", updated.previousVersion?.version)
+
+            dao.failNextSave = true
+            val failedRollback = runCatching { repository.rollbackService("bjtu.demo") }
+            assertTrue(failedRollback.isFailure)
+            assertEquals("2.0.0", dao.saved.getValue("bjtu.demo").version)
+            assertEquals("2", (kvStore.get(namespace, "schema") as JsonPrimitive).content)
+
+            val rolledBack = repository.rollbackService("bjtu.demo")
+
+            assertEquals("1.0.0", rolledBack.manifest.version)
+            assertEquals(1, rolledBack.dataSchemaVersion)
+            assertEquals("1", (kvStore.get(namespace, "schema") as JsonPrimitive).content)
+            assertEquals(setOf("identity.profile.read"), rolledBack.grantedPermissions)
+        }
+    }
+
+    @Test
+    fun updateRejectsDataSchemaDowngradeAndPublisherSubjectChange() = runBlocking {
+        MockWebServer().use { server ->
+            val dao = FakeThirdPartyServiceDao().apply {
+                saved["bjtu.demo"] = existingAuthorizedEntity().copy(dataSchemaVersion = 2)
+            }
+            val repository = repository(server, dao)
+            enqueueGithubPackage(server)
+
+            val downgrade = runCatching {
+                repository.prepareImportFromGitHub("https://github.com/alice/demo")
+            }
+
+            assertTrue(downgrade.isFailure)
+        }
+
+        MockWebServer().use { server ->
+            val dao = FakeThirdPartyServiceDao().apply {
+                saved["bjtu.demo"] = existingAuthorizedEntity()
+            }
+            val repository = repository(server, dao)
+            enqueueGithubPackage(server, ownerId = 67890)
+
+            val publisherChange = runCatching {
+                repository.prepareImportFromGitHub("https://github.com/alice/demo")
+            }
+
+            assertTrue(publisherChange.isFailure)
         }
     }
 
@@ -215,6 +345,9 @@ class ThirdPartyServiceRepositoryTest {
         servicesRoot: File = temp.newFolder("services-${System.nanoTime()}"),
         bundledProvider: ThirdPartyBundledServiceProvider? = null,
         configurationStore: ThirdPartyConfigurationStore = InMemoryThirdPartyConfigurationStore(),
+        webStorageCleaner: ThirdPartyWebStorageCleaner = NoOpThirdPartyWebStorageCleaner,
+        kvStore: ThirdPartyKvStore? = null,
+        migrationRunner: ThirdPartyDataMigrationRunner? = null,
     ): ThirdPartyServiceRepository =
         ThirdPartyServiceRepository(
             dao = dao,
@@ -225,15 +358,27 @@ class ThirdPartyServiceRepositoryTest {
             ),
             bundledProvider = bundledProvider,
             configurationStore = configurationStore,
+            webStorageCleaner = webStorageCleaner,
+            kvStore = kvStore,
+            migrationRunner = migrationRunner,
         )
 
-    private fun enqueueGithubPackage(server: MockWebServer) {
-        val zip = serviceZip(
-            "repo-main/bjtu-service.json" to validManifest(),
+    private fun enqueueGithubPackage(
+        server: MockWebServer,
+        manifest: String = validManifest(),
+        ownerId: Long = 12345,
+        includeMigration: Boolean = false,
+    ) {
+        val entries = mutableListOf(
+            "repo-main/bjtu-service.json" to manifest,
             "repo-main/dist/index.html" to "<html></html>",
             "repo-main/dist/icon.svg" to "<svg></svg>",
         )
-        server.enqueue(json("""{"default_branch":"main"}"""))
+        if (includeMigration) {
+            entries += "repo-main/dist/migration.html" to "<html></html>"
+        }
+        val zip = serviceZip(*entries.toTypedArray())
+        server.enqueue(json("""{"default_branch":"main","owner":{"id":$ownerId}}"""))
         server.enqueue(json("""{"object":{"sha":"abc1234def5678"}}"""))
         server.enqueue(MockResponse().setResponseCode(200).setBody(Buffer().write(zip.readBytes())))
     }
@@ -254,7 +399,11 @@ class ThirdPartyServiceRepositoryTest {
             manifestJson = validManifest(),
             grantedPermissionsJson = AppJson.encodeToString(listOf("identity.profile.read")),
             allowedOriginsJson = AppJson.encodeToString(listOf("https://api.example.com")),
-            installDir = temp.newFolder("old-install").absolutePath,
+            publisherSubjectId = "github-owner:12345",
+            dataSchemaVersion = 1,
+            compatibilityState = ThirdPartyCompatibilityState.Compatible.value,
+            verificationLevel = "unverified",
+            installDir = temp.newFolder("old-install-${System.nanoTime()}").absolutePath,
             entrypoint = "index.html",
             icon = "icon.svg",
             enabled = true,
@@ -263,14 +412,23 @@ class ThirdPartyServiceRepositoryTest {
             updatedAt = "2026-06-01T00:00:00Z",
         )
 
-    private fun validManifest(): String =
+    private fun validManifest(
+        version: String = "1.0.0",
+        dataSchemaVersion: Int = 1,
+        migrationEntrypoint: String? = null,
+    ): String =
         AppJson.encodeToString(
             ThirdPartyServiceManifest(
-                schemaVersion = 1,
+                schemaVersion = 3,
                 id = "bjtu.demo",
                 name = "Demo",
                 description = "Demo service",
-                version = "1.0.0",
+                version = version,
+                runtimeVersion = 1,
+                minRuntimeVersion = 1,
+                requiredCapabilities = listOf("runtime.lifecycle.v1"),
+                dataSchemaVersion = dataSchemaVersion,
+                migrationEntrypoint = migrationEntrypoint,
                 entrypoint = "index.html",
                 icon = "icon.svg",
                 author = "Alice",
@@ -278,7 +436,9 @@ class ThirdPartyServiceRepositoryTest {
                     required = listOf("identity.profile.read"),
                     optional = listOf("academic.timetable.read"),
                 ),
-                allowedOrigins = listOf("https://api.example.com"),
+                connectOrigins = listOf("https://api.example.com"),
+                bridgeOrigins = listOf("self"),
+                marketplace = ThirdPartyMarketplaceMetadata(category = "other"),
             )
         )
 
@@ -315,18 +475,24 @@ private class FakeBundledProvider(
             InstalledBundledThirdPartyService(
                 packageInfo = InstalledThirdPartyServicePackage(
                     manifest = ThirdPartyServiceManifest(
-                        schemaVersion = 1,
+                        schemaVersion = 3,
                         id = "bjtu.bundled.demo",
                         name = "Bundled Demo",
                         description = "Bundled demo service",
                         version = "1.0.0",
+                        runtimeVersion = 1,
+                        minRuntimeVersion = 1,
+                        requiredCapabilities = listOf("runtime.lifecycle.v1"),
+                        dataSchemaVersion = 1,
                         entrypoint = "index.html",
                         icon = "icon.svg",
                         author = "bundled-demo",
                         permissions = ThirdPartyServicePermissionDeclaration(
                             required = listOf("identity.profile.read"),
                         ),
-                        allowedOrigins = listOf("https://api.example.com"),
+                        connectOrigins = listOf("https://api.example.com"),
+                        bridgeOrigins = listOf("self"),
+                        marketplace = ThirdPartyMarketplaceMetadata(category = "other"),
                     ),
                     source = GitHubRepositoryRef(
                         owner = "bundled",
@@ -356,9 +522,15 @@ private object EmptyBundledProvider : ThirdPartyBundledServiceProvider {
 
 private class FakeThirdPartyServiceDao : ThirdPartyServiceDao {
     val saved = linkedMapOf<String, ThirdPartyServiceEntity>()
+    val cleanupTombstones = linkedMapOf<String, ThirdPartyCleanupTombstoneEntity>()
     var failDelete = false
+    var failNextSave = false
 
     override suspend fun saveService(service: ThirdPartyServiceEntity) {
+        if (failNextSave) {
+            failNextSave = false
+            throw IllegalStateException("simulated database save failure")
+        }
         saved[service.serviceId] = service
     }
 
@@ -371,6 +543,32 @@ private class FakeThirdPartyServiceDao : ThirdPartyServiceDao {
     override suspend fun deleteService(serviceId: String) {
         if (failDelete) throw IllegalStateException("simulated database delete failure")
         saved.remove(serviceId)
+    }
+
+    override suspend fun saveCleanupTombstone(tombstone: ThirdPartyCleanupTombstoneEntity) {
+        cleanupTombstones[tombstone.serviceId] = tombstone
+    }
+
+    override suspend fun listCleanupTombstones(): List<ThirdPartyCleanupTombstoneEntity> =
+        cleanupTombstones.values.toList()
+
+    override suspend fun deleteCleanupTombstone(serviceId: String) {
+        cleanupTombstones.remove(serviceId)
+    }
+
+    override suspend fun deleteServiceAndScheduleCleanup(tombstone: ThirdPartyCleanupTombstoneEntity) {
+        val previous = cleanupTombstones[tombstone.serviceId]
+        try {
+            saveCleanupTombstone(tombstone)
+            deleteService(tombstone.serviceId)
+        } catch (error: Exception) {
+            if (previous == null) {
+                cleanupTombstones.remove(tombstone.serviceId)
+            } else {
+                cleanupTombstones[tombstone.serviceId] = previous
+            }
+            throw error
+        }
     }
 
     override suspend fun updateGrantState(
@@ -387,4 +585,23 @@ private class FakeThirdPartyServiceDao : ThirdPartyServiceDao {
             updatedAt = updatedAt,
         )
     }
+}
+
+private class FakeThirdPartyWebStorageCleaner(
+    var fail: Boolean,
+) : ThirdPartyWebStorageCleaner {
+    val origins = mutableListOf<String>()
+
+    override suspend fun deleteOrigin(origin: String) {
+        origins += origin
+        if (fail) throw IllegalStateException("simulated WebStorage cleanup failure")
+    }
+}
+
+private object PassthroughKvCipher : ThirdPartyKvCipher {
+    override fun encrypt(plaintext: ByteArray, associatedData: ByteArray): ByteArray =
+        plaintext.copyOf()
+
+    override fun decrypt(payload: ByteArray, associatedData: ByteArray): ByteArray =
+        payload.copyOf()
 }

@@ -24,6 +24,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,6 +39,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.model.ProgressiveModuleState
+import cn.edu.bjtu.mis.ui.theme.AppUiStyle
+import cn.edu.bjtu.mis.ui.theme.LocalAppDesign
+import cn.edu.bjtu.mis.ui.theme.LocalAppMotion
+import cn.edu.bjtu.mis.ui.theme.LocalAppUiStyle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -62,6 +67,7 @@ sealed interface LoadState<out T> {
 
 @Composable
 fun SectionTitle(title: String, subtitle: String? = null, trailing: @Composable (() -> Unit)? = null) {
+    val isApple = LocalAppUiStyle.current == AppUiStyle.Apple
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -70,7 +76,7 @@ fun SectionTitle(title: String, subtitle: String? = null, trailing: @Composable 
         Column(Modifier.weight(1f)) {
             Text(
                 title,
-                style = MaterialTheme.typography.titleLarge,
+                style = if (isApple) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onBackground,
             )
@@ -108,14 +114,25 @@ fun InfoCard(
     trailing: @Composable (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
+    val isApple = LocalAppUiStyle.current == AppUiStyle.Apple
+    val design = LocalAppDesign.current
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(
+                alpha = design.materialSurfaceAlpha,
+            ),
+        ),
         shape = MaterialTheme.shapes.large,
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isApple) 0.dp else 1.dp),
+        border = if (isApple) null else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
+        },
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            Modifier.padding(design.cardContentPadding),
+            verticalArrangement = Arrangement.spacedBy(if (isApple) 14.dp else 12.dp),
+        ) {
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -127,7 +144,7 @@ fun InfoCard(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 2,
+                        maxLines = if (isApple) Int.MAX_VALUE else 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (!subtitle.isNullOrBlank()) {
@@ -136,7 +153,7 @@ fun InfoCard(
                             subtitle,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
+                            maxLines = if (isApple) Int.MAX_VALUE else 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
@@ -151,26 +168,31 @@ fun InfoCard(
 @Composable
 fun KeyValue(label: String, value: String?, modifier: Modifier = Modifier) {
     if (value.isNullOrBlank()) return
+    val isApple = LocalAppUiStyle.current == AppUiStyle.Apple
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
+            maxLines = if (isApple) 2 else 1,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
             value,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 3,
+            maxLines = if (isApple) 6 else 3,
             overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
 @Composable
-fun LoadingOrError(state: LoadState<*>, modifier: Modifier = Modifier) {
+fun LoadingOrError(
+    state: LoadState<*>,
+    modifier: Modifier = Modifier,
+    onRetry: (() -> Unit)? = null,
+) {
     when (state) {
         LoadState.Loading -> Column(
             modifier = modifier
@@ -184,7 +206,13 @@ fun LoadingOrError(state: LoadState<*>, modifier: Modifier = Modifier) {
             Spacer(Modifier.height(12.dp))
             Text("正在加载", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        is LoadState.Error -> InfoCard("加载失败", subtitle = state.message) {}
+        is LoadState.Error -> InfoCard("加载失败", subtitle = state.message) {
+            onRetry?.let { retry ->
+                TextButton(onClick = retry) {
+                    Text("重试")
+                }
+            }
+        }
         else -> Unit
     }
 }
@@ -224,19 +252,28 @@ fun ProgressiveStatus(state: ProgressiveModuleState<*>, modifier: Modifier = Mod
 @Composable
 private fun BouncingLoadingMascot() {
     var mascotIndex by remember { mutableStateOf(0) }
-    val transition = rememberInfiniteTransition(label = "loadingMascot")
-    val offsetY by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = -10f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = LoadingMascotHalfBounceMillis, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "loadingMascotOffset",
-    )
+    val reduceMotion = LocalAppMotion.current.reduceMotion
+    val offsetY = if (reduceMotion) {
+        0f
+    } else {
+        val transition = rememberInfiniteTransition(label = "loadingMascot")
+        val animatedOffset by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = -10f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = LoadingMascotHalfBounceMillis,
+                    easing = FastOutSlowInEasing,
+                ),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "loadingMascotOffset",
+        )
+        animatedOffset
+    }
 
-    LaunchedEffect(Unit) {
-        while (isActive) {
+    LaunchedEffect(reduceMotion) {
+        while (isActive && !reduceMotion) {
             delay(LoadingMascotHalfBounceMillis * 2L)
             mascotIndex = (mascotIndex + 1) % LoadingMascotDrawables.size
         }

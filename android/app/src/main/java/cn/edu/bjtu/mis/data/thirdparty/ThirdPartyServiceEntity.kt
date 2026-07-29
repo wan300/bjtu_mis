@@ -8,6 +8,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.Transaction
 
 @Entity(
     tableName = "third_party_services",
@@ -39,6 +40,16 @@ data class ThirdPartyServiceEntity(
     val grantedPermissionsJson: String,
     @ColumnInfo(name = "allowed_origins_json")
     val allowedOriginsJson: String,
+    @ColumnInfo(name = "publisher_subject_id")
+    val publisherSubjectId: String = "",
+    @ColumnInfo(name = "data_schema_version")
+    val dataSchemaVersion: Int = 0,
+    @ColumnInfo(name = "compatibility_state")
+    val compatibilityState: String = ThirdPartyCompatibilityState.LegacyDisabled.value,
+    @ColumnInfo(name = "verification_level")
+    val verificationLevel: String = "legacy",
+    @ColumnInfo(name = "previous_version_json")
+    val previousVersionJson: String? = null,
     @ColumnInfo(name = "install_dir")
     val installDir: String,
     val entrypoint: String,
@@ -50,6 +61,19 @@ data class ThirdPartyServiceEntity(
     val installedAt: String,
     @ColumnInfo(name = "updated_at")
     val updatedAt: String,
+)
+
+@Entity(tableName = "third_party_cleanup_tombstones")
+data class ThirdPartyCleanupTombstoneEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "service_id")
+    val serviceId: String,
+    @ColumnInfo(name = "publisher_subject_id")
+    val publisherSubjectId: String,
+    @ColumnInfo(name = "web_storage_origin")
+    val webStorageOrigin: String,
+    @ColumnInfo(name = "created_at")
+    val createdAt: String,
 )
 
 @Dao
@@ -65,6 +89,21 @@ interface ThirdPartyServiceDao {
 
     @Query("DELETE FROM third_party_services WHERE service_id = :serviceId")
     suspend fun deleteService(serviceId: String)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveCleanupTombstone(tombstone: ThirdPartyCleanupTombstoneEntity)
+
+    @Query("SELECT * FROM third_party_cleanup_tombstones ORDER BY created_at")
+    suspend fun listCleanupTombstones(): List<ThirdPartyCleanupTombstoneEntity>
+
+    @Query("DELETE FROM third_party_cleanup_tombstones WHERE service_id = :serviceId")
+    suspend fun deleteCleanupTombstone(serviceId: String)
+
+    @Transaction
+    suspend fun deleteServiceAndScheduleCleanup(tombstone: ThirdPartyCleanupTombstoneEntity) {
+        saveCleanupTombstone(tombstone)
+        deleteService(tombstone.serviceId)
+    }
 
     @Query(
         """

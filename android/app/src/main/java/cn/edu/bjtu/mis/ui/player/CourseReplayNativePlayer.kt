@@ -1,3 +1,5 @@
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package cn.edu.bjtu.mis.ui.player
 
 import android.app.Activity
@@ -82,6 +84,9 @@ import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.data.repository.CourseReplayRepository
 import cn.edu.bjtu.mis.model.CourseReplayPlaybackInfo
 import cn.edu.bjtu.mis.model.CourseReplayStreamChoice
+import cn.edu.bjtu.mis.ui.theme.AppHapticEvent
+import cn.edu.bjtu.mis.ui.theme.LocalAppEffects
+import cn.edu.bjtu.mis.ui.theme.LocalAppHaptics
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 import java.util.Locale
@@ -114,6 +119,7 @@ fun CourseReplayNativePlayer(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val reduceTransparency = LocalAppEffects.current.reduceTransparency
     val activity = context.findActivity()
     val streams = playback.streams
     val initialStreamKind = initialState?.selectedStreamKind
@@ -459,7 +465,9 @@ fun CourseReplayNativePlayer(
                 color = Color.White,
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .background(Color.Black.copy(alpha = 0.56f))
+                    .background(
+                        Color.Black.copy(alpha = if (reduceTransparency) 0.94f else 0.56f),
+                    )
                     .padding(horizontal = 14.dp, vertical = 8.dp),
             )
         }
@@ -471,7 +479,9 @@ fun CourseReplayNativePlayer(
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .background(Color.Black.copy(alpha = 0.62f))
+                    .background(
+                        Color.Black.copy(alpha = if (reduceTransparency) 0.94f else 0.62f),
+                    )
                     .padding(horizontal = 18.dp, vertical = 10.dp),
             )
         }
@@ -483,7 +493,9 @@ fun CourseReplayNativePlayer(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .background(Color.Black.copy(alpha = 0.72f))
+                    .background(
+                        Color.Black.copy(alpha = if (reduceTransparency) 0.96f else 0.72f),
+                    )
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
@@ -557,6 +569,8 @@ private fun CourseReplayPlayerControls(
     onExit: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val reduceTransparency = LocalAppEffects.current.reduceTransparency
+    val haptics = LocalAppHaptics.current
     val safeDuration = durationMs.coerceAtLeast(0L)
     var isSeeking by remember(safeDuration) { mutableStateOf(false) }
     var seekPosition by remember(safeDuration) { mutableStateOf(positionMs.coerceAtMost(safeDuration).toFloat()) }
@@ -571,7 +585,17 @@ private fun CourseReplayPlayerControls(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color.Black.copy(alpha = if (mode == CourseReplayPlayerMode.Dedicated) 0.76f else 0.66f))
+            .background(
+                Color.Black.copy(
+                    alpha = if (reduceTransparency) {
+                        0.96f
+                    } else if (mode == CourseReplayPlayerMode.Dedicated) {
+                        0.76f
+                    } else {
+                        0.66f
+                    },
+                ),
+            )
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -612,6 +636,7 @@ private fun CourseReplayPlayerControls(
             },
             onValueChangeFinished = {
                 isSeeking = false
+                haptics.perform(AppHapticEvent.Snap)
                 onSeek(seekPosition.toLong())
             },
             valueRange = 0f..safeDuration.coerceAtLeast(1L).toFloat(),

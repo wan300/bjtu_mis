@@ -19,7 +19,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import cn.edu.bjtu.mis.BjtuMisApplication
-import cn.edu.bjtu.mis.ui.theme.AppThemeOption
+import cn.edu.bjtu.mis.ui.theme.AppAppearancePreferences
 import cn.edu.bjtu.mis.ui.theme.BjtuMisTheme
 import kotlin.math.roundToInt
 
@@ -52,35 +52,43 @@ class CourseReplayPlayerActivity : AppCompatActivity() {
 
         val app = application as BjtuMisApplication
         setContent {
-            var themeOption by remember { mutableStateOf(AppThemeOption.Default) }
+            var appearance by remember { mutableStateOf<AppAppearancePreferences?>(null) }
             LaunchedEffect(app.container.themeStore) {
-                app.container.themeStore.theme.collect { themeOption = it }
+                appearance = app.container.themeStore.initialize()
+                app.container.themeStore.appearance.collect { appearance = it }
             }
-            BjtuMisTheme(themeOption = themeOption) {
-                BackHandler { finishWithLatestResult() }
-                CourseReplayNativePlayer(
-                    playback = session.playback,
-                    title = session.title,
-                    subtitle = session.subtitle,
-                    initialState = CourseReplayPlayerResult(
-                        selectedStreamKind = session.selectedStreamKind
-                            ?: session.playback.streams.first().kind,
-                        positionMs = session.positionMs,
-                        playWhenReady = session.playWhenReady,
-                        playbackSpeed = session.playbackSpeed,
-                        volume = session.volume,
-                        resizeMode = session.resizeMode,
-                    ),
-                    mode = CourseReplayPlayerMode.Dedicated,
-                    repository = app.container.courseReplayRepository,
-                    okHttpClient = app.container.httpClient.client,
-                    onExit = { finishWithLatestResult() },
-                    onStateChanged = { latestResult = it },
-                    onPlaybackMetadataChanged = { isPlaying, aspectRatio ->
-                        playbackActive = isPlaying
-                        videoAspectRatio = aspectRatio.takeIf { it.isFinite() && it > 0f } ?: videoAspectRatio
-                    },
-                )
+            appearance?.let { currentAppearance ->
+                BjtuMisTheme(
+                    themeOption = currentAppearance.theme,
+                    appearance = currentAppearance,
+                ) {
+                    BackHandler { finishWithLatestResult() }
+                    CourseReplayNativePlayer(
+                        playback = session.playback,
+                        title = session.title,
+                        subtitle = session.subtitle,
+                        initialState = CourseReplayPlayerResult(
+                            selectedStreamKind = session.selectedStreamKind
+                                ?: session.playback.streams.first().kind,
+                            positionMs = session.positionMs,
+                            playWhenReady = session.playWhenReady,
+                            playbackSpeed = session.playbackSpeed,
+                            volume = session.volume,
+                            resizeMode = session.resizeMode,
+                        ),
+                        mode = CourseReplayPlayerMode.Dedicated,
+                        repository = app.container.courseReplayRepository,
+                        okHttpClient = app.container.httpClient.client,
+                        onExit = { finishWithLatestResult() },
+                        onStateChanged = { latestResult = it },
+                        onPlaybackMetadataChanged = { isPlaying, aspectRatio ->
+                            playbackActive = isPlaying
+                            videoAspectRatio = aspectRatio
+                                .takeIf { it.isFinite() && it > 0f }
+                                ?: videoAspectRatio
+                        },
+                    )
+                }
             }
         }
     }

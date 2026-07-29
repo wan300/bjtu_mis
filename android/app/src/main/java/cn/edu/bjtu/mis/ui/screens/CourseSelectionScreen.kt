@@ -72,6 +72,8 @@ import cn.edu.bjtu.mis.ui.components.InfoCard
 import cn.edu.bjtu.mis.ui.components.KeyValue
 import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
+import cn.edu.bjtu.mis.ui.theme.AppHapticEvent
+import cn.edu.bjtu.mis.ui.theme.LocalAppHaptics
 import cn.edu.bjtu.mis.ui.components.PageActionRow
 import kotlinx.coroutines.launch
 
@@ -95,6 +97,7 @@ fun CourseSelectionScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val captchaFocusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
+    val haptics = LocalAppHaptics.current
     val runState by runner.state.collectAsStateWithLifecycle()
     var state by remember { mutableStateOf<LoadState<ModuleEnvelope<CourseSelectionData>>>(LoadState.Loading) }
     var selectedKeys by remember { mutableStateOf(setOf<String>()) }
@@ -112,6 +115,7 @@ fun CourseSelectionScreen(
     var captchaText by remember { mutableStateOf("") }
     var uiError by remember { mutableStateOf<String?>(null) }
     var pendingConfig by remember { mutableStateOf<CourseSelectionRunConfig?>(null) }
+    var showStartConfirmation by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -120,8 +124,14 @@ fun CourseSelectionScreen(
         pendingConfig = null
         if (granted && config != null) {
             runCatching { CourseSelectionForegroundService.start(context, config) }
-                .onSuccess { uiError = null }
-                .onFailure { uiError = it.message ?: "抢课后台服务启动失败" }
+                .onSuccess {
+                    uiError = null
+                    haptics.perform(AppHapticEvent.Success)
+                }
+                .onFailure {
+                    uiError = it.message ?: "抢课后台服务启动失败"
+                    haptics.perform(AppHapticEvent.Error)
+                }
         } else {
             uiError = "需要通知权限才能在后台持续显示抢课状态并提醒验证码。"
         }
@@ -198,8 +208,14 @@ fun CourseSelectionScreen(
             return
         }
         runCatching { CourseSelectionForegroundService.start(context, config) }
-            .onSuccess { uiError = null }
-            .onFailure { uiError = it.message ?: "抢课后台服务启动失败" }
+            .onSuccess {
+                uiError = null
+                haptics.perform(AppHapticEvent.Success)
+            }
+            .onFailure {
+                uiError = it.message ?: "抢课后台服务启动失败"
+                haptics.perform(AppHapticEvent.Error)
+            }
     }
 
     fun submitCaptcha() {
@@ -285,7 +301,7 @@ fun CourseSelectionScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                             Button(
                                 enabled = !runState.running && (chosenCourses.isNotEmpty() || replaceRules.isNotEmpty()) && currentData.canSubmit,
-                                onClick = { startSelecting(chosenCourses, replaceRules) },
+                                onClick = { showStartConfirmation = true },
                                 modifier = Modifier.weight(1f),
                             ) {
                                 Text(if (runState.running) "抢课中" else "开始抢课")
@@ -446,6 +462,19 @@ fun CourseSelectionScreen(
                 }
             }
         }
+    }
+
+    if (showStartConfirmation) {
+        CourseSelectionStartConfirmationDialog(
+            courseCount = chosenCourses.size,
+            replacementCount = replaceRules.size,
+            onDismiss = { showStartConfirmation = false },
+            onConfirm = {
+                showStartConfirmation = false
+                haptics.perform(AppHapticEvent.Commit)
+                startSelecting(chosenCourses, replaceRules)
+            },
+        )
     }
 
     runState.awaitingCaptcha?.let { challenge ->
@@ -625,6 +654,44 @@ private fun CourseSelectionFilterChip(
         selected = selected,
         onClick = onClick,
         label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+    )
+}
+
+@Composable
+internal fun CourseSelectionStartConfirmationDialog(
+    courseCount: Int,
+    replacementCount: Int,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("确认开始抢课") },
+        text = {
+            Text(
+                buildString {
+                    append("将持续尝试选择 ")
+                    append(courseCount)
+                    append(" 门课程")
+                    if (replacementCount > 0) {
+                        append("，并执行 ")
+                        append(replacementCount)
+                        append(" 条换课规则；换课成功时会退掉原课程")
+                    }
+                    append("。请确认课程、重试间隔和最大轮数无误。")
+                },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("确认开始")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("返回检查")
+            }
+        },
     )
 }
 

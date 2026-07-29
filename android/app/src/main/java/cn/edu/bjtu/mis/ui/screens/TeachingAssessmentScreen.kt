@@ -41,6 +41,8 @@ import cn.edu.bjtu.mis.ui.components.LoadState
 import cn.edu.bjtu.mis.ui.components.LoadingOrError
 import cn.edu.bjtu.mis.ui.components.PageActionRow
 import cn.edu.bjtu.mis.ui.components.SectionTitle
+import cn.edu.bjtu.mis.ui.theme.AppHapticEvent
+import cn.edu.bjtu.mis.ui.theme.LocalAppHaptics
 import kotlinx.coroutines.launch
 
 private const val DefaultAssessmentComment = "很好"
@@ -62,6 +64,7 @@ fun TeachingAssessmentScreen(
     initialLoadStrategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
 ) {
     val scope = rememberCoroutineScope()
+    val haptics = LocalAppHaptics.current
     var state by remember { mutableStateOf<LoadState<ModuleEnvelope<TeachingAssessmentData>>>(LoadState.Loading) }
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
     var drafts by remember { mutableStateOf<List<TeachingAssessmentDraft>>(emptyList()) }
@@ -148,6 +151,9 @@ fun TeachingAssessmentScreen(
                 )
             }
             updateDraft(draft.course.id) { it.copy(submitting = false, result = result) }
+            haptics.perform(
+                if (result.success) AppHapticEvent.Success else AppHapticEvent.Error,
+            )
         }
     }
 
@@ -172,6 +178,13 @@ fun TeachingAssessmentScreen(
                 updateDraft(draft.course.id) { it.copy(submitting = false, result = result) }
             }
             submitRunning = false
+            haptics.perform(
+                if (drafts.any { it.result?.success == false }) {
+                    AppHapticEvent.Error
+                } else {
+                    AppHapticEvent.Success
+                },
+            )
         }
     }
 
@@ -294,28 +307,52 @@ fun TeachingAssessmentScreen(
 
     if (showConfirm) {
         val readyCount = drafts.count { it.readyForSubmit() }
-        AlertDialog(
-            onDismissRequest = { if (!submitRunning) showConfirm = false },
-            title = { Text("确认提交评教") },
-            text = { Text("将按当前预填内容提交 $readyCount 门课程。提交后可能无法撤回，请确认课程和评价内容无误。") },
-            confirmButton = {
-                TextButton(
-                    enabled = readyCount > 0 && !submitRunning,
-                    onClick = {
-                        showConfirm = false
-                        submitAll()
-                    },
-                ) {
-                    Text("提交")
-                }
-            },
-            dismissButton = {
-                TextButton(enabled = !submitRunning, onClick = { showConfirm = false }) {
-                    Text("取消")
-                }
+        TeachingAssessmentSubmitConfirmationDialog(
+            readyCount = readyCount,
+            submitting = submitRunning,
+            onDismiss = { showConfirm = false },
+            onConfirm = {
+                showConfirm = false
+                submitAll()
             },
         )
     }
+}
+
+@Composable
+internal fun TeachingAssessmentSubmitConfirmationDialog(
+    readyCount: Int,
+    submitting: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val haptics = LocalAppHaptics.current
+    AlertDialog(
+        onDismissRequest = { if (!submitting) onDismiss() },
+        title = { Text("确认提交评教") },
+        text = {
+            Text(
+                "将按当前预填内容提交 $readyCount 门课程。" +
+                    "提交后可能无法撤回，请确认课程和评价内容无误。",
+            )
+        },
+        confirmButton = {
+            TextButton(
+                enabled = readyCount > 0 && !submitting,
+                onClick = {
+                    haptics.perform(AppHapticEvent.Commit)
+                    onConfirm()
+                },
+            ) {
+                Text("提交")
+            }
+        },
+        dismissButton = {
+            TextButton(enabled = !submitting, onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 @Composable

@@ -33,6 +33,8 @@ data class PreparedThirdPartyServicePackage(
     val createdAtMillis: Long,
     val archiveSha256: String? = null,
     val platformVerified: Boolean = false,
+    val publisherSubjectId: String = "development-unverified",
+    val verificationLevel: String = "unverified",
 )
 
 data class InstalledThirdPartyServicePackage(
@@ -44,6 +46,8 @@ data class InstalledThirdPartyServicePackage(
     val packageBytes: Long,
     val packageFileCount: Int,
     val installDir: File,
+    val publisherSubjectId: String = "development-unverified",
+    val verificationLevel: String = "unverified",
 )
 
 data class StagedThirdPartyServiceDeletion(
@@ -67,8 +71,13 @@ class ThirdPartyServiceInstaller(
 
     suspend fun prepareFromGitHub(sourceUrl: String): PreparedThirdPartyServicePackage {
         cleanupStalePreparedImports()
-        val source = parseGitHubRepositoryUrl(sourceUrl)
-        val repo = fetchRepository(source)
+        val parsedSource = parseGitHubRepositoryUrl(sourceUrl)
+        val repo = fetchRepository(parsedSource)
+        val ownerId = repo.owner.id
+            .takeIf { it > 0L }
+            ?.toString()
+            ?: throw ThirdPartyServiceException("GitHub 仓库缺少不可变 owner 数值 ID")
+        val source = parsedSource.copy(ownerId = ownerId)
         val defaultBranch = repo.defaultBranch.trim().takeIf { it.isNotBlank() }
             ?: throw ThirdPartyServiceException("GitHub 仓库缺少默认分支")
         val commitSha = fetchCommitSha(source, defaultBranch)
@@ -77,7 +86,14 @@ class ThirdPartyServiceInstaller(
         return try {
             tempDir.mkdirs()
             downloadZip("$normalizedApiBaseUrl/repos/${source.owner}/${source.repo}/zipball/$commitSha", zipFile)
-            preparePackageFromZip(source, defaultBranch, commitSha, zipFile)
+            preparePackageFromZip(
+                source = source,
+                defaultBranch = defaultBranch,
+                commitSha = commitSha,
+                zipFile = zipFile,
+                publisherSubjectId = "github-owner:$ownerId",
+                allowDevelopmentOrigins = true,
+            )
         } finally {
             tempDir.deleteRecursively()
         }
@@ -91,6 +107,22 @@ class ThirdPartyServiceInstaller(
     suspend fun prepareFromCatalog(plugin: CatalogPlugin): PreparedThirdPartyServicePackage {
         cleanupStalePreparedImports()
         val source = parseGitHubRepositoryUrl(plugin.repositoryUrl)
+        if (
+            plugin.schemaVersion != THIRD_PARTY_SERVICE_SCHEMA_VERSION ||
+            plugin.compatibilityState != ThirdPartyCompatibilityState.Compatible.value ||
+            plugin.minRuntimeVersion > THIRD_PARTY_RUNTIME_VERSION
+        ) {
+            throw ThirdPartyServiceException("插件目录版本与当前 Manifest v3 runtime 不兼容")
+        }
+        if (!plugin.publisherSubjectId.matches(Regex("^github-owner:[1-9]\\d*$"))) {
+            throw ThirdPartyServiceException("插件目录缺少可验证的 publisher subject")
+        }
+        if (
+            plugin.publisherIdentity.subjectId != plugin.publisherSubjectId ||
+            !plugin.publisherIdentity.ownerId.orEmpty().matches(Regex("^[1-9]\\d*$"))
+        ) {
+            throw ThirdPartyServiceException("插件目录 publisher identity 元数据不一致")
+        }
         val tempDir = File(root, "tmp/${UUID.randomUUID()}").canonicalFile.safeChildOf(root)
         val zipFile = File(tempDir, "artifact.zip")
         return try {
@@ -100,7 +132,13 @@ class ThirdPartyServiceInstaller(
             if (!archiveSha256.equals(plugin.archiveSha256, ignoreCase = true)) {
                 throw ThirdPartyServiceException("插件快照 SHA-256 校验失败，已阻止安装")
             }
-            val prepared = preparePackageFromZip(source, "platform-snapshot", plugin.commitSha, zipFile)
+            val prepared = preparePackageFromZip(
+                source = source,
+                defaultBranch = "platform-snapshot",
+                commitSha = plugin.commitSha,
+                zipFile = zipFile,
+                publisherSubjectId = plugin.publisherSubjectId,
+            )
             if (prepared.manifest.id != plugin.id || prepared.manifest.version != plugin.version) {
                 discardPreparedImport(prepared.token)
                 throw ThirdPartyServiceException("插件快照 manifest 与目录元数据不一致")
@@ -109,7 +147,11 @@ class ThirdPartyServiceInstaller(
                 discardPreparedImport(prepared.token)
                 throw ThirdPartyServiceException("插件 dist digest 校验失败，已阻止安装")
             }
-            prepared.copy(archiveSha256 = archiveSha256, platformVerified = true).also {
+            prepared.copy(
+                archiveSha256 = archiveSha256,
+                platformVerified = true,
+                verificationLevel = plugin.verificationLevel,
+            ).also {
                 preparedPackages[it.token] = it
             }
         } finally {
@@ -122,13 +164,22 @@ class ThirdPartyServiceInstaller(
         defaultBranch: String,
         commitSha: String,
         zipFile: File,
+        publisherSubjectId: String = developmentPublisherSubject(source),
+        allowDevelopmentOrigins: Boolean = false,
     ): PreparedThirdPartyServicePackage = withContext(Dispatchers.IO) {
         val tempDir = File(root, "extract/${UUID.randomUUID()}").canonicalFile.safeChildOf(root)
         val extractedDir = File(tempDir, "package")
         try {
             extractZip(zipFile, extractedDir)
             val packageRoot = locatePackageRoot(extractedDir)
-            preparePackageFromRoot(source, defaultBranch, commitSha, packageRoot)
+            preparePackageFromRoot(
+                source,
+                defaultBranch,
+                commitSha,
+                packageRoot,
+                publisherSubjectId,
+                allowDevelopmentOrigins,
+            )
         } catch (error: ThirdPartyServiceException) {
             throw error
         } catch (error: Exception) {
@@ -143,6 +194,8 @@ class ThirdPartyServiceInstaller(
         defaultBranch: String,
         commitSha: String,
         packageRoot: File,
+        publisherSubjectId: String = developmentPublisherSubject(source),
+        allowDevelopmentOrigins: Boolean = false,
     ): PreparedThirdPartyServicePackage = withContext(Dispatchers.IO) {
         try {
             preparePackageFromRoot(
@@ -150,6 +203,8 @@ class ThirdPartyServiceInstaller(
                 defaultBranch = defaultBranch,
                 commitSha = commitSha,
                 packageRoot = packageRoot.canonicalFile,
+                publisherSubjectId = publisherSubjectId,
+                allowDevelopmentOrigins = allowDevelopmentOrigins,
             )
         } catch (error: ThirdPartyServiceException) {
             throw error
@@ -201,6 +256,8 @@ class ThirdPartyServiceInstaller(
                 packageBytes = prepared.packageBytes,
                 packageFileCount = prepared.packageFileCount,
                 installDir = finalDir,
+                publisherSubjectId = prepared.publisherSubjectId,
+                verificationLevel = prepared.verificationLevel,
             )
         } catch (error: ThirdPartyServiceException) {
             preparedPackages[token] = prepared
@@ -214,9 +271,13 @@ class ThirdPartyServiceInstaller(
     fun preparedPackage(token: String): PreparedThirdPartyServicePackage? = preparedPackages[token]
 
     fun pruneInstalledVersions(serviceId: String, keepCommitSha: String) {
+        pruneInstalledVersions(serviceId, setOf(keepCommitSha))
+    }
+
+    fun pruneInstalledVersions(serviceId: String, keepCommitShas: Set<String>) {
         val serviceRoot = File(installedRoot, serviceId).canonicalFile.safeChildOf(installedRoot)
         serviceRoot.listFiles().orEmpty().forEach { child ->
-            if (child.name != keepCommitSha) child.safeDeleteWithin(serviceRoot)
+            if (child.name !in keepCommitShas) child.safeDeleteWithin(serviceRoot)
         }
     }
 
@@ -239,6 +300,15 @@ class ThirdPartyServiceInstaller(
     fun deleteInstalledService(serviceId: String) {
         requireValidServiceId(serviceId)
         File(installedRoot, serviceId).safeDeleteWithin(installedRoot)
+    }
+
+    fun cleanupDeletedServiceArtifacts(serviceId: String) {
+        requireValidServiceId(serviceId)
+        deleteInstalledService(serviceId)
+        deletionRoot.mkdirs()
+        deletionRoot.listFiles().orEmpty()
+            .filter { it.name.startsWith("$serviceId-") }
+            .forEach { it.safeDeleteWithin(deletionRoot) }
     }
 
     fun stageInstalledServiceDeletion(serviceId: String): StagedThirdPartyServiceDeletion? {
@@ -388,12 +458,15 @@ class ThirdPartyServiceInstaller(
         defaultBranch: String,
         commitSha: String,
         packageRoot: File,
+        publisherSubjectId: String,
+        allowDevelopmentOrigins: Boolean = false,
     ): PreparedThirdPartyServicePackage {
         val manifestFile = File(packageRoot, "bjtu-service.json")
         if (!manifestFile.isFile) throw ThirdPartyServiceException("第三方服务缺少 bjtu-service.json")
-        val manifest = ThirdPartyManifestValidator.validate(
-            AppJson.decodeFromString<ThirdPartyServiceManifest>(manifestFile.readText(Charsets.UTF_8)),
+        val manifest = ThirdPartyManifestValidator.decodeAndValidate(
+            manifestFile.readText(Charsets.UTF_8),
             packageRoot,
+            allowDevelopmentOrigins,
         )
         val token = UUID.randomUUID().toString()
         val stagingDir = File(stagingRoot, token).canonicalFile.safeChildOf(stagingRoot)
@@ -414,12 +487,19 @@ class ThirdPartyServiceInstaller(
             packageFileCount = digest.fileCount,
             stagingDir = stagingDir,
             createdAtMillis = nowMillis(),
+            publisherSubjectId = publisherSubjectId,
         )
         preparedPackages[token] = prepared
         return prepared
     }
 
     companion object {
+        private fun developmentPublisherSubject(source: GitHubRepositoryRef): String =
+            source.ownerId
+                ?.takeIf { it.matches(Regex("^\\d+$")) }
+                ?.let { "github-owner:$it" }
+                ?: "development-github-login:${source.owner.lowercase()}"
+
         fun parseGitHubRepositoryUrl(value: String): GitHubRepositoryRef {
             val raw = value.trim()
             val uri = runCatching { URI(raw) }.getOrElse {
@@ -466,6 +546,12 @@ class ThirdPartyServiceInstaller(
 @Serializable
 private data class GitHubRepoDto(
     val defaultBranch: String = "",
+    val owner: GitHubOwnerDto = GitHubOwnerDto(),
+)
+
+@Serializable
+private data class GitHubOwnerDto(
+    val id: Long = 0L,
 )
 
 @Serializable

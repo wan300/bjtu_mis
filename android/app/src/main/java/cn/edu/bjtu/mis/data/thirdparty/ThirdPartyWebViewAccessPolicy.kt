@@ -1,34 +1,23 @@
 package cn.edu.bjtu.mis.data.thirdparty
 
-import java.io.File
 import java.net.URI
 
 object ThirdPartyWebViewAccessPolicy {
+    fun isTrustedBridgeMessage(
+        isMainFrame: Boolean,
+        sourceOrigin: String?,
+        expectedOrigin: String,
+    ): Boolean =
+        isMainFrame && sourceOrigin?.let(::origin) == expectedOrigin
+
     fun isTrustedRuntimeUrl(
         url: String?,
         serviceId: String,
-        commitSha: String,
-        allowedOrigins: Collection<String>,
+        publisherSubjectId: String,
     ): Boolean {
         val raw = url?.trim().orEmpty()
         if (raw.isBlank()) return false
-        return ThirdPartyServiceSandbox.isServiceSandboxUrl(raw, serviceId, commitSha) ||
-            origin(raw) in allowedOrigins
-    }
-
-    fun isTrustedUrl(url: String?, installDir: File, allowedOrigins: Collection<String>): Boolean {
-        val raw = url?.trim().orEmpty()
-        if (raw.isBlank()) return false
-        val uri = runCatching { URI(raw) }.getOrElse { return false }
-        return when (uri.scheme?.lowercase()) {
-            "file" -> runCatching {
-                val installRoot = installDir.canonicalFile
-                val file = File(uri).canonicalFile
-                file == installRoot || file.path.startsWith(installRoot.path + File.separator)
-            }.getOrDefault(false)
-            "http", "https" -> origin(raw) in allowedOrigins
-            else -> false
-        }
+        return ThirdPartyServiceSandbox.isServiceSandboxUrl(raw, serviceId, publisherSubjectId)
     }
 
     fun origin(url: String): String? {

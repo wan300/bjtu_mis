@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -46,6 +47,10 @@ import androidx.compose.ui.unit.dp
 import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.data.repository.SessionRepository
 import cn.edu.bjtu.mis.model.AutoLoginStatus
+import cn.edu.bjtu.mis.ui.friendlyTimestamp
+import cn.edu.bjtu.mis.ui.theme.AppUiStyle
+import cn.edu.bjtu.mis.ui.theme.LocalAppDesign
+import cn.edu.bjtu.mis.ui.theme.LocalAppUiStyle
 import kotlinx.coroutines.launch
 
 @Composable
@@ -54,6 +59,9 @@ fun LoginScreen(
     onLoggedIn: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val isApple = LocalAppUiStyle.current == AppUiStyle.Apple
+    val design = LocalAppDesign.current
+    val largeFont = LocalConfiguration.current.fontScale >= 1.5f
     var loginName by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var captchaText by remember { mutableStateOf("") }
@@ -119,16 +127,22 @@ fun LoginScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        MaterialTheme.colorScheme.background,
-                        MaterialTheme.colorScheme.surfaceVariant,
-                        MaterialTheme.colorScheme.background,
-                    ),
-                ),
+            .then(
+                if (isApple) {
+                    Modifier.background(MaterialTheme.colorScheme.background)
+                } else {
+                    Modifier.background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.background,
+                                MaterialTheme.colorScheme.surfaceVariant,
+                                MaterialTheme.colorScheme.background,
+                            ),
+                        ),
+                    )
+                },
             )
-            .padding(18.dp),
+            .padding(if (isApple) design.pageHorizontalPadding else 18.dp),
         contentAlignment = Alignment.Center,
     ) {
         Card(
@@ -137,8 +151,12 @@ fun LoginScreen(
                 .widthIn(max = 420.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             shape = MaterialTheme.shapes.large,
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = if (isApple) 0.dp else 2.dp),
+            border = if (isApple) {
+                null
+            } else {
+                BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
+            },
         ) {
             Column(
                 modifier = Modifier.padding(22.dp),
@@ -189,29 +207,61 @@ fun LoginScreen(
                     colors = loginTextFieldColors(),
                 )
                 if (showManualCaptcha) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = captchaText,
-                            onValueChange = { captchaText = it },
-                            modifier = Modifier.weight(1f),
-                            label = { Text("验证码") },
-                            singleLine = true,
-                            enabled = !busy,
-                            shape = MaterialTheme.shapes.medium,
-                            colors = loginTextFieldColors(),
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        CaptchaImage(
-                            dataUrl = captchaDataUrl,
-                            modifier = Modifier
-                                .width(118.dp)
-                                .height(48.dp)
-                                .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium)
-                                .clickable(enabled = !busy) { loadCaptcha() },
-                        )
+                    if (largeFont) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                value = captchaText,
+                                onValueChange = { captchaText = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("验证码") },
+                                singleLine = true,
+                                enabled = !busy,
+                                shape = MaterialTheme.shapes.medium,
+                                colors = loginTextFieldColors(),
+                            )
+                            CaptchaImage(
+                                dataUrl = captchaDataUrl,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(56.dp)
+                                    .background(
+                                        MaterialTheme.colorScheme.surfaceVariant,
+                                        MaterialTheme.shapes.medium,
+                                    )
+                                    .clickable(enabled = !busy) { loadCaptcha() },
+                            )
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = captchaText,
+                                onValueChange = { captchaText = it },
+                                modifier = Modifier.weight(1f),
+                                label = { Text("验证码") },
+                                singleLine = true,
+                                enabled = !busy,
+                                shape = MaterialTheme.shapes.medium,
+                                colors = loginTextFieldColors(),
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            CaptchaImage(
+                                dataUrl = captchaDataUrl,
+                                modifier = Modifier
+                                    .width(118.dp)
+                                    .height(48.dp)
+                                    .background(
+                                        MaterialTheme.colorScheme.surfaceVariant,
+                                        MaterialTheme.shapes.medium,
+                                    )
+                                    .clickable(enabled = !busy) { loadCaptcha() },
+                            )
+                        }
                     }
                     if (!fetchedAt.isNullOrBlank()) {
-                        Text("验证码更新时间：$fetchedAt", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "验证码更新时间：${friendlyTimestamp(fetchedAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
                 if (!error.isNullOrBlank()) {

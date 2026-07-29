@@ -1,8 +1,11 @@
-# Remote Origin Demo
+# Remote frame example
 
-This example documents the v1 `allowed_origins` semantics. Declared origins are trusted executable and network origins: a page or iframe loaded from the origin may call the bridge with the service's granted permissions.
+This Manifest v3 example declares `https://example.com` only in
+`frame_origins`. The frame is sandboxed with scripts, forms, and same-origin
+DOM/storage support, but it cannot access the BJTU native bridge, navigate the
+top frame, open popups, or download files.
 
-The remote URL is illustrative. It is not required for offline linting.
+Run:
 
 ```powershell
 node tools/third-party-service-lint.cjs third-party-plugins/examples/remote-origin-demo

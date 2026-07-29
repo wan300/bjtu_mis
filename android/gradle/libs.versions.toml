@@ -19,12 +19,15 @@ okhttp = "4.12.0"
 jsoup = "1.18.3"
 serializationJson = "1.7.3"
 junit = "4.13.2"
+androidxTestExt = "1.2.1"
+androidxTestRunner = "1.6.2"
 mockwebserver = "4.12.0"
 pytorchAndroid = "2.1.0"
 javascriptengine = "1.1.0"
 pdfboxAndroid = "2.0.27.0"
 media3 = "1.5.1"
 commonsCompress = "1.28.0"
+coil = "3.0.4"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core" }
@@ -47,6 +50,8 @@ compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeB
 compose-ui = { module = "androidx.compose.ui:ui" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
+compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
 compose-material3 = { module = "androidx.compose.material3:material3" }
 compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
@@ -64,8 +69,13 @@ media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3" }
 media3-datasource-okhttp = { module = "androidx.media3:media3-datasource-okhttp", version.ref = "media3" }
 androidx-room-testing = { module = "androidx.room:room-testing", version.ref = "room" }
 junit = { module = "junit:junit", version.ref = "junit" }
+androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestExt" }
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
 cordova-android = { module = "org.apache.cordova:framework", version.ref = "cordovaAndroid" }
 commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commonsCompress" }
+coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
+coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
+coil-svg = { module = "io.coil-kt.coil3:coil-svg", version.ref = "coil" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -1,0 +1,230 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 3,
+    "identityHash": "b0289b934e16dc6651ad770aaab3e0f3",
+    "entities": [
+      {
+        "tableName": "sync_runs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `started_at` TEXT NOT NULL, `finished_at` TEXT, `status` TEXT NOT NULL, `module_summary_json` TEXT NOT NULL, `error_text` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "started_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finishedAt",
+            "columnName": "finished_at",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "moduleSummaryJson",
+            "columnName": "module_summary_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "errorText",
+            "columnName": "error_text",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "module_snapshots",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`module_key` TEXT NOT NULL, `synced_at` TEXT NOT NULL, `source_system` TEXT NOT NULL, `coverage` TEXT NOT NULL, `source_params_json` TEXT NOT NULL, `payload_json` TEXT NOT NULL, PRIMARY KEY(`module_key`))",
+        "fields": [
+          {
+            "fieldPath": "moduleKey",
+            "columnName": "module_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncedAt",
+            "columnName": "synced_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceSystem",
+            "columnName": "source_system",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "coverage",
+            "columnName": "coverage",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceParamsJson",
+            "columnName": "source_params_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payload_json",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "module_key"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "user_courses",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `course_name` TEXT NOT NULL, `weekday` TEXT NOT NULL, `weekday_index` INTEGER NOT NULL, `period` TEXT NOT NULL, `period_number` INTEGER NOT NULL, `time_range` TEXT, `start_week` INTEGER NOT NULL, `end_week` INTEGER NOT NULL, `weeks_text` TEXT, `duration_type` TEXT NOT NULL, `teacher` TEXT, `location_text` TEXT, `remark` TEXT, `color_index` INTEGER NOT NULL, `created_at` TEXT NOT NULL, `updated_at` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "courseName",
+            "columnName": "course_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weekday",
+            "columnName": "weekday",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weekdayIndex",
+            "columnName": "weekday_index",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "period",
+            "columnName": "period",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "periodNumber",
+            "columnName": "period_number",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timeRange",
+            "columnName": "time_range",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "startWeek",
+            "columnName": "start_week",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endWeek",
+            "columnName": "end_week",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weeksText",
+            "columnName": "weeks_text",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "durationType",
+            "columnName": "duration_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "teacher",
+            "columnName": "teacher",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "locationText",
+            "columnName": "location_text",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "remark",
+            "columnName": "remark",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "colorIndex",
+            "columnName": "color_index",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b0289b934e16dc6651ad770aaab3e0f3')"
+    ]
+  }
+}

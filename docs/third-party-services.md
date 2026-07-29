@@ -1,615 +1,313 @@
-# 第三方插件开发者文档
+# BJTU MIS 第三方插件 Manifest v3
 
-BJTU MIS Android 第三方插件是安装在应用私有目录中的已构建 H5/SPA Web 服务。插件通过公开 GitHub 仓库导入，通过 `bjtu-service.json` 声明元数据、权限和允许执行/联网的 HTTP/HTTPS origin，并在应用内 WebView 的受控沙箱 origin 中调用受控的 `window.BjtuService` API。
+> **权威安全基线**：本文与
+> `docs/third-party-service-manifest.schema.json`、constitution 原则 VII 共同定义当前插件
+> 安全策略，并覆盖此前所有 Manifest v1/v2、聚合 origin、凭据读取桥和通用原生 HTTP
+> 桥设计。旧 spec、plan、API 或迁移说明仅用于历史追踪和无桥数据救援，不具备重新启用
+> 旧策略的规范效力。
 
-本文档中的“第三方插件”和应用代码中的“第三方服务”指同一能力。
+BJTU MIS Android 的第三方插件是安装在应用私有目录中的静态 H5/SPA 包。Manifest v3
+把插件身份、WebView 信任边界、runtime 能力、数据迁移和校园会话访问拆成独立契约。
 
-## 1. 平台概览
+新客户端只安装、更新和运行 Manifest v3。v1/v2 插件会标记为
+`legacy_disabled`；旧包和旧 WebStorage 不会自动删除，用户可从无桥、无网络的只读救援
+入口查看数据或明确删除插件。
 
-插件不会直接接触 Cookie、token 或原始 HTTP 客户端。校园数据由 BJTU MIS Android 的受控 Repository 返回；若插件声明并获得 `identity.credentials.read` 权限，并在调用时通过宿主单次确认，也可以通过桥接 API 读取首次登录 BJTU MIS 时保存的登录名和明文密码，用于服务侧直登或会话恢复。
+## 快速开始
 
-当前支持：
-
-- 仓库根目录包含 `bjtu-service.json` 和 `dist/`。
-- 通过 `https://github.com/{owner}/{repo}` 公开仓库导入。
-- 导入前预检 manifest、权限、允许来源、包内容 digest 和文件数量。
-- 安装时固定默认分支的 `commitSha`，并按该 commit 下载 zip 包。
-- 安装后记录 `dist/` 内容的 SHA-256 digest。
-- 安装后的 `dist/` 会通过每服务隔离的虚拟 HTTPS origin 运行，支持 `/assets/...` 绝对路径资源和 SPA history fallback。
-- 通过 `window.BjtuService.invoke` 调用受控 API。
-- 通过 `app.http_request` 向 `allowed_origins` 中声明的远端 API 发起受控 HTTP/HTTPS 请求。
-
-当前不支持：
-
-- 私有仓库、release asset、仓库子目录安装。
-- 应用侧自动源码构建或静默更新。
-- Android 端运行 Node、Vite dev server、`npm install` 或开发服务器。
-- 原生插件、后台常驻任务、直接读取 App 内部文件。
-- 调用 manifest 未声明或用户未授权的校园服务能力。
-
-## 2. 仓库结构
+仓库根目录必须包含：
 
 ```text
-your-repo/
-  bjtu-service.json
-  dist/
-    index.html
-    icon.svg
-    assets/
-      app.css
-      app.js
+bjtu-service.json
+dist/
+  index.html
+  icon.svg
 ```
 
-v1 只支持 `https://github.com/{owner}/{repo}` 形式的公开仓库链接。应用读取默认分支，下载 zip 包，并固定安装时的 `commitSha`。应用只会安装 `dist/` 内的静态文件；运行时由 App 映射到每服务隔离的虚拟 HTTPS origin，不直接把 `file://` 作为页面 origin。
-
-再次导入同一 `id` 的服务会作为更新处理。更新后原有授权会被清空，服务进入需要重新确认状态；用户重新同意必须权限后才会启用。
-
-仓库内提供开发起点：
-
-- 基础模板：`third-party-plugins/templates/basic/`
-- 离线示例：`third-party-plugins/examples/profile-timetable/`
-- 远程来源语义示例：`third-party-plugins/examples/remote-origin-demo/`
-
-发布前建议运行 lint：
+复制 `third-party-plugins/templates/basic/` 后运行：
 
 ```powershell
-node tools/third-party-service-lint.cjs third-party-plugins/examples/profile-timetable
+node tools/third-party-service-lint.cjs third-party-plugins/templates/basic
 ```
 
-lint 的 `ERROR` 必须修复；`WARN` 用于提示可能的运行时远端引用。若 warning 指向运行时会加载的页面、iframe、接口或资源，需要加入 `allowed_origins`，或改为本地打包/移除引用；若只是框架错误说明链接、开发占位字符串或不会触发的文本常量，可以保留，并在发布说明中记录原因。
+公开投稿只接受 GitHub 公开仓库和 Manifest v3。平台固定解析仓库当前 commit，计算源归档
+SHA-256 与 `dist/` 内容 digest，并记录 GitHub owner 的不可变数值 ID。
 
-## 3. Manifest
+## Manifest
 
-`bjtu-service.json` 使用 snake_case。所有字段都必须存在，权限可为空数组。
+最小示例：
 
 ```json
 {
-  "schema_version": 2,
-  "id": "bjtu.demo",
-  "name": "Demo Service",
-  "description": "A demo BJTU MIS service.",
+  "schema_version": 3,
+  "runtime_version": 1,
+  "min_runtime_version": 1,
+  "required_capabilities": ["runtime.lifecycle.v1"],
+  "optional_capabilities": ["storage.kv.v1"],
+  "data_schema_version": 1,
+  "id": "bjtu.example.demo",
+  "name": "Demo",
+  "description": "Manifest v3 example.",
   "version": "1.0.0",
   "entrypoint": "index.html",
   "icon": "icon.svg",
-  "author": "Your Name",
+  "author": "Example",
   "permissions": {
-    "required": ["identity.profile.read", "app.configuration.read"],
-    "optional": ["academic.timetable.read"]
+    "required": [],
+    "optional": []
   },
-  "allowed_origins": ["https://api.example.com"],
+  "connect_origins": [],
+  "media_origins": [],
+  "frame_origins": [],
+  "navigation_origins": [],
+  "bridge_origins": ["self"],
   "marketplace": {
-    "category": "academic",
-    "tags": ["课表", "示例"],
+    "category": "other",
+    "tags": ["example"],
     "license": "MIT"
   },
-  "configuration": [{
-    "key": "API_TOKEN",
-    "label": "API Token",
-    "description": "第三方 API 的访问令牌",
-    "type": "secret",
-    "required": true
-  }]
+  "configuration": []
 }
 ```
 
-规则：
+`migration_entrypoint` 是可选的 `dist/` 内相对路径。提高
+`data_schema_version` 时必须提供它；版本不得降低。
 
-- 高级直链导入兼容 `schema_version: 1`；投稿插件大厅必须使用 `schema_version: 2`，且 `version` 必须是 SemVer。
-- `id` 长度 3-64，以小写字母开头，只能包含小写字母、数字、点、下划线和短横线。
-- `name`、`description`、`version`、`author` 不能为空。
-- `entrypoint` 和 `icon` 必须是 `dist/` 内相对路径，不能包含 `..`、反斜杠、URL、盘符或绝对路径。
-- `permissions.required` 是必须授权的权限。用户未全部同意时服务不能启用。
-- `permissions.optional` 是可选权限。用户拒绝后服务仍可打开，但对应接口返回 `permission_denied`。
-- `required` 和 `optional` 不能声明重复权限。
-- `allowed_origins` 只能填写 HTTP/HTTPS origin，例如 `https://api.example.com` 或 `http://127.0.0.1:8080`，不能带路径、查询参数、片段或用户名。
-- `allowed_origins` 是受信任的执行和联网来源。来自这些 origin 的页面或 iframe 可作为插件代码运行，并可调用该插件已授权的接口；`app.http_request` 的 `url` origin 也必须在该列表中。
-- v2 的 `marketplace.category` 只能为 `academic`、`campus`、`information`、`productivity`、`assistant`、`other`；`tags` 最多 5 个，`license` 只展示、不作为上架条件。
-- v2 的 `configuration` 最多 32 项，键匹配 `[A-Z][A-Z0-9_]{0,63}`，类型为 `text | secret | url | number | boolean | select`。声明配置时，必须把 `app.configuration.read` 放入必选权限；`secret` 不允许默认值。
+### Runtime capability
 
-Schema 文件：
-
-- 仓库文档：`docs/third-party-service-manifest.schema.json`
-- 网页下载：`web/assets/schemas/third-party-service-manifest.schema.json`
-
-## 4. 权限
-
-插件必须先在 manifest 中声明权限，再调用对应接口。授权页展示中文说明，不展示裸权限 ID。
-
-| 权限 ID | 能力 |
+| capability | 用途 |
 | --- | --- |
-| `identity.profile.read` | 读取姓名、学号、学院、专业、邮箱等个人资料。 |
-| `app.configuration.read` | 从插件本地 sandbox origin 读取当前插件声明过的本机加密配置。远端页面不能读取。 |
-| `identity.credentials.read` | 读取首次登录 BJTU MIS 时保存的登录名和明文密码。服务启用后，调用对应接口时宿主会弹出单次确认。 |
-| `academic.timetable.read` | 读取当前课表和用户自定义课程。 |
-| `academic.user_courses.write` | 新增、修改或删除用户手动创建的课程。 |
-| `academic.scores.read` | 读取当前学期或指定学期主修成绩。 |
-| `academic.history_scores.read` | 读取历年成绩。 |
-| `academic.exams.read` | 读取考试时间、地点和考试方式。 |
-| `academic.calendar.read` | 读取校历、周次和学期安排。 |
-| `academic.progress.read` | 读取培养方案完成情况和学分进度。 |
-| `academic.homework.read` | 读取课程作业、截止时间和提交状态。 |
-| `academic.homework.submit` | 提交作业内容。服务启用后，调用对应接口时宿主会弹出单次确认。 |
-| `academic.course_resources.read` | 读取课程资料列表和课程资源元数据。 |
-| `mail.folders.read` | 读取邮箱文件夹和未读数量。 |
-| `mail.messages.read` | 读取邮件摘要列表。 |
-| `mail.message_detail.read` | 读取单封邮件正文、收发件人和附件信息。 |
-| `mail.send` | 发送邮件。服务启用后，调用对应接口时宿主会弹出单次确认。 |
+| `runtime.lifecycle.v1` | Runtime 信息、ready 握手和环境生命周期事件。 |
+| `storage.kv.v1` | 加密、配额化、可迁移的 `app.storage`。 |
+| `campus.request.v1` | 通过宿主会话访问校园只读 registry。 |
+| `remote.frame.v1` | 加载声明过的受限远程 iframe。 |
 
-## 5. JavaScript API
+必需 capability 不受 runtime 支持时插件不兼容；可选 capability 应在调用前通过
+`app.has_capability` 检测。
 
-应用内 WebView 会在本服务沙箱 origin 和 `allowed_origins` 页面中注入：
+### 四类远程 origin
 
-```ts
-window.BjtuService.invoke(
-  method: string,
-  params?: Record<string, unknown>
-): Promise<{
-  ok: boolean;
-  data?: unknown;
-  error?: { code: string; message: string };
-}>;
+Manifest v3 不接受旧的聚合来源字段。每个列表只接受标准 origin，不得携带路径、查询、
+片段、用户名或密码。
+
+| 字段 | 作用 |
+| --- | --- |
+| `connect_origins` | 页面 `fetch`、XHR 等连接目标。 |
+| `media_origins` | 图片、音视频等媒体资源目标。 |
+| `frame_origins` | 远程 iframe 目标；还需 `remote.frame.v1`。 |
+| `navigation_origins` | 用户手势触发的系统浏览器或 Custom Tab 跳转。 |
+| `bridge_origins` | 必须严格等于 `["self"]`。 |
+
+公共制品只允许 HTTPS。开发者模式可为 localhost 使用 HTTP。普通 connect/media/frame
+来源禁止校园域名、私网、回环、链路本地和本地域名；校园访问必须走 `campus.request`。
+
+远程 iframe 必须声明：
+
+```html
+<iframe
+  src="https://example.com/embed"
+  sandbox="allow-scripts allow-forms allow-same-origin"
+></iframe>
 ```
 
-调用约定：
+宿主会在 document-start 再次收紧 sandbox。远程 frame 不获得原生桥、第三方 Cookie、
+顶层导航、下载、弹窗或多窗口能力。
 
-- `invoke` 返回 Promise。调用方必须检查 `ok`，不要假设接口一定成功。
-- 业务读取接口返回 `{ ok: true, data: ModuleEnvelope<T> }`。真正的业务数据在 `response.data.data`，不是 `response.data` 顶层。
-- 除 `app.http_request` 的兼容字段 `statusCode` 外，业务接口的请求参数和返回字段都使用 snake_case。
-- Kotlin 侧 JSON 配置为 `ignoreUnknownKeys = true`、`explicitNulls = false`、`JsonNamingStrategy.SnakeCase`、`encodeDefaults = true`。可空字段没有值时通常会被省略，而不是返回 `null`。
-- 字符串参数会 trim，空字符串按缺失处理。整数和布尔参数必须传 JSON number / boolean，`to`、`cc`、`bcc` 必须传字符串数组。
-- 未声明或未授权的权限不会触发真实校园接口访问；权限在服务授权页展示，用户批准后同一服务可调用已授权接口。`identity.get_credentials`、`academic.submit_homework` 和 `mail.send` 调用时需要宿主单次确认。
+## 发布者身份与稳定 origin
 
-示例：
+平台首次发布时固定：
+
+```text
+publisher_subject_id = github-owner:<GitHub numeric owner id>
+```
+
+插件稳定 sandbox host 只由插件 ID 和 publisher subject 的 SHA-256 截断值生成，不包含
+commit。仓库改名不会改变主体或 WebStorage origin。仓库转移 owner 会冻结更新；管理员
+批准后只更新当前 owner 绑定，原 publisher subject 保持不变。高级直链安装检测到 owner
+变化时拒绝原位更新。
+
+插件大厅 `/api/v2` 会展示 runtime、capability、四类 origin、publisher identity、
+验证级别和兼容状态。旧 `/api/v1` 仅保留迁移期只读目录能力。
+
+## Bridge protocol
+
+桥只在稳定本地 origin、main frame、精确 source origin 匹配时存在。客户端必须同时支持
+WebView `DOCUMENT_START_SCRIPT` 与 `WEB_MESSAGE_LISTENER`；缺一即显示兼容错误，不使用
+`onPageFinished` 注入回退。
+
+线上的每个请求统一为：
+
+```json
+{
+  "protocol_version": 1,
+  "request_id": "unique-request-id",
+  "method": "app.get_runtime_info",
+  "params": {}
+}
+```
+
+插件通常使用 document-start 注入的包装器：
 
 ```js
-const profileResult = await window.BjtuService.invoke('identity.get_profile');
-if (!profileResult.ok) {
-  throw new Error(profileResult.error.message);
-}
-const profile = profileResult.data.data;
-console.log(profile.name, profile.student_id);
+const runtime = await window.BjtuService.invoke('app.get_runtime_info', {});
+await window.BjtuService.invoke('app.ready', {});
+```
 
-const timetableResult = await window.BjtuService.invoke('academic.get_timetable');
-const timetable = timetableResult.ok ? timetableResult.data.data.entries : [];
+成功响应包含 `protocol_version`、`request_id`、`ok: true` 和 `data`。失败响应包含：
 
-const saved = await window.BjtuService.invoke('academic.save_user_course', {
-  course_name: '自习',
-  weekday: '周一',
-  weekday_index: 0,
-  period: '第1-2节',
-  period_number: 1,
-  start_week: 1,
-  end_week: 16,
-  duration_type: 'LongTerm',
-  location_text: '图书馆'
-});
-
-if (!saved.ok) {
-  console.warn(saved.error.code, saved.error.message);
-}
-
-const remote = await window.BjtuService.invoke('app.http_request', {
-  url: 'https://api.example.com/v1/items',
-  method: 'GET',
-  headers: {
-    Accept: 'application/json'
+```json
+{
+  "protocol_version": 1,
+  "request_id": "unique-request-id",
+  "ok": false,
+  "error": {
+    "code": "permission_denied",
+    "message": "Safe user-facing message",
+    "request_id": "unique-request-id",
+    "retryable": false,
+    "http_status": 403,
+    "details": {}
   }
+}
+```
+
+`http_status` 与 `details` 可省略，`details` 不包含凭据、Cookie、token 或个人通信数据。
+
+### Runtime 方法
+
+| 方法 | 参数 | 结果 |
+| --- | --- | --- |
+| `app.get_runtime_info` | `{}` | runtime/protocol/schema/data schema、publisher subject、支持的 capabilities。 |
+| `app.has_capability` | `{ capability }` | `declared`、`supported`、`available`。 |
+| `app.ready` | `{}` | `{ ready: true }`。 |
+| `app.get_configuration` | `{ key }` | 读取插件已声明且用户已保存的配置；需要 `app.configuration.read`。 |
+| `app.storage.get` | `{ key }` | JSON 值或 `null`。 |
+| `app.storage.set` | `{ key, value }` | 当前使用量。 |
+| `app.storage.remove` | `{ key }` | 是否删除。 |
+| `app.storage.keys` | `{}` | 排序后的 key 列表。 |
+| `app.storage.usage` | `{}` | byte/key 使用量与上限。 |
+| `app.storage.clear` | `{}` | `{ cleared: true }`。 |
+| `campus.request` | 见下节 | 受控校园响应。 |
+
+插件仍可使用既有细粒度领域 API，例如 `identity.get_profile`、
+`academic.get_timetable`、`academic.get_scores`、`academic.get_exams`、
+`academic.get_homework`、`academic.get_course_resources` 和只读邮件接口。写操作继续使用
+领域 API；`academic.submit_homework` 与 `mail.send` 每次都需要宿主确认，Agent 不会自动
+提交作业。
+
+Runtime 不提供读取明文登录凭据的 API，也不提供通用原生 HTTP bridge。第三方公网访问
+使用受 CSP 与 `connect_origins` 约束的浏览器 `fetch`。
+
+`app.get_configuration` 仅能读取当前插件 Manifest 已声明的 key，配置值保存在设备加密
+存储中，并受同一稳定本地 main-frame/source-origin 桥接边界约束；远程 frame 不得读取。
+
+## `app.storage`
+
+`app.storage` 按 publisher subject + plugin ID 隔离，值为 JSON：
+
+- 总配额 10 MiB；
+- 单项最大 256 KiB；
+- 最多 1024 keys；
+- Android Keystore AES-GCM 加密；
+- Mutex 串行化同一 namespace；
+- 临时文件、`fsync` 和原子替换。
+
+重要数据应写入 `app.storage`。LocalStorage/IndexedDB 会在稳定 origin 下跨 commit
+保留，但不进入数据回滚快照。
+
+提高 `data_schema_version` 时，migration entrypoint 在独立临时 origin 的隐藏
+WebView 中运行。它无网络、无校园权限，只能操作影子 KV，并必须在 30 秒内调用：
+
+```js
+await window.BjtuService.invoke('migration.commit', {});
+```
+
+成功提交后才切换包与数据；失败或超时会丢弃影子数据并恢复旧 KV。插件回滚会恢复上一
+包、Manifest、授权状态和 KV 快照。当前不提供外部文件导出；可移植 SAF 导入导出属于
+后续版本。
+
+## `campus.request`
+
+请求格式：
+
+```js
+const response = await window.BjtuService.invoke('campus.request', {
+  service_id: 'aa',
+  method: 'GET',
+  path: '/examine/examplanstudent/stulist/',
+  query: { term: '2026-2027-1' },
+  accept: 'application/json'
 });
-
-await window.BjtuService.invoke('app.close_service');
 ```
 
-## 6. 方法清单
+约束：
 
-| 方法 | 权限 | 参数 | 成功时 `data` |
-| --- | --- | --- | --- |
-| `identity.get_profile` | `identity.profile.read` | 无。 | `ModuleEnvelope<StudentProfileData>` |
-| `identity.get_credentials` | `identity.credentials.read` | 无。 | `{ login_name: string, loginName: string, student_id: string, studentId: string, account: string, password: string }`，其中 `password` 为已保存的明文密码。 |
-| `academic.get_timetable` | `academic.timetable.read` | 无。 | `ModuleEnvelope<TimetableData>` |
-| `academic.save_user_course` | `academic.user_courses.write` | `course_name` string、`weekday` string、`weekday_index` int、`period` string、`period_number` int、`start_week` int、`end_week` int 必填；可选 `id` number/string、`time_range` string、`weeks_text` string、`duration_type` `"Temporary" \| "LongTerm"`、`teacher` string、`location_text` string、`remark` string、`color_index` int。 | `{ id: number }` |
-| `academic.delete_user_course` | `academic.user_courses.write` | `id` number/string 必填。 | `{ deleted: true }` |
-| `academic.get_scores` | `academic.scores.read` | 可选 `term` string、`ctype` string。 | `ModuleEnvelope<ScoreData>` |
-| `academic.get_history_scores` | `academic.history_scores.read` | 可选 `term` string。 | `ModuleEnvelope<ScoreData>` |
-| `academic.get_exams` | `academic.exams.read` | 可选 `term` string。 | `ModuleEnvelope<ExamData>` |
-| `academic.get_calendar` | `academic.calendar.read` | 可选 `month` string。 | `ModuleEnvelope<CalendarData>` |
-| `academic.get_academic_progress` | `academic.progress.read` | 无。 | `ModuleEnvelope<AcademicProgressData>` |
-| `academic.get_homework` | `academic.homework.read` | 可选 `status` string，默认 `all`。内置过滤值：`all`、`open`、`done`、`expired`、`expired_can_submit`、`expired_closed`；其他值会与上游原始 `item.status` 精确匹配。 | `ModuleEnvelope<HomeworkData>` |
-| `academic.submit_homework` | `academic.homework.submit` | `homework_id` int、`course_id` int 必填；可选 `content` string。当前不接受第三方文件列表。 | `HomeworkSubmitResponse` |
-| `academic.get_course_resources` | `academic.course_resources.read` | 可选 `term` string、`course_id` string、`folder_id` string，默认 `0`、`search` string、`category_key` string。 | `ModuleEnvelope<CourseResourcesData>` |
-| `mail.list_folders` | `mail.folders.read` | 无。 | `ModuleEnvelope<MailFoldersData>` |
-| `mail.list_messages` | `mail.messages.read` | 可选 `folder_id` string，默认 `1`、`start` int，默认 `0`、`limit` int，默认 `20`，会限制在 1-100。 | `ModuleEnvelope<MailMessagesData>` |
-| `mail.get_message` | `mail.message_detail.read` | `message_id` string 必填；可选 `mboxa` string。 | `ModuleEnvelope<MailMessageDetail>` |
-| `mail.send` | `mail.send` | 可选 `compose_id` string、`account` string、`to` string[]、`cc` string[]、`bcc` string[]、`subject` string、`content` string、`body` string 兼容别名、`html_content` string、`is_html` boolean、`save_sent_copy` boolean，默认 `true`、`request_read_receipt` boolean，默认 `false`、`schedule_date` string、`show_one_rcpt` boolean，默认 `false`、`forbid_download` boolean，默认 `false`、`mboxa` string。当前不接受第三方附件列表。 | `MailComposeResponse` |
-| `app.get_configuration` | `app.configuration.read` | `key` string 必填，只能读取 manifest 声明的键，且只允许本地 sandbox origin 调用。 | string |
-| `app.http_request` | 无 | `url` string 必填；可选 `method` `"GET" \| "POST" \| "PUT" \| "DELETE"`，默认 `GET`、`data` JSON、`headers` object。 | `HttpBridgeResponse` |
-| `app.close_service` | 无 | 无。 | `{}`，随后关闭当前第三方服务并返回服务列表。 |
+- 仅 `GET`/`HEAD`；
+- 固定 15 秒超时；
+- 5 MiB 流式响应上限；
+- 只接受 registry 允许的 path、query key 和对应细粒度权限；
+- 宿主复用 `SessionManager`，但不会把 Cookie 或认证头暴露给插件；
+- 剥离 `Cookie`、`Set-Cookie`、认证头和不安全响应头；
+- 重定向越出当前注册服务立即失败。
 
-参数补充：
+首批 registry：
 
-- `academic.save_user_course` 会把 `weekday_index` 限制在 0-6、`period_number` 至少为 1、`start_week` / `end_week` 至少为 1 并自动排序、`color_index` 限制在 0-7。`duration_type` 缺失或非法时按 `Temporary` 处理。
-- `identity.get_credentials`、`academic.submit_homework` 和 `mail.send` 需要服务先获得对应权限，并在每次调用时由宿主完成单次确认。
-- `mail.send` 的 `to`、`cc`、`bcc` 是数组；传逗号分隔字符串不会被拆分。
-- `app.http_request` 的 `headers` 会过滤 `host`、`connection`、`content-length`、`transfer-encoding`、`accept-encoding`、`cookie`、`origin` 等敏感或运行时控制头。
-
-受控 HTTP 请求：
-
-- `app.http_request` 不需要权限 ID，但调用页面必须位于当前服务沙箱 origin 或 `allowed_origins` 中的 origin。
-- `url` 只能是 HTTP/HTTPS URL，且其 origin 必须已经写入 `allowed_origins`。
-- 非 `GET` 请求默认以 `application/json;charset=UTF-8` 发送 `data`；响应正文会优先解析为 JSON，解析失败则作为字符串返回。
-- 响应超过 5 MiB 会返回 `bridge_failed`。
-- 成功响应形状为 `{ ok: true, data: { statusCode, data, header } }`。这里的 `statusCode` 保持 WebView/uni-app 兼容命名，不转换为 snake_case。
-
-### 返回数据模型
-
-下面的类型是运行时 JSON 形状，字段已按 snake_case 展示。可空字段在没有值时可能被省略。
-
-```ts
-type CoverageLevel = 'verified' | 'provisional';
-
-type ModuleEnvelope<T> = {
-  module: string;
-  synced_at?: string;
-  source_system: string;
-  coverage: CoverageLevel;
-  source_params: Record<string, unknown>;
-  data: T;
-};
-
-type TermOption = {
-  value: string;
-  label: string;
-  selected: boolean;
-};
-
-type ProfileField = { label: string; value: string };
-type ProfileSection = { title: string; fields: ProfileField[] };
-
-type StudentProfileData = {
-  name?: string;
-  student_id?: string;
-  account?: string;
-  gender?: string;
-  birthday?: string;
-  name_pinyin?: string;
-  english_name?: string;
-  ethnicity?: string;
-  political_status?: string;
-  nationality?: string;
-  is_international_student?: string;
-  college?: string;
-  major?: string;
-  class_name?: string;
-  grade?: string;
-  education_level?: string;
-  has_student_status?: string;
-  student_status?: string;
-  student_category?: string;
-  change_status?: string;
-  cultivation_method?: string;
-  is_auditor?: string;
-  study_language?: string;
-  campus?: string;
-  phone?: string;
-  email?: string;
-  avatar_url?: string;
-  fields: ProfileField[];
-  sections: ProfileSection[];
-};
-
-type CourseEntry = {
-  weekday: string;
-  period: string;
-  time_range?: string;
-  course_code: string;
-  section?: string;
-  course_name: string;
-  teacher?: string;
-  weeks?: string;
-  campus?: string;
-  building?: string;
-  room?: string;
-  location_text?: string;
-  local_id?: number;
-  remark?: string;
-  color_index?: number;
-  is_user_created: boolean;
-};
-
-type TimetableData = {
-  days: string[];
-  periods: string[];
-  entries: CourseEntry[];
-  current_term?: string;
-  available_terms: TermOption[];
-};
-
-type ExamItem = {
-  term?: string;
-  course_name: string;
-  schedule?: string;
-  exam_mode?: string;
-  remark?: string;
-  registration?: string;
-  status?: string;
-};
-
-type ExamData = {
-  current_term?: string;
-  available_terms: TermOption[];
-  items: ExamItem[];
-};
-
-type ScoreItem = {
-  term?: string;
-  course_name: string;
-  credit?: string;
-  score?: string;
-  bonus_score?: string;
-  teacher?: string;
-  detail?: string;
-  detail_path?: string;
-};
-
-type ScoreData = {
-  current_term?: string;
-  available_terms: TermOption[];
-  items: ScoreItem[];
-};
-
-type CalendarItem = {
-  date: string;
-  week?: string;
-  note?: string;
-};
-
-type CalendarData = {
-  month: string;
-  current_week?: string;
-  current_term?: string;
-  available_terms: TermOption[];
-  items: CalendarItem[];
-};
-
-type CreditSummary = {
-  course_count: number;
-  passed_course_count: number;
-  failed_course_count: number;
-  attempted_credits: number;
-  passed_credits: number;
-  failed_credits: number;
-  target_credits?: number;
-  completion_rate: number;
-};
-
-type CreditBucket = {
-  name: string;
-  required_credits?: number;
-  earned_credits: number;
-  pending_credits?: number;
-  completion_rate?: number;
-  parent?: string;
-};
-
-type AcademicProgressCourse = {
-  term?: string;
-  course_code?: string;
-  course_name: string;
-  credit?: number;
-  exam_date?: string;
-  score?: string;
-  status: string;
-  detail?: string;
-  group_info?: string;
-  source: string;
-};
-
-type AcademicProgressData = {
-  current_term?: string;
-  summary: CreditSummary;
-  buckets: CreditBucket[];
-  merged_buckets: CreditBucket[];
-  detail_buckets: CreditBucket[];
-  courses: AcademicProgressCourse[];
-  replace_courses: Record<string, unknown>[];
-  fields: ProfileField[];
-};
-
-type CourseSummary = {
-  course_id: number;
-  course_name: string;
-  course_code?: string;
-  teacher_name?: string;
-  teacher_id?: string;
-  term?: string;
-  xq_code?: string;
-  xkh_id?: string;
-};
-
-type HomeworkAttachment = {
-  attachment_id: string;
-  filename: string;
-  url?: string;
-  size?: string;
-};
-
-type HomeworkItem = {
-  homework_id?: number;
-  course: string;
-  course_id: number;
-  course_code?: string;
-  title: string;
-  content_excerpt?: string;
-  requirement_text?: string;
-  opened_at?: string;
-  due_at?: string;
-  submitted_at?: string;
-  status: string;
-  sub_type: number;
-  submission_status?: string;
-  can_submit: boolean;
-  can_submit_explicit: boolean;
-  content_type: number;
-  is_group: boolean;
-  return_num: number;
-  attachments: HomeworkAttachment[];
-};
-
-type HomeworkData = {
-  current_term?: string;
-  courses: CourseSummary[];
-  items: HomeworkItem[];
-};
-
-type HomeworkSubmitResponse = {
-  status: string;
-  message?: string;
-  homework_id: number;
-  submitted_at?: string;
-  upstream: Record<string, unknown>;
-};
-
-type CourseResourceCategory = { key: string; label: string };
-
-type CourseResourceFolder = {
-  folder_id: string;
-  name: string;
-  parent_id?: string;
-  category_key: string;
-  category_label: string;
-};
-
-type CourseResourceItem = {
-  resource_id: string;
-  rp_id: string;
-  res_id?: string;
-  name: string;
-  extension?: string;
-  size?: string;
-  play_url?: string;
-  res_url?: string;
-  uploaded_at?: string;
-  teacher_name?: string;
-  download_count?: number;
-  click_count?: number;
-  can_download: boolean;
-  folder_id: string;
-  category_key: string;
-  category_label: string;
-};
-
-type CourseResourcesData = {
-  current_term?: string;
-  courses: CourseSummary[];
-  selected_course_id?: number;
-  folder_id: string;
-  categories: CourseResourceCategory[];
-  selected_category_key: string;
-  tree: CourseResourceFolder[];
-  folders: CourseResourceFolder[];
-  resources: CourseResourceItem[];
-};
-
-type MailFolder = {
-  folder_id: string;
-  name: string;
-  message_count: number;
-  unread_count: number;
-  message_size: number;
-  unread_size: number;
-  system: boolean;
-};
-
-type MailMessageSummary = {
-  message_id: string;
-  folder_id: string;
-  subject: string;
-  from_text: string;
-  to_text: string;
-  sender?: string;
-  sent_at?: string;
-  received_at?: string;
-  modified_at?: string;
-  size: number;
-  read: boolean;
-  attached: boolean;
-  priority?: number;
-  summary?: string;
-};
-
-type MailAttachment = {
-  attachment_id: string;
-  filename: string;
-  content_type?: string;
-  size: number;
-  part: string;
-};
-
-type MailMessageDetail = MailMessageSummary & {
-  from_list: string[];
-  to_list: string[];
-  cc_list: string[];
-  bcc_list: string[];
-  html_content: string;
-  headers: Record<string, unknown>;
-  attachments: MailAttachment[];
-};
-
-type MailFoldersData = { folders: MailFolder[] };
-
-type MailMessagesData = {
-  folder_id: string;
-  start: number;
-  limit: number;
-  total: number;
-  messages: MailMessageSummary[];
-};
-
-type MailComposeResponse = {
-  status: string;
-  compose_id: string;
-  draft_id?: string;
-  sent_message_id?: string;
-  upstream: Record<string, unknown>;
-};
-
-type HttpBridgeResponse = {
-  statusCode: number;
-  data: unknown;
-  header: Record<string, string>;
-};
-```
-
-## 7. 错误码
-
-| 错误码 | 含义 |
+| service | 范围 |
 | --- | --- |
-| `service_not_enabled` | 服务尚未完成授权或更新后需要重新确认。 |
-| `unknown_method` | 接口不存在或方法名拼写错误。 |
-| `permission_denied` | 服务未获得该接口对应权限。 |
-| `api_failed` | 底层 BJTU MIS、教学服务或邮箱接口失败，或业务接口参数缺失、类型不正确。 |
-| `bridge_failed` | WebView 桥接请求格式错误、当前页面不在允许执行来源内、HTTP 桥接校验失败、HTTP 响应超过 5 MiB 或运行时异常。 |
+| `mis` | 仅 `/home/`，需要 `identity.profile.read`。 |
+| `aa` | 已验证的课表、考试、成绩、学籍和学业进度只读路径。 |
+| `ve` | 已验证的课程、作业列表、资源、回放和用户信息 path+method 组合。 |
 
-## 8. 安全限制
+Coremail、知行、就业和全部写操作不在 registry 中。
 
-- WebView 通过每服务隔离的虚拟 HTTPS origin 加载已安装插件目录内的资源，例如 `https://<service-sandbox-id>.third-party.bjtu-mis.local/`。该 origin 只映射当前服务安装目录，并支持缺失页面路径回落到入口文件以适配 SPA history 路由。
-- WebView 允许加载 manifest 中声明的 HTTP/HTTPS origin；这些 origin 同时作为执行来源和联网来源使用。
-- `app.http_request` 的目标 origin 必须在 manifest 的 `allowed_origins` 中声明。
-- 其他未声明 HTTP/HTTPS origin、content URL 和未声明本地路径会被拦截。
-- 禁止通过 manifest 声明带路径、查询参数、片段、用户名或非 HTTP/HTTPS 协议的外联地址。
-- 下载包最大 25 MiB，解压后最大 50 MiB，最多 1000 个文件。
-- Zip 包和 manifest 路径不能包含路径穿越、绝对路径或反斜杠。
-- 插件更新会清空授权并进入重新确认状态。
-- 导入确认页会展示 commitSha、内容 digest、权限和允许执行/联网来源。
-- `identity.credentials.read` 对应的 `identity.get_credentials` 会在宿主单次确认后返回本机已保存的登录名和明文密码。
+## 生命周期与环境
 
-## 9. 发布检查清单
+window 事件名为 `pause`、`resume`、`back`、`theme`、`resize`、`network`；为兼容包装器，
+宿主同时发送 `bjtu:<name>`。事件 `detail` 提供：
 
-- 仓库为公开 GitHub 仓库，导入链接只使用仓库根地址。
-- `bjtu-service.json` 位于仓库根目录，字段完整且通过 schema 校验。
-- `dist/` 包含入口文件、图标和所有静态资源。
-- 已运行 `node tools/third-party-service-lint.cjs <plugin-root>`。
-- 仅声明实际需要的权限，优先把非关键能力放到 `optional`。
-- 只在 `allowed_origins` 中声明运行时确实需要加载的页面、iframe、接口或资源 origin。
-- 所有 API 调用都处理 `ok: false` 和常用错误码。
-- 页面在窄屏下可用，表格、按钮、长文本和代码片段不会遮挡内容。
-- 不要把真实校园账号、Cookie、token、邮箱内容、验证码或个人隐私写入代码或示例数据。
+- viewport 宽高、density、安全区和 IME 高度；
+- 方向与 font scale；
+- light/dark 主题、减少动态、高对比度；
+- online、validated、metered 与网络 transport。
+
+`back` 可取消：
+
+```js
+window.addEventListener('back', (event) => {
+  if (closeDialogIfOpen()) event.preventDefault();
+});
+```
+
+150 ms 内未消费时，宿主回退 Web 历史；没有历史则关闭插件。
+
+## WebView 安全基线
+
+- `MIXED_CONTENT_NEVER_ALLOW`；
+- 关闭第三方 Cookie、文件访问、content 访问、多窗口和下载；
+- 每个本地响应设置 CSP、Permissions-Policy、`nosniff` 和 Referrer-Policy；
+- CSP 分别绑定 connect/media/frame；
+- WebViewClient 阻止任何远程 main-frame 导航；
+- `navigation_origins` 只允许用户手势打开外部浏览器；
+- bridge 消息必须来自 main frame 和精确稳定 origin。
+
+## 更新、迁移、回滚与删除
+
+- 更新保留仍被声明且已授予的权限；
+- 删除的权限自动撤销；
+- 新增权限与 origin 仅展示差异；
+- 用户拒绝新增 required 权限时不切换版本；
+- 始终保留上一版本包和 KV 快照；
+- 删除插件会清理 KV、配置、快照、包和稳定 origin WebStorage；
+- 物理清理失败会在 Room 中留下 tombstone，并在下次启动幂等重试；
+- legacy 救援数据只在用户明确删除插件时清理。
+
+## 发布检查清单
+
+- Manifest 为 v3，版本使用 SemVer，`bridge_origins` 严格为 `["self"]`。
+- `dist/` 自包含所有可执行脚本；不加载远程 JavaScript。
+- origin 按用途最小声明，公开制品只使用 HTTPS。
+- 远程 iframe 使用规定 sandbox 且声明 `remote.frame.v1`。
+- 重要数据使用 `app.storage`，schema 提升包含可重复执行的 migration。
+- 所有 bridge 调用处理结构化错误和 `retryable`。
+- 未写入真实校园账号、密码、Cookie、token、邮件、验证码或个人信息。
+- 已运行共享 lint、平台测试和 Android 对应测试。
