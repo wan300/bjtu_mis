@@ -11,6 +11,42 @@ permissions:
   contents: read
 
 jobs:
+  tooling:
+    name: Contract generation, SDK, CLI and package determinism
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: plugin-tooling/package-lock.json
+      - name: Install tooling dependencies
+        working-directory: plugin-tooling
+        run: npm ci
+      - name: Reject generated contract drift
+        working-directory: plugin-tooling
+        run: npm run generate:check
+      - name: Typecheck SDK and CLI
+        working-directory: plugin-tooling
+        run: npm run typecheck
+      - name: Run SDK, CLI, Mock and generator tests
+        working-directory: plugin-tooling
+        run: npm test
+      - name: Verify deterministic npm and plugin packages
+        working-directory: plugin-tooling
+        run: npm run pack:check
+      - name: Verify shared schemas are byte-identical
+        run: |
+          cmp docs/third-party-service-manifest.schema.json web/assets/schemas/third-party-service-manifest.schema.json
+          cmp docs/bjtu-marketplace.schema.json web/assets/schemas/bjtu-marketplace.schema.json
+      - name: Lint contract_v1 source fixtures
+        run: |
+          node tools/third-party-service-lint.cjs plugin-tooling/packages/plugin-cli/template --source --marketplace --dev
+          node tools/third-party-service-lint.cjs third-party-plugins/templates/basic --source --marketplace
+          node tools/third-party-service-lint.cjs third-party-plugins/examples/profile-timetable --source --marketplace
+          node tools/third-party-service-lint.cjs third-party-plugins/examples/remote-origin-demo --source --marketplace
+
   platform:
     name: Node 22 platform, schema, integration and e2e
     runs-on: ubuntu-latest
@@ -52,14 +88,6 @@ jobs:
       - name: API e2e tests
         working-directory: web/platform
         run: npm run test:e2e
-      - name: Verify shared schemas are byte-identical
-        run: cmp docs/third-party-service-manifest.schema.json web/assets/schemas/third-party-service-manifest.schema.json
-      - name: Lint bundled Manifest v3 packages
-        run: |
-          node tools/third-party-service-lint.cjs third-party-plugins/templates/basic
-          node tools/third-party-service-lint.cjs third-party-plugins/examples/profile-timetable
-          node tools/third-party-service-lint.cjs third-party-plugins/examples/remote-origin-demo
-
   android-jvm:
     name: Android JVM baseline
     runs-on: ubuntu-latest
@@ -77,7 +105,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Run Android JVM tests
         working-directory: android
-        run: ./gradlew :app:testDebugUnitTest
+        run: ./gradlew test
+      - name: Compile WebView instrumentation and release runtime
+        working-directory: android
+        run: ./gradlew :app:compileDebugAndroidTestKotlin :app:compileReleaseKotlin
 
   android-instrumentation:
     name: Android WebView instrumentation API ${{ matrix.api-level }}

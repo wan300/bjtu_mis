@@ -68,7 +68,7 @@
 - Testable parser/provider/repository/Agent tool changes:
 - Minimal dependencies and clean artifacts:
 - ExecPlan requirement for high-risk changes:
-- Manifest v3 / P0-A zero-trust baseline:
+- Manifest v3 / contract_v1 zero-trust baseline:
 
 ## Acceptance Criteria
 

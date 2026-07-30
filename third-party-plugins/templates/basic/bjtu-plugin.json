@@ -1,0 +1,13 @@
+{
+  "schema_version": 3,
+  "id": "bjtu.template.basic",
+  "name": "Basic Template",
+  "version": "1.0.0",
+  "entrypoint": "index.html",
+  "icon": "icon.svg",
+  "capabilities": {
+    "required": ["runtime.lifecycle@1"],
+    "optional": ["storage.kv@2"]
+  },
+  "data_schema_version": 1
+}

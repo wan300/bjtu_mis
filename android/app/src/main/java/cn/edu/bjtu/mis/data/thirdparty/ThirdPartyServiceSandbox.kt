@@ -7,6 +7,7 @@ import java.util.Locale
 
 private const val SandboxParentDomain = "third-party.bjtu-mis.local"
 private const val SandboxHashLength = 16
+private const val ResourcePathPrefix = "/__bjtu/resources/"
 
 data class ThirdPartySandboxLocalResource(
     val file: File,
@@ -41,6 +42,27 @@ object ThirdPartyServiceSandbox {
 
     fun entrypointUrlFor(service: ThirdPartyService): String =
         originFor(service.serviceId, service.publisherSubjectId) + encodedAbsolutePath(service.manifest.entrypoint)
+
+    fun resourceUrlFor(service: ThirdPartyService, handle: String): String {
+        require(handle.matches(Regex("^(?:blob|cache)-[a-f0-9]{64}$"))) {
+            "Invalid resource handle"
+        }
+        return originFor(service.serviceId, service.publisherSubjectId) +
+            ResourcePathPrefix +
+            handle
+    }
+
+    fun resourceHandleFor(
+        url: String?,
+        serviceId: String,
+        publisherSubjectId: String,
+    ): String? {
+        if (!isServiceSandboxUrl(url, serviceId, publisherSubjectId)) return null
+        val path = parseUrl(url)?.path.orEmpty()
+        if (!path.startsWith(ResourcePathPrefix)) return null
+        return path.removePrefix(ResourcePathPrefix)
+            .takeIf { it.matches(Regex("^(?:blob|cache)-[a-f0-9]{64}$")) }
+    }
 
     fun isServiceSandboxUrl(url: String?, serviceId: String, publisherSubjectId: String): Boolean {
         val uri = parseUrl(url) ?: return false

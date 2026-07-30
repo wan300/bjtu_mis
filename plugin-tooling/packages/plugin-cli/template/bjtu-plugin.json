@@ -1,0 +1,13 @@
+{
+  "schema_version": 3,
+  "id": "io.example.demo",
+  "name": "BJTU Plugin Demo",
+  "version": "1.0.0",
+  "entrypoint": "index.html",
+  "icon": "icon.svg",
+  "capabilities": {
+    "required": [
+      "runtime.lifecycle@1"
+    ]
+  }
+}

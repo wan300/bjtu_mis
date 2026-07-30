@@ -18,6 +18,7 @@ interface ClaimedJob {
   repo_owner: string;
   repo_name: string;
   encrypted_oauth_token: string;
+  contract_profile: string;
 }
 
 interface GitHubRepository {
@@ -47,6 +48,7 @@ interface ExistingRepositoryBinding {
   publisher_owner_id: string | null;
   latest_schema_version: number | null;
   latest_compatibility_state: string | null;
+  latest_contract_profile: string | null;
 }
 
 export interface PublisherBindingDecision {
@@ -55,7 +57,12 @@ export interface PublisherBindingDecision {
 }
 
 export function validateVersionTransition(
-  current: { version: string; schemaVersion: number; dataSchemaVersion: number } | null,
+  current: {
+    version: string;
+    schemaVersion: number;
+    dataSchemaVersion: number;
+    contractProfile?: string;
+  } | null,
   next: { version: string; dataSchemaVersion: number; migrationEntrypoint: string }
 ): void {
   if (!current) return;
@@ -100,7 +107,7 @@ async function claimJob(db: Database): Promise<ClaimedJob | null> {
   return transaction(db, async (client) => {
     const result = await client.query<ClaimedJob>(`
       SELECT j.id AS job_id, s.id AS submission_id, s.user_id, s.source_url, s.repo_owner, s.repo_name,
-             u.encrypted_oauth_token
+             u.encrypted_oauth_token, s.contract_profile
       FROM validation_jobs j
       JOIN submissions s ON s.id = j.submission_id
       JOIN users u ON u.id = s.user_id
@@ -156,6 +163,7 @@ async function latestVersion(client: pg.PoolClient, pluginId: string): Promise<{
   commit_sha: string;
   manifest_schema_version: number;
   data_schema_version: number;
+  contract_profile: string;
 } | null> {
   const result = await client.query<{
     id: string;
@@ -163,8 +171,10 @@ async function latestVersion(client: pg.PoolClient, pluginId: string): Promise<{
     commit_sha: string;
     manifest_schema_version: number;
     data_schema_version: number;
+    contract_profile: string;
   }>(`
-    SELECT v.id, v.version, v.commit_sha, v.manifest_schema_version, v.data_schema_version
+    SELECT v.id, v.version, v.commit_sha, v.manifest_schema_version, v.data_schema_version,
+      v.contract_profile
     FROM plugins p JOIN plugin_versions v ON v.id = p.latest_version_id
     WHERE p.plugin_id=$1
   `, [pluginId]);
@@ -251,6 +261,14 @@ export async function publishStagedFile(sourcePath: string, targetPath: string):
 export async function runOneValidation(db: Database, config: PlatformConfig): Promise<boolean> {
   const job = await claimJob(db);
   if (!job) return false;
+  if (job.contract_profile !== 'contract_v1') {
+    await markFailure(
+      db,
+      job,
+      new Error('旧 /api/v2 投稿队列已冻结；请迁移为 bjtu-plugin.json 后通过 /api/v3 重新投稿')
+    );
+    return true;
+  }
   const workRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'bjtu-plugin-validation-'));
   const sourceZip = path.join(workRoot, 'source.zip');
   const stagedArtifact = path.join(workRoot, 'artifact.zip');
@@ -261,7 +279,8 @@ export async function runOneValidation(db: Database, config: PlatformConfig): Pr
       SELECT p.plugin_id, p.repo_owner, p.repo_name, p.default_branch, p.source_etag,
         p.github_repository_id, p.publisher_owner_id,
         v.commit_sha AS latest_commit, v.manifest_schema_version AS latest_schema_version,
-        v.compatibility_state AS latest_compatibility_state
+        v.compatibility_state AS latest_compatibility_state,
+        v.contract_profile AS latest_contract_profile
       FROM plugins p LEFT JOIN plugin_versions v ON v.id=p.latest_version_id
       WHERE lower(p.repo_owner)=lower($1) AND lower(p.repo_name)=lower($2)
     `, [job.repo_owner, job.repo_name]);
@@ -288,7 +307,8 @@ export async function runOneValidation(db: Database, config: PlatformConfig): Pr
         SELECT p.plugin_id, p.repo_owner, p.repo_name, p.default_branch, p.source_etag,
           p.github_repository_id, p.publisher_owner_id,
           v.commit_sha AS latest_commit, v.manifest_schema_version AS latest_schema_version,
-          v.compatibility_state AS latest_compatibility_state
+          v.compatibility_state AS latest_compatibility_state,
+          v.contract_profile AS latest_contract_profile
         FROM plugins p LEFT JOIN plugin_versions v ON v.id=p.latest_version_id
         WHERE p.github_repository_id=$1
       `, [githubRepositoryId]);
@@ -319,7 +339,8 @@ export async function runOneValidation(db: Database, config: PlatformConfig): Pr
     if (!/^[a-f0-9]{40}$/i.test(commitSha)) throw new Error('GitHub 返回的 commit SHA 无效');
     if (existingRepo?.latest_commit === commitSha &&
       existingRepo.latest_schema_version === 3 &&
-      existingRepo.latest_compatibility_state === 'compatible') {
+      existingRepo.latest_compatibility_state === 'compatible' &&
+      existingRepo.latest_contract_profile === 'contract_v1') {
       await finishNoChange(
         db,
         job,
@@ -387,7 +408,8 @@ export async function runOneValidation(db: Database, config: PlatformConfig): Pr
         current && {
           version: current.version,
           schemaVersion: current.manifest_schema_version,
-          dataSchemaVersion: current.data_schema_version
+          dataSchemaVersion: current.data_schema_version,
+          contractProfile: current.contract_profile
         },
         {
           version,
@@ -403,8 +425,8 @@ export async function runOneValidation(db: Database, config: PlatformConfig): Pr
     const finalIcon = path.join(artifactDirectory, `icon${iconExtension}`);
     const versionId = id();
     const publisherSubjectId = pluginBinding.publisherSubjectId;
-    const runtimeVersion = manifestInteger(validated.manifest, 'runtime_version');
-    const minRuntimeVersion = manifestInteger(validated.manifest, 'min_runtime_version');
+    const runtimeVersion = validated.runtimeFloor;
+    const minRuntimeVersion = validated.runtimeFloor;
     let staleFiles: string[] = [];
     try {
       await fs.rm(artifactDirectory, { recursive: true, force: true });
@@ -439,12 +461,15 @@ export async function runOneValidation(db: Database, config: PlatformConfig): Pr
           INSERT INTO plugin_versions(id, plugin_id, version, commit_sha, manifest_json, warnings_json,
             archive_sha256, package_digest_sha256, package_bytes, package_file_count, artifact_path, icon_path,
             manifest_schema_version, runtime_version, min_runtime_version, data_schema_version,
-            compatibility_state, verification_level)
-          VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'compatible','automated')
+            compatibility_state, verification_level, contract_profile, runtime_floor,
+            capabilities_json, marketplace_json, manifest_file_name)
+          VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+            'compatible','automated',$17,$18,$19::jsonb,$20::jsonb,'bjtu-plugin.json')
         `, [versionId, pluginId, version, commitSha, JSON.stringify(validated.manifest), JSON.stringify(validated.warnings),
           validated.archiveSha256, validated.packageDigestSha256, validated.archiveBytes,
           validated.packageFileCount, finalArtifact, finalIcon, 3, runtimeVersion,
-          minRuntimeVersion, dataSchemaVersion]);
+          minRuntimeVersion, dataSchemaVersion, validated.contractProfile, validated.runtimeFloor,
+          JSON.stringify(validated.capabilities), JSON.stringify(validated.marketplace)]);
         await client.query("UPDATE submissions SET status='published', plugin_id=$2, commit_sha=$3, error_text=NULL, updated_at=now() WHERE id=$1", [job.submission_id, pluginId, commitSha]);
         await client.query("UPDATE validation_jobs SET status='completed', finished_at=now(), diagnostics_json=$2::jsonb WHERE id=$1", [job.job_id, JSON.stringify({ warnings: validated.warnings })]);
         await client.query("INSERT INTO audit_log(id, actor_user_id, action, plugin_id, metadata_json) VALUES($1,$2,'version_published',$3,$4::jsonb)", [id(), job.user_id, pluginId, JSON.stringify({ version, commitSha })]);
@@ -468,7 +493,9 @@ export async function enqueueDueRevalidations(db: Database, config: PlatformConf
   const due = await db.query<{ plugin_id: string; submitter_user_id: string; source_url: string; repo_owner: string; repo_name: string }>(`
     SELECT p.plugin_id, p.submitter_user_id, p.source_url, p.repo_owner, p.repo_name
     FROM plugins p
+    JOIN plugin_versions v ON v.id=p.latest_version_id
     WHERE p.status='published' AND NOT p.admin_suspended
+      AND v.contract_profile='contract_v1'
       AND (p.last_checked_at IS NULL OR p.last_checked_at < now() - ($1 || ' minutes')::interval)
       AND NOT EXISTS (
         SELECT 1 FROM submissions s JOIN validation_jobs j ON j.submission_id=s.id
@@ -480,8 +507,16 @@ export async function enqueueDueRevalidations(db: Database, config: PlatformConf
   for (const plugin of due.rows) {
     await transaction(db, async (client) => {
       const submissionId = id();
-      await client.query(`INSERT INTO submissions(id,user_id,source_url,repo_owner,repo_name,status,plugin_id)
-        VALUES($1,$2,$3,$4,$5,'queued',$6)`, [submissionId, plugin.submitter_user_id, plugin.source_url, plugin.repo_owner, plugin.repo_name, plugin.plugin_id]);
+      await client.query(`INSERT INTO submissions(
+          id,user_id,source_url,repo_owner,repo_name,status,plugin_id,contract_profile
+        ) VALUES($1,$2,$3,$4,$5,'queued',$6,'contract_v1')`, [
+        submissionId,
+        plugin.submitter_user_id,
+        plugin.source_url,
+        plugin.repo_owner,
+        plugin.repo_name,
+        plugin.plugin_id
+      ]);
       await client.query("INSERT INTO validation_jobs(id,submission_id,status) VALUES($1,$2,'queued')", [id(), submissionId]);
       await client.query('UPDATE plugins SET last_checked_at=now() WHERE plugin_id=$1', [plugin.plugin_id]);
     });

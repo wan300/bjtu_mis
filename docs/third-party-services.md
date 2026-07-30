@@ -1,313 +1,305 @@
-# BJTU MIS 第三方插件 Manifest v3
+# BJTU MIS Web 插件 Manifest v3 / contract_v1
 
-> **权威安全基线**：本文与
-> `docs/third-party-service-manifest.schema.json`、constitution 原则 VII 共同定义当前插件
-> 安全策略，并覆盖此前所有 Manifest v1/v2、聚合 origin、凭据读取桥和通用原生 HTTP
-> 桥设计。旧 spec、plan、API 或迁移说明仅用于历史追踪和无桥数据救援，不具备重新启用
-> 旧策略的规范效力。
+本文件描述当前唯一可安装、更新和运行的第三方插件契约。Capability 的权威机器可读
+来源是
+[`plugin-tooling/contracts/capability-contracts.json`](../plugin-tooling/contracts/capability-contracts.json)；
+Manifest、marketplace schema、TypeScript 类型、Kotlin descriptor/router/validator 和
+[Capability API 参考](generated/plugin-capability-api.md)均由它确定性生成。
 
-BJTU MIS Android 的第三方插件是安装在应用私有目录中的静态 H5/SPA 包。Manifest v3
-把插件身份、WebView 信任边界、runtime 能力、数据迁移和校园会话访问拆成独立契约。
+旧 Manifest v1/v2 与 P0-A v3（`bjtu-service.json`）不会获得桥或网络，只能在救援入口
+导出数据。P0-A 仅能在 publisher subject、plugin ID 和数据 schema 兼容时原位升级为
+contract_v1；回滚到 P0-A 也只会恢复救援状态。
 
-新客户端只安装、更新和运行 Manifest v3。v1/v2 插件会标记为
-`legacy_disabled`；旧包和旧 WebStorage 不会自动删除，用户可从无桥、无网络的只读救援
-入口查看数据或明确删除插件。
+## 1. 快速开始
 
-## 快速开始
+仓库内工具链包含 `@bjtu-mis/plugin-sdk`、`@bjtu-mis/plugin-cli` 和
+`create-bjtu-plugin`，本轮不发布到 npm。开发仓库中的构建方式：
 
-仓库根目录必须包含：
+```powershell
+Set-Location plugin-tooling
+npm ci
+npm run build
+node packages/create-bjtu-plugin/dist/index.js my-plugin --id io.example.demo
+Set-Location my-plugin
+npm install
+npm run dev
+```
+
+生成模板是 Vanilla TypeScript + Vite。浏览器开发模式使用 Mock Host；安装 debug APK
+并配置 `adb` 后，可在插件目录运行：
+
+```powershell
+bjtu dev --android
+```
+
+该命令只向 debug 包的显式 receiver 开启当前插件的联调 transport，配置
+`adb reverse`，并在退出时撤销。HTTP 与 HMR WebSocket 都经稳定插件 origin 转发到
+loopback；release source set 不包含 receiver 或 transport。`bjtu-plugin.dev.json`
+只允许保存 Mock/HMR 配置，禁止进入发布包。
+
+## 2. 包结构
 
 ```text
-bjtu-service.json
+bjtu-plugin.json
+bjtu-marketplace.json       # 大厅投稿必需；GitHub 直链安装可省略
+bjtu-plugin.dev.json        # 仅本地开发；不得打包
 dist/
   index.html
   icon.svg
+  assets/
 ```
 
-复制 `third-party-plugins/templates/basic/` 后运行：
+`entrypoint`、`icon`、migration entrypoint 和截图路径都相对于 `dist/`。发布包只包含
+`bjtu-plugin.json`、可选的 `bjtu-marketplace.json` 和 `dist/`。
 
-```powershell
-node tools/third-party-service-lint.cjs third-party-plugins/templates/basic
-```
+## 3. 精简 Manifest
 
-公开投稿只接受 GitHub 公开仓库和 Manifest v3。平台固定解析仓库当前 commit，计算源归档
-SHA-256 与 `dist/` 内容 digest，并记录 GitHub owner 的不可变数值 ID。
-
-## Manifest
-
-最小示例：
+`bjtu-plugin.json` 示例：
 
 ```json
 {
   "schema_version": 3,
-  "runtime_version": 1,
-  "min_runtime_version": 1,
-  "required_capabilities": ["runtime.lifecycle.v1"],
-  "optional_capabilities": ["storage.kv.v1"],
-  "data_schema_version": 1,
-  "id": "bjtu.example.demo",
+  "id": "io.example.demo",
   "name": "Demo",
-  "description": "Manifest v3 example.",
   "version": "1.0.0",
   "entrypoint": "index.html",
   "icon": "icon.svg",
-  "author": "Example",
-  "permissions": {
-    "required": [],
-    "optional": []
+  "capabilities": {
+    "required": ["runtime.lifecycle@1", "network.request@1"],
+    "optional": ["storage.blob@1"]
   },
-  "connect_origins": [],
-  "media_origins": [],
-  "frame_origins": [],
-  "navigation_origins": [],
-  "bridge_origins": ["self"],
-  "marketplace": {
-    "category": "other",
-    "tags": ["example"],
-    "license": "MIT"
+  "origins": {
+    "connect": ["https://api.example.com"],
+    "media": ["https://cdn.example.com"]
   },
-  "configuration": []
+  "data_schema_version": 1
 }
 ```
 
-`migration_entrypoint` 是可选的 `dist/` 内相对路径。提高
-`data_schema_version` 时必须提供它；版本不得降低。
+规则：
 
-### Runtime capability
+- `runtime.lifecycle@1` 必须是 required Capability。
+- optional Capability 首次安装默认关闭，用户授权后才可用。
+- 空 `origins`、`configuration` 和 `capabilities.optional` 必须省略。
+- `origins` 按 `connect`、`media`、`frame`、`navigation` 分离；公开包只接受标准 HTTPS
+  origin，不接受路径、通配符、校园域名、私网、回环或链路本地地址。
+- `origins.frame` 需要 `remote.frame@1`。远程 frame 永远无原生桥。
+- 使用 `storage.kv@2` 或 `storage.blob@1` 时必须声明正整数
+  `data_schema_version`；版本增加时必须提供 `migration_entrypoint`。
+- `permissions`、`runtime_version`、`min_runtime_version`、`bridge_origins`、内嵌
+  marketplace 信息及 P0-A 的平铺 capability/origin 字段全部禁止。
 
-| capability | 用途 |
-| --- | --- |
-| `runtime.lifecycle.v1` | Runtime 信息、ready 握手和环境生命周期事件。 |
-| `storage.kv.v1` | 加密、配额化、可迁移的 `app.storage`。 |
-| `campus.request.v1` | 通过宿主会话访问校园只读 registry。 |
-| `remote.frame.v1` | 加载声明过的受限远程 iframe。 |
+完整结构见
+[`third-party-service-manifest.schema.json`](third-party-service-manifest.schema.json)。
 
-必需 capability 不受 runtime 支持时插件不兼容；可选 capability 应在调用前通过
-`app.has_capability` 检测。
+## 4. Marketplace 元数据
 
-### 四类远程 origin
-
-Manifest v3 不接受旧的聚合来源字段。每个列表只接受标准 origin，不得携带路径、查询、
-片段、用户名或密码。
-
-| 字段 | 作用 |
-| --- | --- |
-| `connect_origins` | 页面 `fetch`、XHR 等连接目标。 |
-| `media_origins` | 图片、音视频等媒体资源目标。 |
-| `frame_origins` | 远程 iframe 目标；还需 `remote.frame.v1`。 |
-| `navigation_origins` | 用户手势触发的系统浏览器或 Custom Tab 跳转。 |
-| `bridge_origins` | 必须严格等于 `["self"]`。 |
-
-公共制品只允许 HTTPS。开发者模式可为 localhost 使用 HTTP。普通 connect/media/frame
-来源禁止校园域名、私网、回环、链路本地和本地域名；校园访问必须走 `campus.request`。
-
-远程 iframe 必须声明：
-
-```html
-<iframe
-  src="https://example.com/embed"
-  sandbox="allow-scripts allow-forms allow-same-origin"
-></iframe>
-```
-
-宿主会在 document-start 再次收紧 sandbox。远程 frame 不获得原生桥、第三方 Cookie、
-顶层导航、下载、弹窗或多窗口能力。
-
-## 发布者身份与稳定 origin
-
-平台首次发布时固定：
-
-```text
-publisher_subject_id = github-owner:<GitHub numeric owner id>
-```
-
-插件稳定 sandbox host 只由插件 ID 和 publisher subject 的 SHA-256 截断值生成，不包含
-commit。仓库改名不会改变主体或 WebStorage origin。仓库转移 owner 会冻结更新；管理员
-批准后只更新当前 owner 绑定，原 publisher subject 保持不变。高级直链安装检测到 owner
-变化时拒绝原位更新。
-
-插件大厅 `/api/v2` 会展示 runtime、capability、四类 origin、publisher identity、
-验证级别和兼容状态。旧 `/api/v1` 仅保留迁移期只读目录能力。
-
-## Bridge protocol
-
-桥只在稳定本地 origin、main frame、精确 source origin 匹配时存在。客户端必须同时支持
-WebView `DOCUMENT_START_SCRIPT` 与 `WEB_MESSAGE_LISTENER`；缺一即显示兼容错误，不使用
-`onPageFinished` 注入回退。
-
-线上的每个请求统一为：
+`bjtu-marketplace.json` 示例：
 
 ```json
 {
-  "protocol_version": 1,
-  "request_id": "unique-request-id",
-  "method": "app.get_runtime_info",
-  "params": {}
+  "description": "A small demonstration plugin.",
+  "author": "Example Team",
+  "category": "other",
+  "tags": ["demo"],
+  "license": "MIT",
+  "screenshots": [
+    { "src": "screenshots/home.webp", "alt": "Home screen" }
+  ]
 }
 ```
 
-插件通常使用 document-start 注入的包装器：
+大厅投稿必须提供描述、作者、分类和标签；schema 位于
+[`bjtu-marketplace.schema.json`](bjtu-marketplace.schema.json)。
 
-```js
-const runtime = await window.BjtuService.invoke('app.get_runtime_info', {});
-await window.BjtuService.invoke('app.ready', {});
+## 5. Capability 与 SDK
+
+稳定 Capability 覆盖 lifecycle、configuration、remote frame、外部导航、身份、教务、
+邮件读取和只读 `campus.request@1`。beta Capability 包括：
+
+- `network.request@1`
+- `storage.kv@2`
+- `storage.blob@1`
+- `cache.resource@1`
+- `academic.userCourses.command@1`
+- `academic.homework.submit@1`
+- `mail.send@1`
+
+精确方法、请求/响应 schema、权限、确认、幂等、配额、超时、错误和平台支持范围见
+[生成的 API 参考](generated/plugin-capability-api.md)。
+
+插件只使用 SDK 命名空间，不直接访问 transport：
+
+```ts
+import { BjtuPluginError, createBjtuPluginSdk } from '@bjtu-mis/plugin-sdk';
+
+const bjtu = createBjtuPluginSdk();
+const host = await bjtu.runtime.handshake();
+await bjtu.runtime.ready();
+
+const profile = await bjtu.campus.getProfile();
+console.log(profile.data, profile.meta.syncedAt, profile.meta.fromCache);
+
+const controller = new AbortController();
+const response = await bjtu.network.request(
+  { url: 'https://api.example.com/data', method: 'GET' },
+  {
+    signal: controller.signal,
+    onProgress: ({ loaded, total }) => console.log(loaded, total)
+  }
+);
+
+try {
+  await bjtu.storage.kv.set('theme', 'dark');
+} catch (error) {
+  if (error instanceof BjtuPluginError) console.error(error.code, error.message);
+}
 ```
 
-成功响应包含 `protocol_version`、`request_id`、`ok: true` 和 `data`。失败响应包含：
+SDK 公开 `runtime`、`configuration`、`network`、`storage.kv`、`storage.blob`、
+`cache`、`navigation`、`campus` 和 `mail`。常用身份、教务和邮件方法的 `data`
+结构由 Registry 生成具体 TypeScript 类型；仅通用 `campus.request@1` 的业务载荷
+保持 `unknown`。所有校园读取统一返回：
 
-```json
+```ts
 {
-  "protocol_version": 1,
-  "request_id": "unique-request-id",
-  "ok": false,
-  "error": {
-    "code": "permission_denied",
-    "message": "Safe user-facing message",
-    "request_id": "unique-request-id",
-    "retryable": false,
-    "http_status": 403,
-    "details": {}
+  data: T,
+  meta: {
+    syncedAt: string,
+    source: 'cache' | 'network' | 'mixed',
+    coverage: 'complete' | 'partial' | 'unknown',
+    fromCache: boolean
   }
 }
 ```
 
-`http_status` 与 `details` 可省略，`details` 不包含凭据、Cookie、token 或个人通信数据。
+迁移页面只能使用 `createBjtuPluginMigrationSdk()`，其表面仅包含影子 KV 和显式
+`commit()`；网络、校园读取和 Command Capability 不可用。
 
-### Runtime 方法
+## 6. Protocol v2 与桥边界
 
-| 方法 | 参数 | 结果 |
-| --- | --- | --- |
-| `app.get_runtime_info` | `{}` | runtime/protocol/schema/data schema、publisher subject、支持的 capabilities。 |
-| `app.has_capability` | `{ capability }` | `declared`、`supported`、`available`。 |
-| `app.ready` | `{}` | `{ ready: true }`。 |
-| `app.get_configuration` | `{ key }` | 读取插件已声明且用户已保存的配置；需要 `app.configuration.read`。 |
-| `app.storage.get` | `{ key }` | JSON 值或 `null`。 |
-| `app.storage.set` | `{ key, value }` | 当前使用量。 |
-| `app.storage.remove` | `{ key }` | 是否删除。 |
-| `app.storage.keys` | `{}` | 排序后的 key 列表。 |
-| `app.storage.usage` | `{}` | byte/key 使用量与上限。 |
-| `app.storage.clear` | `{}` | `{ cleared: true }`。 |
-| `campus.request` | 见下节 | 受控校园响应。 |
+SDK 内部 protocol v2 请求为：
 
-插件仍可使用既有细粒度领域 API，例如 `identity.get_profile`、
-`academic.get_timetable`、`academic.get_scores`、`academic.get_exams`、
-`academic.get_homework`、`academic.get_course_resources` 和只读邮件接口。写操作继续使用
-领域 API；`academic.submit_homework` 与 `mail.send` 每次都需要宿主确认，Agent 不会自动
-提交作业。
-
-Runtime 不提供读取明文登录凭据的 API，也不提供通用原生 HTTP bridge。第三方公网访问
-使用受 CSP 与 `connect_origins` 约束的浏览器 `fetch`。
-
-`app.get_configuration` 仅能读取当前插件 Manifest 已声明的 key，配置值保存在设备加密
-存储中，并受同一稳定本地 main-frame/source-origin 桥接边界约束；远程 frame 不得读取。
-
-## `app.storage`
-
-`app.storage` 按 publisher subject + plugin ID 隔离，值为 JSON：
-
-- 总配额 10 MiB；
-- 单项最大 256 KiB；
-- 最多 1024 keys；
-- Android Keystore AES-GCM 加密；
-- Mutex 串行化同一 namespace；
-- 临时文件、`fsync` 和原子替换。
-
-重要数据应写入 `app.storage`。LocalStorage/IndexedDB 会在稳定 origin 下跨 commit
-保留，但不进入数据回滚快照。
-
-提高 `data_schema_version` 时，migration entrypoint 在独立临时 origin 的隐藏
-WebView 中运行。它无网络、无校园权限，只能操作影子 KV，并必须在 30 秒内调用：
-
-```js
-await window.BjtuService.invoke('migration.commit', {});
+```json
+{
+  "protocolVersion": 2,
+  "requestId": "request-id",
+  "capability": "identity.profile@1",
+  "method": "getProfile",
+  "params": {}
+}
 ```
 
-成功提交后才切换包与数据；失败或超时会丢弃影子数据并恢复旧 KV。插件回滚会恢复上一
-包、Manifest、授权状态和 KV 快照。当前不提供外部文件导出；可移植 SAF 导入导出属于
-后续版本。
+响应使用统一成功/错误 envelope；事件包含 `eventId`、`capability`、`event` 和可选
+`requestId`。lifecycle 事件由契约固定为 `resume`、`pause`、`theme`、`resize`、
+`network` 与 `back`；`back` listener 返回 `true`（也可返回
+`Promise<true>`）才表示已消费。宿主只在没有确认消费时回退 WebView 历史或关闭页面，
+不会再并行派发 DOM back 事件。SDK 把宿主错误转换为 `BjtuPluginError`，并通过
+`AbortSignal` 发送取消。
+底层对象不属于公共 API，宿主也不再注入 `window.BjtuService`。
 
-## `campus.request`
+原生桥只注入由不可变 publisher subject 与 plugin ID 决定的稳定本地 HTTPS origin，
+且仅接受该 origin 的 main-frame 消息。`bridge_origins` 是宿主固定为 self 的不变量，
+不是作者声明。远程 frame、popup 和导航目标永远无法获得桥。
 
-请求格式：
+二进制使用分块 ArrayBuffer，不使用 Base64。缺少
+`WEB_MESSAGE_ARRAY_BUFFER` 时，依赖它的 required Capability fail closed；optional
+Capability 报 `capability_unavailable`。
 
-```js
-const response = await window.BjtuService.invoke('campus.request', {
-  service_id: 'aa',
-  method: 'GET',
-  path: '/examine/examplanstudent/stulist/',
-  query: { term: '2026-2027-1' },
-  accept: 'application/json'
-});
+每个生成的 capability deadline 同时由 SDK 与 Android 宿主执行。插件可在
+`InvokeOptions.timeoutMs` 中缩短 deadline，但不能超过契约上限；超出 deadline
+返回 `request_timeout`，上游网络栈自身超时仍返回 `network_timeout`。
+
+## 7. 网络、存储与资源
+
+`network.request@1` 使用无 Cookie、无宿主认证器的独立 OkHttp 客户端。它支持
+GET、HEAD、POST、PUT、PATCH、DELETE，以及 JSON、文本、FormData 和 Blob handle
+请求体。初始请求、每次 DNS 解析和每次重定向都会重新执行 SSRF 检查；`Host`、
+`Cookie`、`Content-Length` 等传输层 header 被拒绝。
+
+- 默认超时 15 秒，上限 60 秒；最多 5 次手动重定向。
+- 每插件并发 4，每 origin 并发 2。
+- JSON/文本内联响应上限 1 MiB；更大或二进制响应返回资源 handle。
+- 浏览器 `fetch` 可继续访问 Manifest 已声明的 connect origin，但不会获得宿主会话。
+
+`storage.kv@2` 的限制为每插件 10 MiB、单值 256 KiB、最多 1024 keys。它提供
+batch、revision/CAS、声明式原子 transaction、watch，以及通过 Blob handle 完成的
+导入/导出。旧 KV 文件可由同 publisher+plugin 的受控升级直接读取。
+
+`contract_v1` WebView 关闭 DOM Storage，并在 document-start 阶段以不可重新配置的
+guard 禁用 `localStorage`、`sessionStorage`、IndexedDB、Cache Storage、Cookie、
+Worker/Service Worker 和浏览器文件存储；CSP 同时设置 `worker-src 'none'`。guard
+无法完整安装时不会暴露 protocol v2 桥。插件必须使用 SDK 的 KV/Blob/Cache；只有
+无桥、无网络的 legacy 救援页保留 DOM Storage 读取能力，以便用户导出旧数据。CI
+在 API 26/35 运行真实 JavaScript probe，避免只断言 WebSettings 配置值。
+
+Blob 不可变且内容寻址；Cache 可淘汰并使用 LRU，pin 只阻止自动淘汰。两者按
+publisher+plugin 隔离，使用 AES-GCM 分块加密和原子索引：
+
+- Blob：每插件 256 MiB，单项 64 MiB。
+- Cache：每插件 512 MiB，全局 1 GiB，单项 250 MiB。
+- 写入还必须保留设备安全剩余空间。
+
+资源通过稳定 origin 的 `/__bjtu/resources/<handle>` 提供 GET、HEAD 和 Range，支持
+离线读取。零字节 Blob/Cache 是合法资源（对其发起 Range 返回 416）。网络返回的临时
+Cache handle 可通过 `cache.promote(handle, key)` 绑定为业务 key，也可通过
+`cache.deleteHandle(handle)` 显式释放，避免只能等待 LRU。插件更新保留上一版本包、
+KV 快照和 Blob 影子索引；失败时原子恢复。
+
+## 8. Command Capability
+
+所有会改变校园或宿主状态的调用都是 Command Capability。每次调用都必须经过用户
+确认并携带 idempotency key。宿主按“key + 请求摘要”处理：
+
+- 相同 key 和摘要返回原回执，不重复执行。
+- 相同 key、不同摘要返回 `idempotency_conflict`。
+- 加密回执不保存请求正文，保留 7 天，每插件最多 1024 条。
+
+邮件发送和作业提交不会静默执行。
+
+## 9. 错误
+
+统一错误至少包括：
+
+`permission_denied`、`capability_unavailable`、`invalid_request`、
+`origin_denied`、`network_timeout`、`request_timeout`、`http_error`、`quota_exceeded`、
+`resource_too_large`、`migration_failed`、`user_cancelled` 和
+`idempotency_conflict`。
+
+## 10. 校验、打包与发布
+
+```powershell
+bjtu lint --source .
+bjtu lint --marketplace .
+bjtu test .
+bjtu inspect .
+bjtu doctor .
+bjtu pack .
 ```
 
-约束：
+`bjtu test` 会启动本机 Chrome/Chromium/Edge 的 headless 实例，在受控 protocol v2
+Mock Host 中实际加载发布入口，并捕获脚本错误与未处理 Promise rejection。
+`bjtu pack` 生成确定性 ZIP，拒绝 `bjtu-plugin.dev.json`，并与平台一致地执行
+25 MiB 压缩包、50 MiB 解压内容、1000 文件及 1 MiB 图标限制。迁移 P0-A 源仓库可先
+运行 `bjtu migrate`，再人工复核 Capability、origin、数据 migration 和 marketplace
+信息；旧插件不会被平台自动重发。
 
-- 仅 `GET`/`HEAD`；
-- 固定 15 秒超时；
-- 5 MiB 流式响应上限；
-- 只接受 registry 允许的 path、query key 和对应细粒度权限；
-- 宿主复用 `SessionManager`，但不会把 Cookie 或认证头暴露给插件；
-- 剥离 `Cookie`、`Set-Cookie`、认证头和不安全响应头；
-- 重定向越出当前注册服务立即失败。
+新目录、投稿、更新解析和制品使用 `/api/v3`。平台保存 `contractProfile`、派生
+`runtimeFloor`、Capability 声明和独立 marketplace 元数据。`/api/v2` 只保留旧
+P0-A 目录、详情与制品读取，所有写入口冻结。
 
-首批 registry：
+仓库内完整验证：
 
-| service | 范围 |
-| --- | --- |
-| `mis` | 仅 `/home/`，需要 `identity.profile.read`。 |
-| `aa` | 已验证的课表、考试、成绩、学籍和学业进度只读路径。 |
-| `ve` | 已验证的课程、作业列表、资源、回放和用户信息 path+method 组合。 |
+```powershell
+Set-Location plugin-tooling
+npm run generate:check
+npm run typecheck
+npm test
+npm run pack:check
 
-Coremail、知行、就业和全部写操作不在 registry 中。
-
-## 生命周期与环境
-
-window 事件名为 `pause`、`resume`、`back`、`theme`、`resize`、`network`；为兼容包装器，
-宿主同时发送 `bjtu:<name>`。事件 `detail` 提供：
-
-- viewport 宽高、density、安全区和 IME 高度；
-- 方向与 font scale；
-- light/dark 主题、减少动态、高对比度；
-- online、validated、metered 与网络 transport。
-
-`back` 可取消：
-
-```js
-window.addEventListener('back', (event) => {
-  if (closeDialogIfOpen()) event.preventDefault();
-});
+Set-Location ..\web\platform
+npm run typecheck
+npm test
+npm run test:integration
+npm run test:e2e
 ```
-
-150 ms 内未消费时，宿主回退 Web 历史；没有历史则关闭插件。
-
-## WebView 安全基线
-
-- `MIXED_CONTENT_NEVER_ALLOW`；
-- 关闭第三方 Cookie、文件访问、content 访问、多窗口和下载；
-- 每个本地响应设置 CSP、Permissions-Policy、`nosniff` 和 Referrer-Policy；
-- CSP 分别绑定 connect/media/frame；
-- WebViewClient 阻止任何远程 main-frame 导航；
-- `navigation_origins` 只允许用户手势打开外部浏览器；
-- bridge 消息必须来自 main frame 和精确稳定 origin。
-
-## 更新、迁移、回滚与删除
-
-- 更新保留仍被声明且已授予的权限；
-- 删除的权限自动撤销；
-- 新增权限与 origin 仅展示差异；
-- 用户拒绝新增 required 权限时不切换版本；
-- 始终保留上一版本包和 KV 快照；
-- 删除插件会清理 KV、配置、快照、包和稳定 origin WebStorage；
-- 物理清理失败会在 Room 中留下 tombstone，并在下次启动幂等重试；
-- legacy 救援数据只在用户明确删除插件时清理。
-
-## 发布检查清单
-
-- Manifest 为 v3，版本使用 SemVer，`bridge_origins` 严格为 `["self"]`。
-- `dist/` 自包含所有可执行脚本；不加载远程 JavaScript。
-- origin 按用途最小声明，公开制品只使用 HTTPS。
-- 远程 iframe 使用规定 sandbox 且声明 `remote.frame.v1`。
-- 重要数据使用 `app.storage`，schema 提升包含可重复执行的 migration。
-- 所有 bridge 调用处理结构化错误和 `retryable`。
-- 未写入真实校园账号、密码、Cookie、token、邮件、验证码或个人信息。
-- 已运行共享 lint、平台测试和 Android 对应测试。

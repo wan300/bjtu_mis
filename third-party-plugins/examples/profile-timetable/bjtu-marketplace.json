@@ -1,0 +1,7 @@
+{
+  "description": "Demonstrates typed profile and timetable reads through the plugin SDK.",
+  "author": "BJTU MIS",
+  "category": "academic",
+  "tags": ["example", "timetable"],
+  "license": "MIT"
+}

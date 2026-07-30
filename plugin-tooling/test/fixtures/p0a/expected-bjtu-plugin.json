@@ -1,0 +1,23 @@
+{
+  "schema_version": 3,
+  "id": "io.example.old",
+  "name": "Old",
+  "version": "1.0.0",
+  "entrypoint": "index.html",
+  "icon": "icon.svg",
+  "capabilities": {
+    "required": [
+      "runtime.lifecycle@1",
+      "storage.kv@2",
+      "identity.profile@1"
+    ],
+    "optional": [
+      "remote.frame@1",
+      "mail.send@1"
+    ]
+  },
+  "origins": {
+    "connect": ["https://api.example.com"]
+  },
+  "data_schema_version": 1
+}

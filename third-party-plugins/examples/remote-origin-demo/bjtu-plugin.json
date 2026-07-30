@@ -1,0 +1,14 @@
+{
+  "schema_version": 3,
+  "id": "bjtu.example.remote_origin",
+  "name": "Remote Frame Demo",
+  "version": "1.0.0",
+  "entrypoint": "index.html",
+  "icon": "icon.svg",
+  "capabilities": {
+    "required": ["runtime.lifecycle@1", "remote.frame@1"]
+  },
+  "origins": {
+    "frame": ["https://example.com"]
+  }
+}

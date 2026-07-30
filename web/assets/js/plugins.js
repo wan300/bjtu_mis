@@ -71,7 +71,7 @@
       <p>${escapeHtml(plugin.description)}</p>
       <div class="plugin-tags">${(plugin.tags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
       <div class="plugin-card__meta">
-        <span class="plugin-warning">Manifest v${escapeHtml(plugin.schemaVersion)} · Runtime ${escapeHtml(plugin.minRuntimeVersion)}–${escapeHtml(plugin.runtimeVersion)}</span>
+        <span class="plugin-warning">${escapeHtml(plugin.contractProfile)} · Runtime floor ${escapeHtml(plugin.runtimeFloor)}</span>
         <span>${escapeHtml(plugin.verificationLevel)} · ${escapeHtml(plugin.compatibilityState)}</span>
         <code>${escapeHtml(String(plugin.commitSha).slice(0, 8))}</code>
       </div>
@@ -86,7 +86,7 @@
     let cursor = null;
 
     async function load(append = false) {
-      setStatus('正在读取 Manifest v3 插件目录…');
+      setStatus('正在读取 contract_v1 插件目录…');
       const data = new FormData(form);
       const params = new URLSearchParams();
       for (const key of ['query', 'category']) {
@@ -95,7 +95,7 @@
       if (append && cursor) params.set('cursor', cursor);
       try {
         const query = params.toString();
-        const payload = await request(`/api/v2/plugins${query ? `?${query}` : ''}`);
+        const payload = await request(`/api/v3/plugins${query ? `?${query}` : ''}`);
         if (!append) list.innerHTML = '';
         list.insertAdjacentHTML('beforeend', payload.items.map(card).join(''));
         cursor = payload.nextCursor;
@@ -126,22 +126,22 @@
         <h2>Runtime 与授权</h2>
         <dl>
           <div><dt>Manifest</dt><dd>v${escapeHtml(plugin.schemaVersion)}</dd></div>
-          <div><dt>Runtime</dt><dd>${escapeHtml(plugin.minRuntimeVersion)}–${escapeHtml(plugin.runtimeVersion)}</dd></div>
-          <div><dt>数据 schema</dt><dd>v${escapeHtml(plugin.dataSchemaVersion)}</dd></div>
+          <div><dt>Contract</dt><dd>${escapeHtml(plugin.contractProfile)}</dd></div>
+          <div><dt>Runtime floor</dt><dd>${escapeHtml(plugin.runtimeFloor)}</dd></div>
+          <div><dt>数据 schema</dt><dd>${plugin.dataSchemaVersion ? `v${escapeHtml(plugin.dataSchemaVersion)}` : '未使用 KV/Blob'}</dd></div>
           <div><dt>兼容状态</dt><dd>${escapeHtml(plugin.compatibilityState)}</dd></div>
         </dl>
-        <h3>必需 capability</h3>${codeList(plugin.requiredCapabilities)}
-        <h3>可选 capability</h3>${codeList(plugin.optionalCapabilities)}
-        <h3>必需权限</h3>${codeList(plugin.permissions?.required)}
-        <h3>可选权限</h3>${codeList(plugin.permissions?.optional)}
+        <h3>必需 capability</h3>${codeList(plugin.capabilities?.required)}
+        <h3>可选 capability</h3>${codeList(plugin.capabilities?.optional)}
+        <p>权限、逐次确认、幂等和配额由 Capability Contract 派生，不在 Manifest 中重复声明。</p>
       </section>
       <section>
         <h2>Web 信任边界</h2>
-        ${originSection('Connect origins', plugin.connectOrigins)}
-        ${originSection('Media origins', plugin.mediaOrigins)}
-        ${originSection('Frame origins', plugin.frameOrigins)}
-        ${originSection('Navigation origins', plugin.navigationOrigins)}
-        ${originSection('Bridge origins', plugin.bridgeOrigins)}
+        ${originSection('Connect origins', plugin.origins?.connect)}
+        ${originSection('Media origins', plugin.origins?.media)}
+        ${originSection('Frame origins', plugin.origins?.frame)}
+        ${originSection('Navigation origins', plugin.origins?.navigation)}
+        <h3>Bridge</h3><p><code>self</code>（宿主固定；仅稳定本地 main frame，不由插件声明）</p>
       </section>
       <section>
         <h2>发布者身份</h2>
@@ -171,7 +171,7 @@
     const id = new URLSearchParams(location.search).get('id');
     if (!id) return setStatus('缺少插件 ID。', true);
     try {
-      const plugin = await request(`/api/v2/plugins/${encodeURIComponent(id)}`);
+      const plugin = await request(`/api/v3/plugins/${encodeURIComponent(id)}`);
       document.title = `${plugin.name} · 插件大厅`;
       document.querySelector('[data-plugin-detail]').innerHTML = `<header class="plugin-detail__header">
         <img src="${escapeHtml(plugin.iconUrl)}" alt="">
@@ -179,7 +179,7 @@
           <p class="plugin-kicker">${escapeHtml(categoryNames[plugin.category] || '其他')} · ${escapeHtml(plugin.version)}</p>
           <h1>${escapeHtml(plugin.name)}</h1>
           <p>${escapeHtml(plugin.description)}</p>
-          <span class="plugin-warning">Manifest v3 · ${escapeHtml(plugin.verificationLevel)} · ${escapeHtml(plugin.compatibilityState)}</span>
+          <span class="plugin-warning">contract_v1 · ${escapeHtml(plugin.verificationLevel)} · ${escapeHtml(plugin.compatibilityState)}</span>
         </div>
       </header>
       ${detailSections(plugin)}
@@ -215,10 +215,10 @@
     form.hidden = !user.authenticated;
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      setStatus('正在创建 Manifest v3 自动校验任务…');
+      setStatus('正在创建 contract_v1 自动校验任务…');
       try {
         const repositoryUrl = new FormData(form).get('repositoryUrl');
-        const result = await request('/api/v2/submissions', {
+        const result = await request('/api/v3/submissions', {
           method: 'POST',
           body: JSON.stringify({ repositoryUrl })
         });
@@ -260,7 +260,7 @@
     const target = document.querySelector('[data-manage-list]');
 
     async function refresh() {
-      const payload = await request('/api/v2/me/plugins');
+      const payload = await request('/api/v3/me/plugins');
       target.innerHTML = payload.items.map(manageRow).join('') || '<p>还没有投稿记录。</p>';
     }
 
@@ -268,7 +268,7 @@
       const button = event.target.closest('button[data-action]');
       if (!button) return;
       try {
-        await request(`/api/v2/plugins/${encodeURIComponent(button.dataset.id)}/${button.dataset.action}`, {
+        await request(`/api/v3/plugins/${encodeURIComponent(button.dataset.id)}/${button.dataset.action}`, {
           method: 'POST',
           body: '{}'
         });
@@ -302,7 +302,7 @@
   async function initAdmin() {
     const user = await currentUser();
     if (!user.authenticated || !user.admin) return setStatus('需要管理员权限。', true);
-    const payload = await request('/api/v2/admin/overview');
+    const payload = await request('/api/v3/admin/overview');
     const target = document.querySelector('[data-admin-content]');
     target.innerHTML = `<section class="plugin-admin">
         <h2>插件</h2>${payload.plugins.map(adminPluginRow).join('')}
@@ -320,19 +320,19 @@
       const reportButton = event.target.closest('[data-report]');
       try {
         if (pluginButton) {
-          await request(`/api/v2/admin/plugins/${encodeURIComponent(pluginButton.dataset.id)}/${pluginButton.dataset.adminAction}`, {
+          await request(`/api/v3/admin/plugins/${encodeURIComponent(pluginButton.dataset.id)}/${pluginButton.dataset.adminAction}`, {
             method: 'POST',
             body: JSON.stringify({ reason: '管理员操作' })
           });
         }
         if (transferButton) {
-          await request(`/api/v2/admin/plugins/${encodeURIComponent(transferButton.dataset.id)}/publisher-transfer/${transferButton.dataset.transferAction}`, {
+          await request(`/api/v3/admin/plugins/${encodeURIComponent(transferButton.dataset.id)}/publisher-transfer/${transferButton.dataset.transferAction}`, {
             method: 'POST',
             body: JSON.stringify({ reason: '管理员审核 publisher transfer' })
           });
         }
         if (reportButton) {
-          await request(`/api/v2/admin/reports/${encodeURIComponent(reportButton.dataset.id)}/resolve`, {
+          await request(`/api/v3/admin/reports/${encodeURIComponent(reportButton.dataset.id)}/resolve`, {
             method: 'POST',
             body: JSON.stringify({ status: reportButton.dataset.report })
           });

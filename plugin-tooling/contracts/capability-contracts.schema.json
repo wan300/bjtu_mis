@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bjtu.cc/schemas/capability-contracts.schema.json",
+  "title": "BJTU Plugin Capability Contract Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractProfile",
+    "schemaVersion",
+    "protocolVersion",
+    "runtimeFloor",
+    "packageLimits",
+    "errors",
+    "marketplaceCategories",
+    "configurationTypes",
+    "schemas",
+    "capabilities"
+  ],
+  "properties": {
+    "contractProfile": {
+      "type": "string",
+      "pattern": "^contract_v[1-9][0-9]*$"
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 3
+    },
+    "protocolVersion": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "runtimeFloor": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "packageLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "archiveBytes",
+        "extractedBytes",
+        "files",
+        "iconBytes"
+      ],
+      "properties": {
+        "archiveBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "extractedBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "files": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "iconBytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "marketplaceCategories": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "configurationTypes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "schemas": {
+      "type": "object"
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "stability",
+          "runtimeFloor",
+          "permission",
+          "confirmation",
+          "idempotency",
+          "quota",
+          "timeoutMs",
+          "support",
+          "methods"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][A-Za-z0-9.]*@[1-9][0-9]*$"
+          },
+          "stability": {
+            "enum": [
+              "stable",
+              "beta"
+            ]
+          },
+          "runtimeFloor": {
+            "type": "integer",
+            "minimum": 2
+          },
+          "permission": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "confirmation": {
+            "enum": [
+              "none",
+              "userGesture",
+              "eachCall"
+            ]
+          },
+          "idempotency": {
+            "enum": [
+              "none",
+              "required"
+            ]
+          },
+          "quota": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxTimeoutMs": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "support": {
+            "type": "object"
+          },
+          "methods": {
+            "type": "array"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "data"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z][A-Za-z0-9]*$"
+                },
+                "data": {
+                  "type": "object"
+                },
+                "requiresAcknowledgement": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

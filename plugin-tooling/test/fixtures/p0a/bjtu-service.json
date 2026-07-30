@@ -2,28 +2,28 @@
   "schema_version": 3,
   "runtime_version": 1,
   "min_runtime_version": 1,
-  "required_capabilities": ["runtime.lifecycle.v1"],
-  "optional_capabilities": [],
+  "required_capabilities": ["runtime.lifecycle.v1", "storage.kv.v1"],
+  "optional_capabilities": ["remote.frame.v1"],
   "data_schema_version": 1,
-  "id": "bjtu.example.profile_timetable",
-  "name": "Profile Timetable Example",
-  "description": "Demonstrates profile and timetable reads through the BJTU MIS bridge.",
+  "id": "io.example.old",
+  "name": "Old",
+  "description": "Old plugin",
   "version": "1.0.0",
   "entrypoint": "index.html",
   "icon": "icon.svg",
-  "author": "BJTU MIS",
+  "author": "Example",
   "permissions": {
     "required": ["identity.profile.read"],
-    "optional": ["academic.timetable.read"]
+    "optional": ["mail.send"]
   },
-  "connect_origins": [],
+  "connect_origins": ["https://api.example.com"],
   "media_origins": [],
   "frame_origins": [],
   "navigation_origins": [],
   "bridge_origins": ["self"],
   "marketplace": {
-    "category": "academic",
-    "tags": ["example", "timetable"],
+    "category": "other",
+    "tags": ["legacy"],
     "license": "MIT"
   },
   "configuration": []

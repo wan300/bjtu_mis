@@ -33,7 +33,7 @@
 
 - Validation iteration 1 passed the original checklist. Deployment and internal sequencing were
   maintained in the original `plan.md`.
-- 2026-07-28 security amendment passed: `spec.md` now aligns with constitution 1.1.0 and
-  Manifest v3 / P0-A. The original `plan.md` is retained as a superseded historical record;
+- 2026-07-29 contract amendment passed: `spec.md` now aligns with constitution 1.2.0 and
+  Manifest v3 / contract_v1. The original `plan.md` is retained as a superseded historical record;
   current security and rollback decisions live in
-  `docs/plugin-platform-manifest-v3-p0a-execplan.md`.
+  `docs/plugin-runtime-contract-p0-p1-execplan.md`.

@@ -6,10 +6,10 @@
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>Manifest v3 插件开发者文档 - BJTU MIS Android</title>
+    <title>Web 插件开发者文档 - BJTU MIS Android</title>
     <meta
       name="description"
-      content="BJTU MIS Android Manifest v3 插件开发者文档：runtime、capability、origin、桥接、加密存储、数据迁移与校园只读代理。"
+      content="BJTU MIS Android SDK-first、Capability 驱动的 Manifest v3 / contract_v1 Web 插件开发文档。"
     >
     <link rel="icon" type="image/png" href="assets/icons/icon_home.png?v=2026062602">
     <link rel="stylesheet" href="assets/css/styles.css?v=2026062602">
@@ -39,233 +39,222 @@
       <section class="docs-hero" aria-labelledby="docs-title">
         <div class="docs-hero__copy reveal">
           <a class="back-link" href="index.html">返回主页</a>
-          <p class="eyebrow">Developer platform · Manifest v3</p>
-          <h1 id="docs-title">安全静态 Web 插件开发</h1>
+          <p class="eyebrow">SDK-first · contract_v1 · protocol v2</p>
+          <h1 id="docs-title">Capability 驱动的 Web 插件</h1>
           <p>
-            插件以静态 H5/SPA 包运行在稳定的本地 HTTPS origin。Manifest v3 将 runtime
-            capability、联网、媒体、iframe、外部导航和原生桥拆分声明，远程页面永远不会
-            获得 BJTU 原生桥。
+            插件编写普通 TypeScript/Web 业务代码，通过类型化 SDK 调用宿主能力。
+            Manifest 只声明版本化 Capability 和按用途拆分的公网 origin；桥接协议、
+            权限、配额、错误和平台支持都从单一 Contract Registry 自动生成。
           </p>
           <div class="docs-hero__actions">
             <a class="btn btn--signal" href="#quickstart">开始开发</a>
-            <a class="btn btn--ghost" href="assets/schemas/third-party-service-manifest.schema.json" download>下载 Manifest v3 schema</a>
+            <a class="btn btn--ghost" href="assets/schemas/third-party-service-manifest.schema.json" download>Manifest schema</a>
+            <a class="btn btn--ghost" href="assets/schemas/bjtu-marketplace.schema.json" download>Marketplace schema</a>
           </div>
         </div>
-        <div class="docs-hero__panel reveal" aria-label="平台约束摘要">
-          <div class="ticket-row"><span>Manifest</span><strong>v3 only</strong></div>
-          <div class="ticket-row"><span>Runtime</span><strong>v1</strong></div>
-          <div class="ticket-row"><span>Bridge</span><strong>self + main frame</strong></div>
-          <div class="ticket-row"><span>发布主体</span><strong>GitHub owner 数值 ID</strong></div>
+        <div class="docs-hero__panel reveal" aria-label="运行时摘要">
+          <div class="ticket-row"><span>Profile</span><strong>contract_v1</strong></div>
+          <div class="ticket-row"><span>Protocol</span><strong>v2</strong></div>
+          <div class="ticket-row"><span>Bridge</span><strong>host-fixed self</strong></div>
+          <div class="ticket-row"><span>Legacy</span><strong>rescue only</strong></div>
         </div>
       </section>
 
       <div class="docs-layout">
         <aside class="docs-toc reveal" aria-label="文档目录">
           <strong>目录</strong>
-          <a href="#compatibility">兼容规则</a>
+          <a href="#compatibility">兼容边界</a>
           <a href="#quickstart">快速开始</a>
           <a href="#manifest">Manifest</a>
-          <a href="#origins">Origin 边界</a>
-          <a href="#bridge">Bridge</a>
-          <a href="#storage">存储与迁移</a>
-          <a href="#campus">校园代理</a>
-          <a href="#lifecycle">生命周期</a>
+          <a href="#sdk">SDK</a>
+          <a href="#origins">Origin 与桥</a>
+          <a href="#network">网络</a>
+          <a href="#storage">存储与资源</a>
+          <a href="#commands">写能力</a>
           <a href="#release">发布检查</a>
         </aside>
 
         <div class="docs-content">
           <section class="docs-section reveal" id="compatibility">
             <p class="eyebrow">Compatibility</p>
-            <h2>Manifest v3 是破坏性基线</h2>
+            <h2>只运行 contract_v1</h2>
             <p>
-              新客户端禁止安装、更新和运行 v1/v2。旧包和旧 WebStorage 不会自动删除，
-              用户可从无桥、无网络的只读救援入口查看数据或明确删除。
-            </p>
-            <p>
-              本页与公开 Manifest v3 schema 覆盖此前的 v1/v2、聚合 origin、凭据读取桥和
-              通用原生 HTTP 桥说明；旧文档只用于历史追踪，不构成兼容承诺。
+              Manifest v1/v2 和 P0-A v3（<code>bjtu-service.json</code>）不再安装、
+              更新或运行，只保留无桥、无网络的数据救援。P0-A 仅能在 publisher
+              subject、plugin ID 和数据版本均兼容时原位升级；回滚后仍是救援状态。
             </p>
             <ul class="docs-checklist">
-              <li>运行 v3 需要 WebView 同时支持 document-start script 与 web message listener。</li>
-              <li>能力缺失时显示兼容错误，不使用页面加载完成后的注入回退。</li>
-              <li>插件大厅默认目录只返回兼容 v3 制品；旧 API 进入迁移期只读模式。</li>
+              <li>远程 frame 永远没有原生桥。</li>
+              <li>optional Capability 首次安装默认关闭。</li>
+              <li>缺少安全 WebView feature 时 required Capability fail closed。</li>
+              <li><code>/api/v3</code> 服务新目录；<code>/api/v2</code> 冻结为旧目录只读。</li>
             </ul>
           </section>
 
           <section class="docs-section reveal" id="quickstart">
             <p class="eyebrow">Quickstart</p>
-            <h2>创建与校验</h2>
-            <pre><code>bjtu-service.json
-dist/
-  index.html
-  icon.svg</code></pre>
-            <p>从仓库根目录运行：</p>
-            <pre><code>node tools/third-party-service-lint.cjs third-party-plugins/templates/basic</code></pre>
+            <h2>Vanilla TypeScript + Vite</h2>
+            <pre><code>cd plugin-tooling
+npm ci
+npm run build
+node packages/create-bjtu-plugin/dist/index.js my-plugin --id io.example.demo
+cd my-plugin
+npm install
+npm run dev</code></pre>
             <p>
-              lint 会校验两份共享 schema 一致性、capability、四类 origin、HTTPS/私网规则、
-              远程脚本和 iframe sandbox。所有 <code>ERROR</code> 必须修复。
+              浏览器开发模式使用 Mock Host。安装 debug APK 后运行
+              <code>bjtu dev --android</code>，可通过稳定插件 origin 联调 Vite 和
+              HMR；命令退出时自动撤销 <code>adb reverse</code> 和 debug 开关。
             </p>
+            <pre><code>bjtu lint --source .
+bjtu lint --marketplace .
+bjtu test .
+bjtu inspect .
+bjtu doctor .
+bjtu pack .</code></pre>
           </section>
 
           <section class="docs-section reveal" id="manifest">
             <p class="eyebrow">Contract</p>
-            <h2>Manifest v3</h2>
+            <h2>精简 Manifest</h2>
             <pre><code>{
   "schema_version": 3,
-  "runtime_version": 1,
-  "min_runtime_version": 1,
-  "required_capabilities": ["runtime.lifecycle.v1"],
-  "optional_capabilities": ["storage.kv.v1"],
-  "data_schema_version": 1,
-  "id": "bjtu.example.demo",
+  "id": "io.example.demo",
   "name": "Demo",
-  "description": "Manifest v3 example.",
   "version": "1.0.0",
   "entrypoint": "index.html",
   "icon": "icon.svg",
-  "author": "Example",
-  "permissions": { "required": [], "optional": [] },
-  "connect_origins": [],
-  "media_origins": [],
-  "frame_origins": [],
-  "navigation_origins": [],
-  "bridge_origins": ["self"],
-  "marketplace": {
-    "category": "other",
-    "tags": ["example"],
-    "license": "MIT"
+  "capabilities": {
+    "required": ["runtime.lifecycle@1", "network.request@1"],
+    "optional": ["storage.blob@1"]
   },
-  "configuration": []
+  "origins": {
+    "connect": ["https://api.example.com"],
+    "media": ["https://cdn.example.com"]
+  },
+  "data_schema_version": 1
 }</code></pre>
+            <p>
+              空 <code>origins</code>、<code>configuration</code> 和 optional 列表必须
+              省略。KV/Blob 需要 <code>data_schema_version</code>；版本提升还需要
+              <code>migration_entrypoint</code>。
+            </p>
+            <p>
+              描述、作者、分类、标签、许可证和截图放入独立
+              <code>bjtu-marketplace.json</code>。大厅投稿必须提供它；GitHub 直链
+              安装可以省略。<code>bjtu-plugin.dev.json</code> 只能用于 Mock/HMR，
+              <code>bjtu pack</code> 会拒绝把它放入发布包。
+            </p>
             <div class="docs-table-wrap">
               <table>
-                <thead><tr><th>Capability</th><th>用途</th></tr></thead>
+                <thead><tr><th>稳定 Capability</th><th>用途</th></tr></thead>
                 <tbody>
-                  <tr><td><code>runtime.lifecycle.v1</code></td><td>Runtime 信息、ready 和环境事件。</td></tr>
-                  <tr><td><code>storage.kv.v1</code></td><td>加密、配额化、可迁移的 JSON KV。</td></tr>
-                  <tr><td><code>campus.request.v1</code></td><td>宿主会话下的校园只读 registry。</td></tr>
-                  <tr><td><code>remote.frame.v1</code></td><td>受限远程 iframe。</td></tr>
+                  <tr><td><code>runtime.lifecycle@1</code></td><td>握手、ready、close 与宿主事件。</td></tr>
+                  <tr><td><code>configuration.read@1</code></td><td>读取 Manifest 声明的配置。</td></tr>
+                  <tr><td><code>identity.profile@1</code></td><td>读取当前用户概要。</td></tr>
+                  <tr><td><code>academic.*@1</code></td><td>课表、成绩、考试、校历、进度、作业和资源读取。</td></tr>
+                  <tr><td><code>mail.read@1</code></td><td>读取邮箱目录和消息。</td></tr>
+                  <tr><td><code>campus.request@1</code></td><td>MIS/AA/VE 注册表内只读请求。</td></tr>
                 </tbody>
               </table>
             </div>
             <p>
-              <code>data_schema_version</code> 不得降低。提升时必须设置
-              <code>migration_entrypoint</code>，指向 <code>dist/</code> 内的本地页面。
+              beta Capability 包括 <code>network.request@1</code>、
+              <code>storage.kv@2</code>、<code>storage.blob@1</code>、
+              <code>cache.resource@1</code> 和受确认的课程、作业、邮件 Command。
+            </p>
+          </section>
+
+          <section class="docs-section reveal" id="sdk">
+            <p class="eyebrow">Type-safe API</p>
+            <h2>只通过 SDK 调用</h2>
+            <pre><code>import { createBjtuPluginSdk } from '@bjtu-mis/plugin-sdk';
+
+const bjtu = createBjtuPluginSdk();
+const runtime = await bjtu.runtime.handshake();
+await bjtu.runtime.ready();
+
+const profile = await bjtu.campus.getProfile();
+console.log(profile.data, profile.meta.syncedAt);
+
+const controller = new AbortController();
+await bjtu.network.request(
+  { url: 'https://api.example.com/data' },
+  {
+    signal: controller.signal,
+    onProgress: ({ loaded, total }) =&gt; console.log(loaded, total)
+  }
+);</code></pre>
+            <p>
+              SDK 提供 <code>runtime</code>、<code>configuration</code>、
+              <code>network</code>、<code>storage.kv</code>、
+              <code>storage.blob</code>、<code>cache</code>、
+              <code>navigation</code>、<code>campus</code> 和 <code>mail</code>。
+              校园读取统一返回 <code>{ data, meta }</code>，meta 含
+              <code>syncedAt</code>、<code>source</code>、<code>coverage</code> 和
+              <code>fromCache</code>。
+            </p>
+            <p>
+              protocol v2 使用 camelCase、独立 <code>capability</code> /
+              <code>method</code>、取消、订阅事件和统一错误。底层 transport 是私有
+              实现，不再公开 <code>window.BjtuService</code>。
             </p>
           </section>
 
           <section class="docs-section reveal" id="origins">
             <p class="eyebrow">Trust boundary</p>
-            <h2>按用途声明 origin</h2>
-            <div class="docs-table-wrap">
-              <table>
-                <thead><tr><th>字段</th><th>用途</th></tr></thead>
-                <tbody>
-                  <tr><td><code>connect_origins</code></td><td>fetch/XHR 连接目标。</td></tr>
-                  <tr><td><code>media_origins</code></td><td>图片、音视频等资源。</td></tr>
-                  <tr><td><code>frame_origins</code></td><td>远程 iframe；同时声明 <code>remote.frame.v1</code>。</td></tr>
-                  <tr><td><code>navigation_origins</code></td><td>用户手势打开系统浏览器或 Custom Tab。</td></tr>
-                  <tr><td><code>bridge_origins</code></td><td>必须严格为 <code>["self"]</code>。</td></tr>
-                </tbody>
-              </table>
-            </div>
+            <h2>Origin 与桥由宿主守住</h2>
+            <p>
+              Manifest 只按用途声明 <code>connect</code>、<code>media</code>、
+              <code>frame</code> 和 <code>navigation</code>。公共制品只允许标准 HTTPS
+              origin，禁止校园、私网、回环、链路本地、路径和通配符。
+            </p>
             <ul class="docs-checklist">
-              <li>公共制品只接受 HTTPS；开发者模式仅 localhost 可使用 HTTP。</li>
-              <li>校园、私网、回环、链路本地来源不能进入普通 connect 列表。</li>
-              <li>远程主 frame 始终阻止；远程 iframe 不获得桥、第三方 Cookie、下载、弹窗或顶层导航。</li>
+              <li>桥 origin 固定为 self，不是 Manifest 字段。</li>
+              <li>桥只注入 publisher+plugin 决定的稳定本地 HTTPS main frame。</li>
+              <li>每条消息必须精确匹配 source origin；远程 frame 始终无桥。</li>
+              <li>二进制使用分块 ArrayBuffer，不使用 Base64 fallback。</li>
             </ul>
-            <pre><code>&lt;iframe
-  src="https://example.com/embed"
-  sandbox="allow-scripts allow-forms allow-same-origin"
-&gt;&lt;/iframe&gt;</code></pre>
           </section>
 
-          <section class="docs-section reveal" id="bridge">
-            <p class="eyebrow">Protocol v1</p>
-            <h2>统一请求与错误</h2>
-            <pre><code>{
-  "protocol_version": 1,
-  "request_id": "unique-id",
-  "method": "app.get_runtime_info",
-  "params": {}
-}</code></pre>
-            <pre><code>const runtime = await window.BjtuService.invoke('app.get_runtime_info', {});
-const storage = await window.BjtuService.invoke('app.storage.usage', {});
-await window.BjtuService.invoke('app.ready', {});</code></pre>
+          <section class="docs-section reveal" id="network">
+            <p class="eyebrow">Isolated network</p>
+            <h2>无宿主会话的公网请求</h2>
             <p>
-              错误统一包含 <code>code</code>、<code>message</code>、
-              <code>request_id</code>、<code>retryable</code>，并可带
-              <code>http_status</code> 与安全的 <code>details</code>。
+              <code>network.request@1</code> 使用无 Cookie、无宿主认证器的独立客户端。
+              初始请求、DNS 解析和每次重定向都会重新执行 SSRF 检查，并拒绝
+              <code>Host</code>、<code>Cookie</code>、<code>Content-Length</code> 等
+              传输层 header。
             </p>
-            <div class="docs-table-wrap">
-              <table>
-                <thead><tr><th>方法</th><th>参数</th></tr></thead>
-                <tbody>
-                  <tr><td><code>app.get_runtime_info</code></td><td><code>{}</code></td></tr>
-                  <tr><td><code>app.has_capability</code></td><td><code>{ capability }</code></td></tr>
-                  <tr><td><code>app.ready</code></td><td><code>{}</code></td></tr>
-                  <tr><td><code>app.get_configuration</code></td><td><code>{ key }</code>；需要 <code>app.configuration.read</code></td></tr>
-                  <tr><td><code>app.storage.get/set/remove</code></td><td><code>{ key, value? }</code></td></tr>
-                  <tr><td><code>app.storage.keys/usage/clear</code></td><td><code>{}</code></td></tr>
-                  <tr><td><code>campus.request</code></td><td><code>{ service_id, method, path, query, accept }</code></td></tr>
-                </tbody>
-              </table>
-            </div>
-            <p>
-              Runtime 不暴露明文登录凭据，也不提供通用原生 HTTP bridge。公网请求使用
-              浏览器 fetch，并受 CSP 与 <code>connect_origins</code> 限制。
-            </p>
-            <p>
-              <code>app.get_configuration</code> 只能读取 Manifest 已声明且保存在设备加密
-              存储中的配置 key，并受同一稳定本地 main-frame/source-origin 边界约束；
-              远程 frame 不得读取。
-            </p>
+            <ul class="docs-checklist">
+              <li>六种 HTTP 方法；JSON、文本、FormData 和 Blob handle 请求体。</li>
+              <li>默认 15 秒、上限 60 秒；最多 5 次重定向。</li>
+              <li>每插件并发 4、每 origin 并发 2。</li>
+              <li>JSON/文本内联上限 1 MiB；更大或二进制响应返回资源 handle。</li>
+            </ul>
           </section>
 
           <section class="docs-section reveal" id="storage">
             <p class="eyebrow">Transactional data</p>
-            <h2>加密 KV、迁移与回滚</h2>
+            <h2>KV2、Blob 与 Cache</h2>
             <ul class="docs-checklist">
-              <li>按 publisher subject + plugin ID 隔离，使用 Android Keystore AES-GCM。</li>
-              <li>10 MiB 总配额、单项 256 KiB、最多 1024 keys。</li>
-              <li>同一 namespace 使用 Mutex；临时文件、fsync 和原子替换保证写入。</li>
-              <li>迁移 WebView 使用临时 origin、影子 KV、无网络且无校园权限。</li>
-              <li>30 秒内调用 <code>migration.commit</code> 后才切换包与数据；失败自动回滚。</li>
-              <li>LocalStorage/IndexedDB 跨 commit 保留，但不在 KV 回滚范围内。</li>
+              <li>KV：10 MiB、单项 256 KiB、1024 keys，支持 CAS、batch、transaction 和 watch。</li>
+              <li>Blob：不可变内容寻址，每插件 256 MiB、单项 64 MiB。</li>
+              <li>Cache：LRU，每插件 512 MiB、全局 1 GiB、单项 250 MiB。</li>
+              <li>数据按 publisher+plugin 隔离，以 AES-GCM 分块加密并原子维护索引。</li>
+              <li>资源通过 <code>/__bjtu/resources/&lt;handle&gt;</code> 提供 GET、HEAD 和 Range。</li>
+              <li>升级使用影子迁移和上一版本快照，失败时原子回滚。</li>
             </ul>
           </section>
 
-          <section class="docs-section reveal" id="campus">
-            <p class="eyebrow">Campus proxy</p>
-            <h2>只读校园会话代理</h2>
-            <pre><code>await window.BjtuService.invoke('campus.request', {
-  service_id: 'aa',
-  method: 'GET',
-  path: '/examine/examplanstudent/stulist/',
-  query: { term: '2026-2027-1' },
-  accept: 'application/json'
-});</code></pre>
-            <ul class="docs-checklist">
-              <li>只接受 GET/HEAD、注册 service ID、精确 path 和受控 query。</li>
-              <li>15 秒超时、5 MiB 流式上限，越出注册服务的重定向立即失败。</li>
-              <li>Cookie、Set-Cookie、认证头和不安全响应头不会暴露给插件。</li>
-              <li>MIS 仅开放 <code>/home/</code>；AA 与 VE 仅开放已验证的细粒度只读路径。</li>
-              <li>Coremail、知行、就业和全部写操作不进入代理。</li>
-            </ul>
-          </section>
-
-          <section class="docs-section reveal" id="lifecycle">
-            <p class="eyebrow">Environment</p>
-            <h2>生命周期与宿主环境</h2>
+          <section class="docs-section reveal" id="commands">
+            <p class="eyebrow">Command capabilities</p>
+            <h2>逐次确认与幂等</h2>
             <p>
-              window 事件为 <code>pause</code>、<code>resume</code>、<code>back</code>、
-              <code>theme</code>、<code>resize</code>、<code>network</code>；同时发送
-              <code>bjtu:&lt;name&gt;</code> 兼容事件。
-            </p>
-            <p>
-              detail 包含 viewport、安全区、IME 高度、方向、font scale、主题、减少动态、
-              高对比度和网络状态。<code>back</code> 在 150 ms 内未
-              <code>preventDefault()</code> 时回退 Web 历史或关闭插件。
+              所有改变校园或宿主状态的能力都要求用户逐次确认和 idempotency key。
+              同 key 与同请求摘要返回原回执；同 key 与不同摘要返回
+              <code>idempotency_conflict</code>。加密回执不保存请求正文，保留 7 天，
+              每插件最多 1024 条。邮件和作业不会静默发送或提交。
             </p>
           </section>
 
@@ -273,14 +262,20 @@ await window.BjtuService.invoke('app.ready', {});</code></pre>
             <p class="eyebrow">Release</p>
             <h2>发布检查清单</h2>
             <ul class="docs-checklist">
-              <li>Manifest v3、SemVer、最小权限与最小 capability。</li>
-              <li><code>bridge_origins</code> 仅 self；各远程 origin 按用途拆分。</li>
-              <li>所有可执行 JavaScript 本地打包，远程 iframe 使用规定 sandbox。</li>
-              <li>重要数据使用 <code>app.storage</code>，schema 提升提供幂等 migration。</li>
-              <li>写操作继续走领域 API；邮件与作业提交保留逐次确认。</li>
-              <li>代码、日志和 fixture 不含真实账号、密码、Cookie、token 或个人信息。</li>
-              <li>提交前运行 lint、平台测试和 Android 对应测试。</li>
+              <li>只保留最小 required/optional Capability 和最小 origin。</li>
+              <li>所有可执行 JavaScript 本地打包；remote iframe 使用受限 sandbox。</li>
+              <li>数据 schema 变化提供仅可访问影子存储的 migration。</li>
+              <li>运行 lint、Mock、确定性 pack、平台与 Android 测试。</li>
+              <li>包内不含 dev 配置、凭据、Cookie、token、个人信息或构建缓存。</li>
             </ul>
+            <p>
+              统一错误包括 <code>permission_denied</code>、
+              <code>capability_unavailable</code>、<code>invalid_request</code>、
+              <code>origin_denied</code>、<code>network_timeout</code>、
+              <code>http_error</code>、<code>quota_exceeded</code>、
+              <code>resource_too_large</code>、<code>migration_failed</code>、
+              <code>user_cancelled</code> 和 <code>idempotency_conflict</code>。
+            </p>
           </section>
         </div>
       </div>

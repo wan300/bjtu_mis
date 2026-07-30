@@ -139,17 +139,19 @@ class WebViewThirdPartyDataMigrationRunner(
             }
             AppJson.parseToJsonElement(raw).jsonObject
         }.getOrNull()
-        val requestId = parsed?.get("request_id")?.jsonPrimitive?.contentOrNull.orEmpty()
-        val protocol = parsed?.get("protocol_version")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+        val requestId = parsed?.get("requestId")?.jsonPrimitive?.contentOrNull.orEmpty()
+        val protocol = parsed?.get("protocolVersion")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+        val capability = parsed?.get("capability")?.jsonPrimitive?.contentOrNull.orEmpty()
         val method = parsed?.get("method")?.jsonPrimitive?.contentOrNull.orEmpty()
         val params = parsed?.get("params") as? JsonObject
         val unknownFields = parsed?.keys.orEmpty() -
-            setOf("protocol_version", "request_id", "method", "params")
+            setOf("protocolVersion", "requestId", "capability", "method", "params")
         val payload = if (
             parsed == null ||
             protocol != THIRD_PARTY_BRIDGE_PROTOCOL_VERSION ||
             requestId.isBlank() ||
             requestId.length > 128 ||
+            capability !in setOf("storage.kv@2", "runtime.migration@1") ||
             method.isBlank() ||
             method.length > 128 ||
             params == null ||
@@ -160,8 +162,8 @@ class WebViewThirdPartyDataMigrationRunner(
             migrationError(requestId, "migration_committed", "迁移已经提交，不能继续修改影子数据")
         } else {
             runCatching {
-                when (method) {
-                    "app.storage.get" -> migrationSuccess(
+                when ("$capability#$method") {
+                    "storage.kv@2#get" -> migrationSuccess(
                         requestId,
                         kvStore.get(
                             namespace,
@@ -169,7 +171,7 @@ class WebViewThirdPartyDataMigrationRunner(
                             ThirdPartyKvSpace.Shadow,
                         ) ?: JsonNull,
                     )
-                    "app.storage.set" -> {
+                    "storage.kv@2#set" -> {
                         val value = params["value"] ?: error("缺少 value")
                         val usage = kvStore.set(
                             namespace,
@@ -179,7 +181,7 @@ class WebViewThirdPartyDataMigrationRunner(
                         )
                         migrationSuccess(requestId, usageJson(usage))
                     }
-                    "app.storage.remove" -> migrationSuccess(
+                    "storage.kv@2#remove" -> migrationSuccess(
                         requestId,
                         JsonPrimitive(
                             kvStore.remove(
@@ -189,19 +191,19 @@ class WebViewThirdPartyDataMigrationRunner(
                             ),
                         ),
                     )
-                    "app.storage.keys" -> migrationSuccess(requestId, buildJsonArray {
+                    "storage.kv@2#keys" -> migrationSuccess(requestId, buildJsonArray {
                         kvStore.keys(namespace, ThirdPartyKvSpace.Shadow)
                             .forEach { add(JsonPrimitive(it)) }
                     })
-                    "app.storage.usage" -> migrationSuccess(
+                    "storage.kv@2#usage" -> migrationSuccess(
                         requestId,
                         usageJson(kvStore.usage(namespace, ThirdPartyKvSpace.Shadow)),
                     )
-                    "app.storage.clear" -> {
+                    "storage.kv@2#clear" -> {
                         kvStore.clear(namespace, ThirdPartyKvSpace.Shadow)
                         migrationSuccess(requestId, buildJsonObject { put("cleared", true) })
                     }
-                    "migration.commit" -> {
+                    "runtime.migration@1#commit" -> {
                         committed.complete(true)
                         migrationSuccess(requestId, buildJsonObject { put("committed", true) })
                     }
@@ -276,28 +278,29 @@ class WebViewThirdPartyDataMigrationRunner(
         )
         val MigrationBridgeScript = """
             (function () {
-              if (window.BjtuService && window.BjtuService.invoke) return;
+              if (window.__BJTU_PLUGIN_MIGRATION_V2__) return;
               var pending = Object.create(null);
-              window.BjtuService = {
-                invoke: function (method, params) {
+              window.__BJTU_PLUGIN_MIGRATION_V2__ = Object.freeze({
+                invoke: function (capability, method, params) {
                   return new Promise(function (resolve) {
                     var requestId = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
                     pending[requestId] = resolve;
                     window.BjtuMigrationNative.postMessage(JSON.stringify({
-                      protocol_version: 1,
-                      request_id: requestId,
+                      protocolVersion: 2,
+                      requestId: requestId,
+                      capability: capability,
                       method: method,
                       params: params || {}
                     }));
                   });
                 }
-              };
+              });
               window.BjtuMigrationNative.onmessage = function (event) {
                 try {
                   var response = JSON.parse(event.data);
-                  var callback = pending[response.request_id];
+                  var callback = pending[response.requestId];
                   if (!callback) return;
-                  delete pending[response.request_id];
+                  delete pending[response.requestId];
                   callback(response);
                 } catch (_) {}
               };
@@ -319,30 +322,29 @@ private fun encodedPath(relativePath: String): String =
 
 private fun migrationSuccess(requestId: String, data: kotlinx.serialization.json.JsonElement): JsonObject =
     buildJsonObject {
-        put("protocol_version", THIRD_PARTY_BRIDGE_PROTOCOL_VERSION)
-        put("request_id", requestId)
+        put("protocolVersion", THIRD_PARTY_BRIDGE_PROTOCOL_VERSION)
+        put("requestId", requestId)
         put("ok", true)
-        put("data", data)
+        put("result", data)
     }
 
 private fun migrationError(requestId: String, code: String, message: String): JsonObject =
     buildJsonObject {
-        put("protocol_version", THIRD_PARTY_BRIDGE_PROTOCOL_VERSION)
-        put("request_id", requestId)
+        put("protocolVersion", THIRD_PARTY_BRIDGE_PROTOCOL_VERSION)
+        put("requestId", requestId)
         put("ok", false)
         put("error", buildJsonObject {
             put("code", code)
             put("message", message)
-            put("request_id", requestId)
             put("retryable", false)
         })
     }
 
 private fun usageJson(usage: ThirdPartyKvUsage): JsonObject = buildJsonObject {
-    put("bytes_used", usage.bytesUsed)
-    put("byte_limit", usage.byteLimit)
-    put("key_count", usage.keyCount)
-    put("key_limit", usage.keyLimit)
+    put("bytesUsed", usage.bytesUsed)
+    put("byteLimit", usage.byteLimit)
+    put("keyCount", usage.keyCount)
+    put("keyLimit", usage.keyLimit)
 }
 
 private fun JsonObject.requiredString(name: String): String =

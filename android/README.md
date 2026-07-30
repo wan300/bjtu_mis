@@ -56,20 +56,23 @@ npm run test:frontend -- --run
 
 ## 第三方插件安全基线
 
-第三方插件只使用 Manifest v3 / P0-A。权威规则位于仓库根目录
+第三方插件只使用 Manifest v3 / contract_v1。权威规则位于仓库根目录
 `docs/third-party-services.md` 和 constitution 原则 VII，并覆盖旧 v1/v2 spec、plan、
 API 与兼容说明。
 
-- 新客户端拒绝安装、更新和运行 v1/v2，拒绝 `allowed_origins`；旧数据只通过无桥、
+- 新客户端拒绝安装、更新和运行 v1/v2 与 P0-A v3，拒绝 `allowed_origins`；旧数据只通过无桥、
   无网络的救援 WebView 访问。
 - sandbox origin 由 plugin ID 与不可变 publisher subject 决定，不随 commit 改变；
   bridge 只注入稳定本地 origin 的 main frame，并要求精确 source-origin 匹配。
-- WebView 同时支持 `DOCUMENT_START_SCRIPT` 与 `WEB_MESSAGE_LISTENER` 才允许运行 v3；
+- WebView 同时支持 `DOCUMENT_START_SCRIPT` 与 `WEB_MESSAGE_LISTENER` 才允许运行 contract_v1；
   不使用 `onPageFinished` 降级注入。
-- connect/media/frame/navigation origin 独立声明，`bridge_origins` 只能为 `["self"]`；
+- connect/media/frame/navigation origin 独立声明；bridge origin 由宿主固定为 self，
+  禁止出现在 Manifest；
   远程 frame 无桥、第三方 Cookie、顶层导航、下载、弹窗或多窗口。
-- 插件重要数据使用 publisher+plugin 隔离的 AES-GCM `app.storage`；更新通过影子 KV
-  migration、上一版本包和快照完成原子切换与回滚。
+- 插件重要数据使用 publisher+plugin 隔离的 AES-GCM KV/Blob/Cache；更新通过影子
+  migration、上一版本包和索引快照完成原子切换与回滚。
+- 公共 API 只通过 `@bjtu-mis/plugin-sdk` 的 protocol v2 调用版本化 Capability，
+  不公开 `window.BjtuService` 或底层 transport。
 - 校园访问只允许 MIS/AA/VE 的 `campus.request` 只读 registry。运行时不提供
   `identity.get_credentials`、`identity.credentials.read` 或 `app.http_request`。
 
@@ -109,7 +112,10 @@ API 与兼容说明。
 
 ## 数据迁移
 
-- Room 数据库当前版本为 11。
+- Room 数据库当前版本为 12。
+- `MIGRATION_11_12` 将插件记录区分为 `legacy_v1_v2`、`legacy_v3_p0a` 与
+  `contract_v1`，新增 granted capabilities、contract profile、派生 runtime floor
+  和独立 marketplace 元数据；旧 runtime 被停用但不会删除插件包或数据。
 - `MIGRATION_10_11` 增加插件 publisher subject、data schema、兼容状态、验证级别、上一版本元数据和删除 tombstone；旧插件记录迁移为 `legacy_disabled`，不会自动删除旧包或数据。
 - `MIGRATION_6_7` 仍负责删除旧原生 Agent 的 `agent_tasks`、`agent_steps`、`agent_artifacts` 和 `agent_messages` 表。
 - 应用启动时会调用 `clearLegacyNativeAgentConfiguration`，清理旧 Agent API Key、DataStore 设置和 Android Keystore alias。

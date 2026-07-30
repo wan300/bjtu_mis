@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit
 
 private const val CampusResponseByteLimit = 5L * 1024L * 1024L
 private const val CampusTimeoutSeconds = 15L
+private const val CampusRequestCapability = "campus.request@1"
 
 class ThirdPartyCampusProxy(
     private val sessionManager: SessionManager,
@@ -31,7 +32,7 @@ class ThirdPartyCampusProxy(
         service: ThirdPartyService,
         params: JsonObject,
     ): JsonObject {
-        requireCapability(service)
+        requireCampusRequestCapability(service)
         val campusServiceId = params.string("service_id")?.lowercase(Locale.US)
             ?: throw ThirdPartyCampusProxyException("service_required", "缺少校园服务 ID")
         val unknownParameters = params.keys -
@@ -125,13 +126,6 @@ class ThirdPartyCampusProxy(
         }
     }
 
-    private fun requireCapability(service: ThirdPartyService) {
-        val declared = service.manifest.requiredCapabilities + service.manifest.optionalCapabilities
-        if ("campus.request.v1" !in declared) {
-            throw ThirdPartyCampusProxyException("capability_not_declared", "插件未声明 campus.request.v1")
-        }
-    }
-
     private fun buildUrl(
         spec: CampusPathSpec,
         relativePath: String,
@@ -194,6 +188,22 @@ class ThirdPartyCampusProxy(
             "Cache-Control",
             "ETag",
             "Last-Modified",
+        )
+    }
+}
+
+internal fun requireCampusRequestCapability(service: ThirdPartyService) {
+    val declared = service.manifest.requiredCapabilities + service.manifest.optionalCapabilities
+    if (CampusRequestCapability !in declared) {
+        throw ThirdPartyCampusProxyException(
+            "capability_unavailable",
+            "插件未声明 $CampusRequestCapability",
+        )
+    }
+    if (CampusRequestCapability !in service.grantedCapabilities) {
+        throw ThirdPartyCampusProxyException(
+            "permission_denied",
+            "插件未获得 capability：$CampusRequestCapability",
         )
     }
 }

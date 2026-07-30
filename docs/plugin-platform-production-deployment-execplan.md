@@ -1,5 +1,10 @@
 # ExecPlan：完整部署插件大厅前后端
 
+> 历史记录：本计划记录 2026-07-28 的 P0-A `/api/v2` 上线过程。contract_v1
+> 的当前部署与回滚要求以
+> `docs/plugin-runtime-contract-p0-p1-execplan.md` 和 `deploy/README.md` 为准；
+> 生产 Nginx 还必须代理 `/api/v3/`。
+
 ## 目标
 
 修复 `https://bjtu.cc/plugins/index.html` 的 API 404，完整部署静态前端、PostgreSQL、数据库迁移、Fastify API、校验 Worker、GitHub OAuth 和 Nginx `/api/v1/` 代理。

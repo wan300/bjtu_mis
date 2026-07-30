@@ -1,0 +1,23 @@
+{
+  "name": "create-bjtu-plugin",
+  "version": "0.1.0",
+  "description": "Create a BJTU MIS TypeScript + Vite plugin",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "create-bjtu-plugin": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@bjtu-mis/plugin-cli": "0.1.0"
+  },
+  "engines": {
+    "node": ">=20 <=22"
+  }
+}

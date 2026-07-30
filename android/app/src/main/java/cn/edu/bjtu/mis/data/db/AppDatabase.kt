@@ -301,7 +301,7 @@ interface BjtuMisDao {
         ThirdPartyServiceEntity::class,
         ThirdPartyCleanupTombstoneEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -444,6 +444,60 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
         db.execSQL(CREATE_THIRD_PARTY_CLEANUP_TOMBSTONES_SQL)
     }
 }
+
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        MIGRATION_11_12_ADD_COLUMN_SQL.forEach(db::execSQL)
+        db.execSQL(MIGRATION_11_12_CLASSIFY_AND_DISABLE_SQL)
+    }
+}
+
+internal val MIGRATION_11_12_ADD_COLUMN_SQL = listOf(
+    "ALTER TABLE `third_party_services` ADD COLUMN `granted_capabilities_json` TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE `third_party_services` ADD COLUMN `runtime_profile` TEXT NOT NULL DEFAULT 'legacy_v1_v2'",
+    "ALTER TABLE `third_party_services` ADD COLUMN `runtime_floor` INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE `third_party_services` ADD COLUMN `marketplace_json` TEXT",
+)
+
+internal const val MIGRATION_11_12_CLASSIFY_AND_DISABLE_SQL = """
+UPDATE `third_party_services`
+SET `enabled` = 0,
+    `needs_review` = 1,
+    `granted_capabilities_json` = '[]',
+    `runtime_floor` = CASE
+        WHEN `manifest_json` LIKE '%"schema_version"%3%'
+         AND `manifest_json` LIKE '%"capabilities"%'
+         AND `manifest_json` NOT LIKE '%"permissions"%'
+         AND `manifest_json` NOT LIKE '%"bridge_origins"%'
+         AND `manifest_json` NOT LIKE '%"runtime_version"%'
+         AND `manifest_json` NOT LIKE '%"required_capabilities"%'
+        THEN 2
+        ELSE 0
+    END,
+    `runtime_profile` = CASE
+        WHEN `manifest_json` LIKE '%"schema_version"%3%'
+         AND `manifest_json` LIKE '%"capabilities"%'
+         AND `manifest_json` NOT LIKE '%"permissions"%'
+         AND `manifest_json` NOT LIKE '%"bridge_origins"%'
+         AND `manifest_json` NOT LIKE '%"runtime_version"%'
+         AND `manifest_json` NOT LIKE '%"required_capabilities"%'
+        THEN 'contract_v1'
+        WHEN `manifest_json` LIKE '%"schema_version"%3%'
+         AND `manifest_json` LIKE '%"bridge_origins"%'
+        THEN 'legacy_v3_p0a'
+        ELSE 'legacy_v1_v2'
+    END,
+    `compatibility_state` = CASE
+        WHEN `manifest_json` LIKE '%"schema_version"%3%'
+         AND `manifest_json` LIKE '%"capabilities"%'
+         AND `manifest_json` NOT LIKE '%"permissions"%'
+         AND `manifest_json` NOT LIKE '%"bridge_origins"%'
+         AND `manifest_json` NOT LIKE '%"runtime_version"%'
+         AND `manifest_json` NOT LIKE '%"required_capabilities"%'
+        THEN 'compatible'
+        ELSE 'legacy_disabled'
+    END
+"""
 
 internal val MIGRATION_10_11_ADD_COLUMN_SQL = listOf(
     "ALTER TABLE `third_party_services` ADD COLUMN `publisher_subject_id` TEXT NOT NULL DEFAULT ''",

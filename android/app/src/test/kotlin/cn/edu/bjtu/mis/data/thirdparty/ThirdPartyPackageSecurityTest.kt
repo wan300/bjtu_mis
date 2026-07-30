@@ -114,6 +114,22 @@ class ThirdPartyPackageSecurityTest {
     }
 
     @Test
+    fun originCanonicalizationOmitsDefaultPorts() {
+        assertEquals(
+            "https://example.com",
+            ThirdPartyWebViewAccessPolicy.origin("https://EXAMPLE.com:443/path"),
+        )
+        assertEquals(
+            "http://example.com",
+            ThirdPartyWebViewAccessPolicy.origin("http://example.com:80/path"),
+        )
+        assertEquals(
+            "https://example.com:8443",
+            ThirdPartyWebViewAccessPolicy.origin("https://example.com:8443/path"),
+        )
+    }
+
+    @Test
     fun sandboxHostsAreIsolatedAndValidHostLabels() {
         val first = ThirdPartyServiceSandbox.hostFor("com.example.campus-service", "github-owner:123")
         val sameServiceNewCommit = ThirdPartyServiceSandbox.hostFor("com.example.campus-service", "github-owner:123")

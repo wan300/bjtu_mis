@@ -3,6 +3,7 @@ package cn.edu.bjtu.mis.data.thirdparty
 import cn.edu.bjtu.mis.data.AppJson
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -14,8 +15,13 @@ import java.util.Locale
 object ThirdPartyManifestValidator {
     private val ServiceIdPattern = Regex("^[a-z][a-z0-9_\\-.]{2,63}$")
     private val ConfigurationKeyPattern = Regex("^[A-Z][A-Z0-9_]{0,63}$")
-    private val SemVerPattern = Regex("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$")
-    private val MarketplaceCategories = setOf("academic", "campus", "information", "productivity", "assistant", "other")
+    private val SemVerPattern = Regex(
+        "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)" +
+            "(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?" +
+            "(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+    )
+    private val MarketplaceCategories =
+        setOf("academic", "campus", "information", "productivity", "assistant", "other")
     private val ConfigurationTypes = setOf("text", "secret", "url", "number", "boolean", "select")
     private val CampusHosts = setOf(
         "123.121.147.7",
@@ -31,81 +37,151 @@ object ThirdPartyManifestValidator {
         "schema_version",
         "id",
         "name",
-        "description",
         "version",
-        "runtime_version",
-        "min_runtime_version",
-        "required_capabilities",
-        "optional_capabilities",
-        "data_schema_version",
-        "migration_entrypoint",
         "entrypoint",
         "icon",
-        "author",
-        "permissions",
-        "connect_origins",
-        "media_origins",
-        "frame_origins",
-        "navigation_origins",
-        "bridge_origins",
-        "marketplace",
+        "capabilities",
+        "origins",
+        "data_schema_version",
+        "migration_entrypoint",
         "configuration",
     )
-    private val RequiredManifestFields = ManifestFields - "migration_entrypoint"
+    private val RequiredManifestFields = setOf(
+        "schema_version",
+        "id",
+        "name",
+        "version",
+        "entrypoint",
+        "icon",
+        "capabilities",
+    )
+    private val MarketplaceFields =
+        setOf("description", "author", "category", "tags", "license", "screenshots")
 
     fun decodeAndValidate(
         rawJson: String,
         packageRoot: File? = null,
         allowDevelopmentOrigins: Boolean = false,
     ): ThirdPartyServiceManifest {
-        val rawManifest = runCatching { AppJson.parseToJsonElement(rawJson).jsonObject }
-            .getOrElse { throw ThirdPartyServiceException("bjtu-service.json 不是有效 JSON object", it) }
-        val fields = rawManifest.keys
-        val unknown = fields - ManifestFields
-        if (unknown.isNotEmpty()) {
-            throw ThirdPartyServiceException("Manifest v3 包含未知字段：${unknown.sorted().joinToString()}")
-        }
-        val missing = RequiredManifestFields - fields
-        if (missing.isNotEmpty()) {
-            throw ThirdPartyServiceException("Manifest v3 缺少字段：${missing.sorted().joinToString()}")
-        }
+        val rawManifest = decodeJsonObject(rawJson, THIRD_PARTY_MANIFEST_FILE_NAME)
+        requireExactFields(rawManifest, THIRD_PARTY_MANIFEST_FILE_NAME, ManifestFields, RequiredManifestFields)
         validateRawObjectShape(
-            rawManifest["permissions"],
-            "permissions",
+            rawManifest["capabilities"],
+            "capabilities",
             allowed = setOf("required", "optional"),
-            required = setOf("required", "optional"),
+            required = setOf("required"),
         )
         validateRawObjectShape(
-            rawManifest["marketplace"],
-            "marketplace",
-            allowed = setOf("category", "tags", "license"),
-            required = setOf("category", "tags"),
+            rawManifest["origins"],
+            "origins",
+            allowed = setOf("connect", "media", "frame", "navigation"),
+            required = emptySet(),
+            optionalObject = true,
         )
-        (rawManifest["configuration"] as? JsonArray)?.forEachIndexed { index, value ->
-            validateRawObjectShape(
-                value,
-                "configuration[$index]",
-                allowed = setOf(
-                    "key",
-                    "label",
-                    "description",
-                    "type",
-                    "required",
-                    "default",
-                    "options",
-                ),
-                required = setOf("key", "label", "description", "type", "required"),
+        requireNonEmptyArray(rawManifest["capabilities"]?.jsonObject?.get("required"), "capabilities.required")
+        rawManifest["capabilities"]?.jsonObject?.get("optional")?.let {
+            requireNonEmptyArray(it, "capabilities.optional")
+        }
+        rawManifest["origins"]?.let { origins ->
+            val originObject = origins as? JsonObject
+                ?: throw ThirdPartyServiceException("origins must be an object")
+            if (originObject.isEmpty()) {
+                throw ThirdPartyServiceException("origins must be omitted when no origins are declared")
+            }
+            originObject.forEach { (key, value) -> requireNonEmptyArray(value, "origins.$key") }
+        }
+        rawManifest["configuration"]?.let { configuration ->
+            requireNonEmptyArray(configuration, "configuration")
+            (configuration as JsonArray).forEachIndexed { index, value ->
+                validateRawObjectShape(
+                    value,
+                    "configuration[$index]",
+                    allowed = setOf(
+                        "key",
+                        "label",
+                        "description",
+                        "type",
+                        "required",
+                        "default",
+                        "options",
+                    ),
+                    required = setOf("key", "label", "description", "type", "required"),
+                )
+            }
+        }
+        if (rawManifest["migration_entrypoint"] is JsonNull) {
+            throw ThirdPartyServiceException(
+                "migration_entrypoint must be omitted or contain a local asset path",
             )
         }
-        if ("migration_entrypoint" in rawManifest && rawManifest["migration_entrypoint"] is JsonNull) {
-            throw ThirdPartyServiceException("migration_entrypoint must be omitted or contain a local asset path")
+
+        val manifest = runCatching {
+            AppJson.decodeFromString<ThirdPartyServiceManifest>(rawJson)
+        }.getOrElse {
+            throw ThirdPartyServiceException("$THIRD_PARTY_MANIFEST_FILE_NAME has invalid field types", it)
         }
-        return validate(
-            AppJson.decodeFromString<ThirdPartyServiceManifest>(rawJson),
-            packageRoot,
-            allowDevelopmentOrigins,
-        )
+        val declaresStorage = (
+            manifest.capabilities.required + manifest.capabilities.optional
+            ).any(ThirdPartyCapabilityRegistry::isStorageCapability)
+        val declaresDataVersion = "data_schema_version" in rawManifest
+        val declaresMigration = "migration_entrypoint" in rawManifest
+        if (declaresStorage != declaresDataVersion) {
+            throw ThirdPartyServiceException(
+                "data_schema_version is required only when storage.kv@2 or storage.blob@1 is declared",
+            )
+        }
+        if (declaresStorage && manifest.dataSchemaVersion < 1) {
+            throw ThirdPartyServiceException("data_schema_version must be a positive integer")
+        }
+        if (!declaresStorage && declaresMigration) {
+            throw ThirdPartyServiceException(
+                "migration_entrypoint is only valid for plugins with persistent storage",
+            )
+        }
+        if (manifest.dataSchemaVersion >= 2 && !declaresMigration) {
+            throw ThirdPartyServiceException(
+                "data_schema_version 2 or newer requires migration_entrypoint",
+            )
+        }
+        return validate(manifest, packageRoot, allowDevelopmentOrigins)
     }
+
+    fun decodeAndValidateMarketplace(rawJson: String): ThirdPartyMarketplaceMetadata {
+        val rawMarketplace = decodeJsonObject(rawJson, THIRD_PARTY_MARKETPLACE_FILE_NAME)
+        requireExactFields(
+            rawMarketplace,
+            THIRD_PARTY_MARKETPLACE_FILE_NAME,
+            MarketplaceFields,
+            setOf("description", "author", "category", "tags"),
+        )
+        rawMarketplace["screenshots"]?.let { screenshots ->
+            (screenshots as? JsonArray
+                ?: throw ThirdPartyServiceException("marketplace.screenshots must be an array"))
+                .forEachIndexed { index, value ->
+                    validateRawObjectShape(
+                        value,
+                        "screenshots[$index]",
+                        allowed = setOf("src", "alt"),
+                        required = setOf("src", "alt"),
+                    )
+                }
+        }
+        val marketplace = runCatching {
+            AppJson.decodeFromString<ThirdPartyMarketplaceMetadata>(rawJson)
+        }.getOrElse {
+            throw ThirdPartyServiceException("$THIRD_PARTY_MARKETPLACE_FILE_NAME has invalid field types", it)
+        }
+        return validateMarketplace(marketplace)
+    }
+
+    fun attachMarketplace(
+        manifest: ThirdPartyServiceManifest,
+        marketplace: ThirdPartyMarketplaceMetadata?,
+    ): ThirdPartyServiceManifest = manifest.copy(
+        description = marketplace?.description.orEmpty(),
+        author = marketplace?.author.orEmpty(),
+        marketplace = marketplace,
+    )
 
     fun validate(
         manifest: ThirdPartyServiceManifest,
@@ -113,148 +189,145 @@ object ThirdPartyManifestValidator {
         allowDevelopmentOrigins: Boolean = false,
     ): ThirdPartyServiceManifest {
         if (manifest.schemaVersion != THIRD_PARTY_SERVICE_SCHEMA_VERSION) {
-            throw ThirdPartyServiceException("Unsupported third-party service schema_version: ${manifest.schemaVersion}")
+            throw ThirdPartyServiceException(
+                "Unsupported plugin schema_version: ${manifest.schemaVersion}",
+            )
         }
         if (!ServiceIdPattern.matches(manifest.id)) {
-            throw ThirdPartyServiceException("Third-party service id must be 3-64 chars and contain only lowercase letters, digits, dot, underscore, or hyphen")
+            throw ThirdPartyServiceException(
+                "Plugin id must be 3-64 chars and contain only lowercase letters, digits, dot, underscore, or hyphen",
+            )
         }
         requireText(manifest.name, "name", 80)
-        requireText(manifest.description, "description", 400)
         requireText(manifest.version, "version", 40)
-        requireText(manifest.author, "author", 120)
         if (!SemVerPattern.matches(manifest.version.trim())) {
             throw ThirdPartyServiceException("schema_version 3 version must use semantic versioning")
         }
-        if (manifest.runtimeVersion < 1 || manifest.minRuntimeVersion < 1) {
-            throw ThirdPartyServiceException("runtime_version and min_runtime_version must be positive integers")
-        }
-        if (manifest.minRuntimeVersion > manifest.runtimeVersion) {
-            throw ThirdPartyServiceException("min_runtime_version cannot exceed runtime_version")
-        }
-        if (manifest.minRuntimeVersion > THIRD_PARTY_RUNTIME_VERSION) {
+
+        val requiredCapabilities =
+            normalizeCapabilities(manifest.capabilities.required, "capabilities.required")
+        val optionalCapabilities =
+            normalizeCapabilities(manifest.capabilities.optional, "capabilities.optional")
+        if ("runtime.lifecycle@1" !in requiredCapabilities) {
             throw ThirdPartyServiceException(
-                "Plugin requires runtime ${manifest.minRuntimeVersion}, host provides $THIRD_PARTY_RUNTIME_VERSION",
+                "runtime.lifecycle@1 must be declared in capabilities.required",
             )
         }
-        if (manifest.dataSchemaVersion < 1) {
-            throw ThirdPartyServiceException("data_schema_version must be a positive integer")
-        }
-        val requiredCapabilities = normalizeCapabilities(manifest.requiredCapabilities, "required_capabilities")
-        val optionalCapabilities = normalizeCapabilities(manifest.optionalCapabilities, "optional_capabilities")
         val duplicatedCapabilities = requiredCapabilities.toSet().intersect(optionalCapabilities.toSet())
         if (duplicatedCapabilities.isNotEmpty()) {
             throw ThirdPartyServiceException(
-                "Capabilities cannot appear in both required and optional: ${duplicatedCapabilities.joinToString()}",
+                "Capabilities cannot appear in both required and optional: " +
+                    duplicatedCapabilities.joinToString(),
             )
         }
-        val missingRequiredCapabilities = requiredCapabilities - THIRD_PARTY_RUNTIME_CAPABILITIES
-        if (missingRequiredCapabilities.isNotEmpty()) {
+        val runtimeFloor = ThirdPartyCapabilityRegistry.runtimeFloor(requiredCapabilities)
+        if (runtimeFloor > THIRD_PARTY_RUNTIME_VERSION) {
             throw ThirdPartyServiceException(
-                "Host does not support required capabilities: ${missingRequiredCapabilities.joinToString()}",
+                "Plugin requires runtime $runtimeFloor, host provides $THIRD_PARTY_RUNTIME_VERSION",
             )
         }
+
         val normalizedEntrypoint = validateAssetPath(manifest.entrypoint, "entrypoint")
         val normalizedIcon = validateAssetPath(manifest.icon, "icon")
         val normalizedMigrationEntrypoint = manifest.migrationEntrypoint
             ?.takeIf { it.isNotBlank() }
             ?.let { validateAssetPath(it, "migration_entrypoint") }
         if (!isSupportedThirdPartyIconPath(normalizedIcon)) {
-            throw ThirdPartyServiceException(
-                "Third-party service icon must be SVG, PNG, WebP, JPG, or JPEG",
-            )
+            throw ThirdPartyServiceException("Plugin icon must be SVG, PNG, WebP, JPG, or JPEG")
         }
-
-        val required = normalizePermissions(manifest.permissions.required, "permissions.required")
-        val optional = normalizePermissions(manifest.permissions.optional, "permissions.optional")
-        val duplicates = required.toSet().intersect(optional.toSet())
-        if (duplicates.isNotEmpty()) {
-            throw ThirdPartyServiceException("Permissions cannot appear in both required and optional: ${duplicates.joinToString()}")
-        }
-        (required + optional).forEach { ThirdPartyPermissionRegistry.requireKnown(it) }
 
         val connectOrigins = normalizeOrigins(
-            manifest.connectOrigins,
-            "connect_origins",
+            manifest.origins.connect,
+            "origins.connect",
             allowDevelopmentOrigins,
             blockCampusHosts = true,
         )
         val mediaOrigins = normalizeOrigins(
-            manifest.mediaOrigins,
-            "media_origins",
+            manifest.origins.media,
+            "origins.media",
             allowDevelopmentOrigins,
             blockCampusHosts = true,
         )
         val frameOrigins = normalizeOrigins(
-            manifest.frameOrigins,
-            "frame_origins",
+            manifest.origins.frame,
+            "origins.frame",
             allowDevelopmentOrigins,
             blockCampusHosts = true,
         )
         val navigationOrigins = normalizeOrigins(
-            manifest.navigationOrigins,
-            "navigation_origins",
+            manifest.origins.navigation,
+            "origins.navigation",
             allowDevelopmentOrigins,
             blockCampusHosts = false,
         )
-        if (manifest.bridgeOrigins != listOf("self")) {
-            throw ThirdPartyServiceException("bridge_origins must be exactly [\"self\"]")
+        val declaredCapabilities = (requiredCapabilities + optionalCapabilities).toSet()
+        if (frameOrigins.isNotEmpty() && "remote.frame@1" !in declaredCapabilities) {
+            throw ThirdPartyServiceException("origins.frame requires remote.frame@1")
         }
-        if (frameOrigins.isNotEmpty() && "remote.frame.v1" !in requiredCapabilities) {
-            throw ThirdPartyServiceException("frame_origins requires remote.frame.v1 in required_capabilities")
+        if (
+            navigationOrigins.isNotEmpty() &&
+            "navigation.external@1" !in declaredCapabilities
+        ) {
+            throw ThirdPartyServiceException(
+                "origins.navigation requires navigation.external@1",
+            )
+        }
+        if (manifest.configuration.isNotEmpty() && "configuration.read@1" !in declaredCapabilities) {
+            throw ThirdPartyServiceException("configuration requires configuration.read@1")
         }
 
         if (packageRoot != null) {
             val dist = File(packageRoot, "dist").canonicalFile
-            if (!dist.isDirectory) throw ThirdPartyServiceException("Third-party service package is missing dist/ directory")
+            if (!dist.isDirectory) {
+                throw ThirdPartyServiceException("Plugin package is missing dist/ directory")
+            }
             val entrypointFile = resolveAssetFile(dist, normalizedEntrypoint, "entrypoint")
             if (!entrypointFile.isFile) {
-                throw ThirdPartyServiceException("Third-party service entrypoint does not exist: ${manifest.entrypoint}")
+                throw ThirdPartyServiceException("Plugin entrypoint does not exist: ${manifest.entrypoint}")
             }
             val iconFile = resolveAssetFile(dist, normalizedIcon, "icon")
             if (!iconFile.isFile) {
-                throw ThirdPartyServiceException("Third-party service icon does not exist: ${manifest.icon}")
+                throw ThirdPartyServiceException("Plugin icon does not exist: ${manifest.icon}")
             }
             if (iconFile.length() !in 1..MAX_THIRD_PARTY_ICON_BYTES) {
-                throw ThirdPartyServiceException("Third-party service icon must be 1 byte to 1 MiB")
+                throw ThirdPartyServiceException("Plugin icon must be 1 byte to 1 MiB")
             }
             normalizedMigrationEntrypoint?.let { migrationEntrypoint ->
-                val migrationFile = resolveAssetFile(dist, migrationEntrypoint, "migration_entrypoint")
-                if (!migrationFile.isFile) {
+                if (!resolveAssetFile(dist, migrationEntrypoint, "migration_entrypoint").isFile) {
                     throw ThirdPartyServiceException(
-                        "Third-party service migration_entrypoint does not exist: $migrationEntrypoint",
+                        "Plugin migration_entrypoint does not exist: $migrationEntrypoint",
                     )
                 }
             }
         }
 
-        val marketplace = validateMarketplace(manifest)
-        val configuration = validateConfiguration(manifest, required)
-
+        val configuration = validateConfiguration(manifest.configuration)
         return manifest.copy(
             id = manifest.id.trim(),
             name = manifest.name.trim(),
-            description = manifest.description.trim(),
             version = manifest.version.trim(),
-            requiredCapabilities = requiredCapabilities,
-            optionalCapabilities = optionalCapabilities,
             entrypoint = normalizedEntrypoint,
-            migrationEntrypoint = normalizedMigrationEntrypoint,
             icon = normalizedIcon,
-            author = manifest.author.trim(),
-            permissions = ThirdPartyServicePermissionDeclaration(required = required, optional = optional),
-            connectOrigins = connectOrigins,
-            mediaOrigins = mediaOrigins,
-            frameOrigins = frameOrigins,
-            navigationOrigins = navigationOrigins,
-            bridgeOrigins = listOf("self"),
-            marketplace = marketplace,
+            capabilities = ThirdPartyCapabilityDeclaration(
+                required = requiredCapabilities,
+                optional = optionalCapabilities,
+            ),
+            origins = ThirdPartyOriginDeclaration(
+                connect = connectOrigins,
+                media = mediaOrigins,
+                frame = frameOrigins,
+                navigation = navigationOrigins,
+            ),
+            migrationEntrypoint = normalizedMigrationEntrypoint,
             configuration = configuration,
         )
     }
 
-    private fun validateMarketplace(manifest: ThirdPartyServiceManifest): ThirdPartyMarketplaceMetadata? {
-        val marketplace = manifest.marketplace
-            ?: throw ThirdPartyServiceException("schema_version 3 requires marketplace metadata")
+    private fun validateMarketplace(
+        marketplace: ThirdPartyMarketplaceMetadata,
+    ): ThirdPartyMarketplaceMetadata {
+        requireText(marketplace.description, "marketplace.description", 400)
+        requireText(marketplace.author, "marketplace.author", 120)
         val category = marketplace.category.trim().lowercase()
         if (category !in MarketplaceCategories) {
             throw ThirdPartyServiceException("Unknown marketplace category: ${marketplace.category}")
@@ -262,80 +335,113 @@ object ThirdPartyManifestValidator {
         if (marketplace.tags.size > 5) {
             throw ThirdPartyServiceException("marketplace.tags cannot contain more than 5 entries")
         }
-        val tags = marketplace.tags.map { it.trim() }
+        val tags = marketplace.tags.map(String::trim)
         if (tags.any { it.length !in 1..20 }) {
             throw ThirdPartyServiceException("marketplace tags must be 1-20 characters")
         }
-        if (tags.map { it.lowercase() }.size != tags.map { it.lowercase() }.toSet().size) {
+        if (tags.map(String::lowercase).size != tags.map(String::lowercase).toSet().size) {
             throw ThirdPartyServiceException("marketplace.tags contains duplicates")
         }
-        if (marketplace.license != null && marketplace.license.isBlank()) {
-            throw ThirdPartyServiceException("marketplace.license must not be blank when provided")
-        }
         val license = marketplace.license?.trim()
-        if (license != null && license.length > 80) {
-            throw ThirdPartyServiceException("marketplace.license cannot exceed 80 characters")
+        if (license != null && license.length !in 1..80) {
+            throw ThirdPartyServiceException("marketplace.license must be 1-80 characters")
         }
-        return ThirdPartyMarketplaceMetadata(category = category, tags = tags, license = license)
+        if (marketplace.screenshots.size > 8) {
+            throw ThirdPartyServiceException("marketplace.screenshots cannot contain more than 8 entries")
+        }
+        val screenshots = marketplace.screenshots.map { screenshot ->
+            val src = screenshot.src.trim()
+            val alt = screenshot.alt.trim()
+            if (src.isEmpty()) {
+                throw ThirdPartyServiceException("marketplace screenshot src cannot be blank")
+            }
+            if (alt.length !in 1..160) {
+                throw ThirdPartyServiceException("marketplace screenshot alt must be 1-160 characters")
+            }
+            screenshot.copy(src = src, alt = alt)
+        }
+        return marketplace.copy(
+            description = marketplace.description.trim(),
+            author = marketplace.author.trim(),
+            category = category,
+            tags = tags,
+            license = license,
+            screenshots = screenshots,
+        )
     }
 
     private fun validateConfiguration(
-        manifest: ThirdPartyServiceManifest,
-        requiredPermissions: List<String>,
+        definitions: List<ThirdPartyConfigurationDefinition>,
     ): List<ThirdPartyConfigurationDefinition> {
-        if (manifest.configuration.size > 32) {
+        if (definitions.size > 32) {
             throw ThirdPartyServiceException("configuration cannot contain more than 32 entries")
         }
-        if (manifest.configuration.isNotEmpty() && "app.configuration.read" !in requiredPermissions) {
-            throw ThirdPartyServiceException("configuration requires app.configuration.read in permissions.required")
-        }
-        val normalized = manifest.configuration.map { definition ->
+        val normalized = definitions.map { definition ->
             val key = definition.key.trim()
             if (!ConfigurationKeyPattern.matches(key)) {
                 throw ThirdPartyServiceException("Invalid configuration key: ${definition.key}")
             }
             val label = definition.label.trim()
             val description = definition.description.trim()
-            if (label.isEmpty() || label.length > 80) {
+            if (label.length !in 1..80) {
                 throw ThirdPartyServiceException("configuration label must be 1-80 characters: $key")
             }
             if (description.length > 240) {
-                throw ThirdPartyServiceException("configuration description cannot exceed 240 characters: $key")
+                throw ThirdPartyServiceException(
+                    "configuration description cannot exceed 240 characters: $key",
+                )
             }
             val type = definition.type.trim().lowercase()
             if (type !in ConfigurationTypes) {
-                throw ThirdPartyServiceException("Unknown configuration type for $key: ${definition.type}")
+                throw ThirdPartyServiceException(
+                    "Unknown configuration type for $key: ${definition.type}",
+                )
             }
-            val options = definition.options.map { it.trim() }
+            val options = definition.options.map(String::trim)
             if (type == "select") {
-                if (options.isEmpty() || options.size > 20 || options.any { it.isEmpty() } || options.size != options.toSet().size) {
-                    throw ThirdPartyServiceException("select configuration requires 1-20 unique non-empty options: $key")
+                if (
+                    options.isEmpty() ||
+                    options.size > 20 ||
+                    options.any(String::isEmpty) ||
+                    options.size != options.toSet().size
+                ) {
+                    throw ThirdPartyServiceException(
+                        "select configuration requires 1-20 unique non-empty options: $key",
+                    )
                 }
             } else if (options.isNotEmpty()) {
-                throw ThirdPartyServiceException("configuration options are only valid for select: $key")
+                throw ThirdPartyServiceException(
+                    "configuration options are only valid for select: $key",
+                )
             }
-            val default = definition.default
-            if (type == "secret" && default != null) {
+            if (type == "secret" && definition.default != null) {
                 throw ThirdPartyServiceException("secret configuration cannot declare a default: $key")
             }
-            validateConfigurationDefault(key, type, default, options)
+            validateConfigurationDefault(key, type, definition.default, options)
             definition.copy(
                 key = key,
                 label = label,
                 description = description,
                 type = type,
-                default = default?.trim(),
+                default = definition.default?.trim(),
                 options = options,
             )
         }
         val duplicateKeys = normalized.groupingBy { it.key }.eachCount().filterValues { it > 1 }.keys
         if (duplicateKeys.isNotEmpty()) {
-            throw ThirdPartyServiceException("configuration contains duplicate keys: ${duplicateKeys.joinToString()}")
+            throw ThirdPartyServiceException(
+                "configuration contains duplicate keys: ${duplicateKeys.joinToString()}",
+            )
         }
         return normalized
     }
 
-    private fun validateConfigurationDefault(key: String, type: String, default: String?, options: List<String>) {
+    private fun validateConfigurationDefault(
+        key: String,
+        type: String,
+        default: String?,
+        options: List<String>,
+    ) {
         val value = default?.trim() ?: return
         when (type) {
             "number" -> if (value.toDoubleOrNull() == null) {
@@ -347,11 +453,15 @@ object ThirdPartyManifestValidator {
             "url" -> {
                 val uri = runCatching { URI(value) }.getOrNull()
                 if (uri?.scheme?.lowercase() !in setOf("http", "https") || uri?.host.isNullOrBlank()) {
-                    throw ThirdPartyServiceException("configuration default must be an HTTP/HTTPS URL: $key")
+                    throw ThirdPartyServiceException(
+                        "configuration default must be an HTTP/HTTPS URL: $key",
+                    )
                 }
             }
             "select" -> if (value !in options) {
-                throw ThirdPartyServiceException("configuration default must be one of its options: $key")
+                throw ThirdPartyServiceException(
+                    "configuration default must be one of its options: $key",
+                )
             }
         }
     }
@@ -359,16 +469,17 @@ object ThirdPartyManifestValidator {
     fun validateAssetPath(value: String, fieldName: String): String = normalizeAssetPath(value).also {
         val raw = value.trim()
         if (it.isBlank()) throw ThirdPartyServiceException("$fieldName cannot be blank")
-        if (raw.startsWith("/") || raw.contains("\\") || raw.contains(":") || it.split('/').any { part -> part == ".." }) {
+        if (
+            raw.startsWith("/") ||
+            raw.contains("\\") ||
+            raw.contains(":") ||
+            it.split('/').any { part -> part == ".." }
+        ) {
             throw ThirdPartyServiceException("$fieldName must be a relative path inside dist/")
         }
     }
 
-    private fun resolveAssetFile(
-        dist: File,
-        relativePath: String,
-        fieldName: String,
-    ): File {
+    private fun resolveAssetFile(dist: File, relativePath: String, fieldName: String): File {
         val file = File(dist, relativePath).canonicalFile
         if (!file.toPath().startsWith(dist.toPath()) || file == dist) {
             throw ThirdPartyServiceException("$fieldName must stay inside dist/")
@@ -395,20 +506,35 @@ object ThirdPartyManifestValidator {
         if (scheme != "https" && !localhostDevelopmentOrigin) {
             throw ThirdPartyServiceException("$fieldName only supports HTTPS origins")
         }
-        if (host.isBlank() || uri.rawUserInfo != null || !uri.rawQuery.isNullOrBlank() || !uri.rawFragment.isNullOrBlank()) {
-            throw ThirdPartyServiceException("$fieldName must contain origins without userinfo, query, or fragment: $raw")
+        if (
+            host.isBlank() ||
+            uri.rawUserInfo != null ||
+            !uri.rawQuery.isNullOrBlank() ||
+            !uri.rawFragment.isNullOrBlank()
+        ) {
+            throw ThirdPartyServiceException(
+                "$fieldName must contain origins without userinfo, query, or fragment: $raw",
+            )
         }
         val path = uri.rawPath.orEmpty()
         if (path.isNotBlank() && path != "/") {
             throw ThirdPartyServiceException("$fieldName cannot include path: $raw")
         }
         if (!localhostDevelopmentOrigin && isPrivateOrLocalHost(host)) {
-            throw ThirdPartyServiceException("$fieldName cannot include private, loopback, link-local, or local hosts: $host")
+            throw ThirdPartyServiceException(
+                "$fieldName cannot include private, loopback, link-local, or local hosts: $host",
+            )
         }
         if (blockCampusHosts && isCampusHost(host)) {
-            throw ThirdPartyServiceException("$fieldName cannot include campus service hosts; use campus.request: $host")
+            throw ThirdPartyServiceException(
+                "$fieldName cannot include campus service hosts; use campus.request@1: $host",
+            )
         }
-        val port = uri.port.takeIf { it != -1 }?.let { ":$it" }.orEmpty()
+        val defaultPort = if (scheme == "https") 443 else 80
+        val port = uri.port
+            .takeIf { it != -1 && it != defaultPort }
+            ?.let { ":$it" }
+            .orEmpty()
         return "$scheme://$host$port"
     }
 
@@ -420,21 +546,7 @@ object ThirdPartyManifestValidator {
         if (normalized.size != normalized.toSet().size) {
             throw ThirdPartyServiceException("$fieldName contains duplicates")
         }
-        val unknown = normalized.toSet() - THIRD_PARTY_RUNTIME_CAPABILITIES
-        if (unknown.isNotEmpty()) {
-            throw ThirdPartyServiceException("$fieldName contains unknown capabilities: ${unknown.joinToString()}")
-        }
-        return normalized
-    }
-
-    private fun normalizePermissions(values: List<String>, fieldName: String): List<String> {
-        val normalized = values.map(String::trim)
-        if (normalized.any(String::isBlank)) {
-            throw ThirdPartyServiceException("$fieldName cannot contain blank values")
-        }
-        if (normalized.size != normalized.toSet().size) {
-            throw ThirdPartyServiceException("$fieldName contains duplicates")
-        }
+        normalized.forEach(ThirdPartyCapabilityRegistry::requireKnown)
         return normalized
     }
 
@@ -461,7 +573,7 @@ object ThirdPartyManifestValidator {
     private fun isCampusHost(host: String): Boolean =
         host in CampusHosts || host.endsWith(".bjtu.edu.cn")
 
-    private fun isPrivateOrLocalHost(host: String): Boolean {
+    internal fun isPrivateOrLocalHost(host: String): Boolean {
         val normalized = host.removePrefix("[").removeSuffix("]").lowercase(Locale.US)
         if (
             normalized == "localhost" ||
@@ -498,7 +610,12 @@ object ThirdPartyManifestValidator {
             address.isLoopbackAddress ||
             address.isLinkLocalAddress ||
             address.isSiteLocalAddress ||
-            address.isMulticastAddress
+            address.isMulticastAddress ||
+            (
+                address.address.size == 4 &&
+                    (address.address[0].toInt() and 0xff) == 100 &&
+                    (address.address[1].toInt() and 0xc0) == 64
+                )
     }
 
     private fun requireText(value: String, fieldName: String, maxLength: Int) {
@@ -509,20 +626,23 @@ object ThirdPartyManifestValidator {
         }
     }
 
-    private fun validateRawObjectShape(
-        value: kotlinx.serialization.json.JsonElement?,
+    private fun decodeJsonObject(rawJson: String, fileName: String): JsonObject =
+        runCatching { AppJson.parseToJsonElement(rawJson).jsonObject }
+            .getOrElse { throw ThirdPartyServiceException("$fileName is not a valid JSON object", it) }
+
+    private fun requireExactFields(
+        value: JsonObject,
         fieldName: String,
         allowed: Set<String>,
         required: Set<String>,
     ) {
-        val objectValue = value as? JsonObject ?: return
-        val unknown = objectValue.keys - allowed
+        val unknown = value.keys - allowed
         if (unknown.isNotEmpty()) {
             throw ThirdPartyServiceException(
                 "$fieldName contains unknown fields: ${unknown.sorted().joinToString()}",
             )
         }
-        val missing = required - objectValue.keys
+        val missing = required - value.keys
         if (missing.isNotEmpty()) {
             throw ThirdPartyServiceException(
                 "$fieldName is missing fields: ${missing.sorted().joinToString()}",
@@ -530,6 +650,27 @@ object ThirdPartyManifestValidator {
         }
     }
 
+    private fun validateRawObjectShape(
+        value: JsonElement?,
+        fieldName: String,
+        allowed: Set<String>,
+        required: Set<String>,
+        optionalObject: Boolean = false,
+    ) {
+        if (value == null && optionalObject) return
+        val objectValue = value as? JsonObject
+            ?: throw ThirdPartyServiceException("$fieldName must be an object")
+        requireExactFields(objectValue, fieldName, allowed, required)
+    }
+
+    private fun requireNonEmptyArray(value: JsonElement?, fieldName: String) {
+        val array = value as? JsonArray
+            ?: throw ThirdPartyServiceException("$fieldName must be an array")
+        if (array.isEmpty()) {
+            throw ThirdPartyServiceException("$fieldName must be omitted instead of empty")
+        }
+    }
+
     private fun normalizeAssetPath(value: String): String =
-        value.trim().replace('\\', '/').split('/').filter { it.isNotBlank() }.joinToString("/")
+        value.trim().replace('\\', '/').split('/').filter(String::isNotBlank).joinToString("/")
 }

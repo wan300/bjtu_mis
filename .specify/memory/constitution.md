@@ -1,14 +1,14 @@
 <!--
 Sync Impact Report
-Version change: 1.0.0 -> 1.1.0
-Modified principles: IV. 外部系统与 Agent 工具变更必须可测试（扩展插件平台安全测试）; V. 最小依赖与干净提交（允许受控提交 Room 迁移 schema 历史）; VI. 高风险变更必须先有 ExecPlan（纳入插件信任边界）
-Added principles: VII. 插件平台安全基线不得降级
-Added sections: Governance 中的插件安全策略优先级
+Version change: 1.1.0 -> 1.2.0
+Modified principles: IV. 外部系统与 Agent 工具变更必须可测试（增加契约生成、Capability、命令幂等、网络和资源测试）; VII. 插件平台安全基线不得降级（以 contract_v1 取代 P0-A，并把 bridge origin 固定为宿主不变量）
+Added principles: none
+Added sections: none
 Removed sections: none
 Templates requiring updates: .specify/templates/spec-template.md (updated); .specify/templates/plan-template.md (updated); .specify/templates/tasks-template.md (updated)
-Runtime guidance requiring updates: AGENTS.md (updated); PLANS.md (updated); README.md (updated); android/README.md (updated); docs/third-party-services.md (updated); docs/plugin-platform-manifest-v3-p0a-execplan.md (updated); web/developers.html (updated); web/platform/README.md (updated)
-Superseded feature artifacts: specs/001-plugin-marketplace/spec.md (amended); specs/001-plugin-marketplace/plan.md (archived in favor of docs/plugin-platform-manifest-v3-p0a-execplan.md); specs/001-plugin-marketplace/checklists/requirements.md (updated)
-Deferred follow-ups: none
+Runtime guidance requiring updates: AGENTS.md (updated); PLANS.md (updated); README.md (updated); android/README.md (updated); docs/third-party-services.md (updated); web/developers.html (updated); web/platform/README.md (updated)
+Superseded feature artifacts: docs/plugin-platform-manifest-v3-p0a-execplan.md (superseded by docs/plugin-runtime-contract-p0-p1-execplan.md); specs/001-plugin-marketplace/* remain historical
+Deferred follow-ups: P2 下载队列、设备能力、声明式扩展点和正式诊断面板
 -->
 
 # BJTU MIS Android Constitution
@@ -33,9 +33,11 @@ Rationale: 清晰边界让校园服务适配、缓存、离线能力、安全存
 
 Rationale: 校园服务和网络并不总是稳定，本应用的核心价值包括本地快照和离线访问。
 
-### IV. 外部系统与 Agent 工具变更必须可测试
+### IV. 外部系统、Agent 工具与插件契约变更必须可测试
 
-parser 变更 MUST 使用 fixture 覆盖成功、缺字段和上游结构变化。provider/repository 变更 SHOULD 使用 MockWebServer、fixture 或 fake/store 模式，不依赖真实校园账号或线上服务。Agent 文件、归档、文档、代码、邮件和结果打包工具变更 MUST 覆盖 workspace 边界、路径穿越、大小限制、条目数量、确认流程和错误反馈。Open WebUI local-first、handoff、工具参数或流式输出变更 MUST 运行对应 Vitest。第三方插件平台、Manifest、WebView runtime、存储、更新或校园代理变更 MUST 覆盖 v3 schema、v1/v2 拒绝、稳定发布者主体、main-frame/source-origin 桥接约束、迁移与回滚以及校园只读 registry。
+parser 变更 MUST 使用 fixture 覆盖成功、缺字段和上游结构变化。provider/repository 变更 SHOULD 使用 MockWebServer、fixture 或 fake/store 模式，不依赖真实校园账号或线上服务。Agent 文件、归档、文档、代码、邮件和结果打包工具变更 MUST 覆盖 workspace 边界、路径穿越、大小限制、条目数量、确认流程和错误反馈。Open WebUI local-first、handoff、工具参数或流式输出变更 MUST 运行对应 Vitest。
+
+第三方插件平台、Manifest、WebView runtime、Capability、存储、更新、网络或校园代理变更 MUST 覆盖契约生成确定性、生成物漂移、v3 schema、v1/v2 与 P0-A 拒绝、稳定发布者主体、main-frame/source-origin 桥接约束、授权与逐次确认、命令幂等、SSRF/重定向/Header/Cookie 边界、配额、迁移与回滚以及校园只读 registry。生成的 TypeScript、Kotlin、Schema、lint 和开发者文档 MUST 由同一 Capability Contract Registry 派生，并由阻塞测试证明一致。
 
 Rationale: 上游页面和工具输入不受本项目控制，测试必须固定风险边界并防止回归。
 
@@ -51,13 +53,15 @@ Room 迁移、权限或网络安全配置、凭据/Cookie 存储、生产配置�
 
 Rationale: 高风险变更需要可交接的上下文和回滚路径，不能只依赖聊天记录或临时判断。
 
-### VII. 插件平台安全基线不得降级
+### VII. 插件平台契约化安全基线不得降级
 
-Manifest v3 / P0-A 是第三方插件唯一有效的安全与兼容基线。新客户端 MUST 拒绝安装、更新和运行 Manifest v1/v2，MUST 拒绝 `allowed_origins`，且 MUST NOT 恢复 `identity.get_credentials`、`identity.credentials.read` 或通用原生 `app.http_request`。旧包和数据只能保留在无桥、无网络的救援环境中，除非用户明确删除。
+Manifest v3 / contract_v1 是第三方插件唯一有效的运行与兼容基线。新客户端 MUST 拒绝安装、更新和运行 Manifest v1/v2 以及 P0-A v3，MUST 拒绝 `allowed_origins`、`permissions`、`runtime_version`、`min_runtime_version`、`bridge_origins` 和内嵌 marketplace 元数据，且 MUST NOT 恢复 `identity.get_credentials`、`identity.credentials.read` 或通用原生 `app.http_request`。旧包和数据只能保留在无桥、无网络的救援环境中，除非用户明确删除；P0-A v3 仅可在 publisher subject、plugin ID 与数据版本全部匹配时原位升级为 contract_v1。
 
-原生桥 MUST 仅注入由 plugin ID 与不可变 publisher subject 决定的稳定本地 origin，且消息必须来自 main frame 并精确匹配 source origin。远程来源 MUST 按 connect、media、frame、navigation 分离；`bridge_origins` MUST 严格为 `["self"]`。校园会话只能通过宿主登记的只读 `campus.request` registry 使用，Cookie、认证头和明文凭据不得暴露给插件。
+原生桥 MUST 仅注入由 plugin ID 与不可变 publisher subject 决定的稳定本地 origin，且消息必须来自 main frame 并精确匹配 source origin。桥接 origin 是宿主固定为 self 的不变量，插件 Manifest 不得声明或扩展它；远程 frame 永远无桥。远程来源 MUST 按 connect、media、frame、navigation 分离。校园会话只能通过宿主登记的只读 `campus.request` registry 使用，Cookie、认证头和明文凭据不得暴露给插件。
 
-插件持久化、更新和删除 MUST 使用 publisher+plugin 隔离、加密且受配额约束的数据空间，并保持迁移、快照、回滚、增量授权和失败清理可恢复。任何文档、旧 feature spec、兼容代码或迁移期 API 都不得被用来削弱这些约束；需要改变本基线时 MUST 先修订 constitution、维护新的安全 ExecPlan 并通过对应阻塞验证。
+插件公开 API MUST 通过 SDK 的命名空间和 protocol v2 调用 Capability；底层 transport 不得作为公共 API 暴露。Capability ID、版本、方法、请求/响应 Schema、权限、逐次确认、配额、超时、错误、平台支持范围和稳定性 MUST 以单一 JSON Contract Registry 为权威来源。optional Capability 默认关闭；所有改变校园或宿主状态的 Command Capability MUST 逐次确认并使用请求摘要绑定的 idempotency key。
+
+插件公网访问 MUST 使用无 Cookie、无宿主认证器的隔离客户端，并在初始请求、每次 DNS 解析和每次重定向重新阻止校园、私网、回环和链路本地目标。插件持久化、更新和删除 MUST 使用 publisher+plugin 隔离、加密且受配额约束的数据空间，并保持迁移、快照、回滚、增量授权和失败清理可恢复。任何文档、旧 feature spec、兼容代码或迁移期 API 都不得被用来削弱这些约束；需要改变本基线时 MUST 先修订 constitution、维护新的安全 ExecPlan 并通过对应阻塞验证。
 
 Rationale: 插件代码不受宿主控制，稳定身份、最小桥接、分域联网、事务数据和只读校园代理必须作为统一零信任边界，而不能由旧兼容策略逐项回退。
 
@@ -79,8 +83,8 @@ Rationale: 插件代码不受宿主控制，稳定身份、最小桥接、分域
 插件安全策略的规范优先级依次为：
 
 1. 本 constitution，尤其是原则 VII；
-2. `docs/third-party-services.md` 与两份字节一致的 Manifest v3 schema；
-3. 当前有效的 `docs/plugin-platform-manifest-v3-p0a-execplan.md`、实现和阻塞测试；
+2. `plugin-tooling/contracts/capability-contracts.json`、`docs/third-party-services.md` 与生成且字节一致的 Manifest/marketplace schema；
+3. 当前有效的 `docs/plugin-runtime-contract-p0-p1-execplan.md`、实现和阻塞测试；
 4. 带有 superseded/legacy 标记的旧 spec、plan、API 和迁移说明，仅可用于历史追踪或数据救援。
 
 低优先级材料与高优先级规则冲突时，冲突部分自动失效。旧文档不得授权重新启用 v1/v2 运行时、聚合 origin、远程桥、明文凭据读取或通用原生 HTTP。
@@ -92,4 +96,4 @@ Rationale: 插件代码不受宿主控制，稳定身份、最小桥接、分域
 3. 破坏性治理调整、原则删除或原则重新定义升级 MAJOR；新增原则或实质扩展升级 MINOR；措辞澄清和非语义修正升级 PATCH。
 4. 任何 feature spec、implementation plan 或任务拆分 MUST 通过模板中的 Constitution Check；未通过项必须先调整设计或写入明确的 `TODO: confirm` 阻塞说明。
 
-**Version**: 1.1.0 | **Ratified**: 2026-06-11 | **Last Amended**: 2026-07-28
+**Version**: 1.2.0 | **Ratified**: 2026-06-11 | **Last Amended**: 2026-07-29

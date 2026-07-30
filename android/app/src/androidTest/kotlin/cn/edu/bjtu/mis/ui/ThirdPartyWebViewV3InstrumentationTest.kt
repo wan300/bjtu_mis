@@ -13,20 +13,30 @@ import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import cn.edu.bjtu.mis.data.thirdparty.BridgeTransport
 import cn.edu.bjtu.mis.data.thirdparty.FileThirdPartyKvStore
+import cn.edu.bjtu.mis.data.thirdparty.PluginDiagnostics
+import cn.edu.bjtu.mis.data.thirdparty.PluginNavigationController
+import cn.edu.bjtu.mis.data.thirdparty.PluginRuntimeEvent
+import cn.edu.bjtu.mis.data.thirdparty.PluginWebViewPolicy
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyCapabilityDeclaration
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyKvCipher
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyKvNamespace
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyMarketplaceMetadata
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyOriginDeclaration
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyRuntimeProfile
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyService
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceApiRegistry
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceManifest
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceSandbox
+import cn.edu.bjtu.mis.data.thirdparty.ThirdPartySensitiveActionConfirmer
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyWebViewAccessPolicy
-import cn.edu.bjtu.mis.ui.screens.configureThirdPartyPluginWebView
-import cn.edu.bjtu.mis.ui.screens.dispatchRuntimeEvent
-import cn.edu.bjtu.mis.ui.screens.supportsThirdPartyV3Runtime
-import cn.edu.bjtu.mis.ui.screens.thirdPartySecurityHeaders
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -40,7 +50,7 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class ThirdPartyWebViewV3InstrumentationTest {
@@ -50,17 +60,18 @@ class ThirdPartyWebViewV3InstrumentationTest {
         instrumentation.runOnMainSync {
             val webView = WebView(instrumentation.targetContext)
             try {
-                configureThirdPartyPluginWebView(webView)
+                PluginWebViewPolicy.configure(webView)
 
                 assertEquals(WebSettings.MIXED_CONTENT_NEVER_ALLOW, webView.settings.mixedContentMode)
                 assertFalse(webView.settings.allowFileAccess)
                 assertFalse(webView.settings.allowContentAccess)
+                assertFalse(webView.settings.domStorageEnabled)
                 assertFalse(webView.settings.javaScriptCanOpenWindowsAutomatically)
                 assertFalse(CookieManager.getInstance().acceptThirdPartyCookies(webView))
                 assertEquals(
                     WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) &&
                         WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER),
-                    supportsThirdPartyV3Runtime(),
+                    PluginWebViewPolicy.supportsSecureTransport(),
                 )
             } finally {
                 webView.destroy()
@@ -70,7 +81,7 @@ class ThirdPartyWebViewV3InstrumentationTest {
 
     @Test
     fun documentStartRunsBeforePageCodeAndRemoteFramesReceiveNoBridge() {
-        assumeTrue(supportsThirdPartyV3Runtime())
+        assumeTrue(PluginWebViewPolicy.supportsSecureTransport())
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val origin = "https://v3-runtime.test"
         val remoteOrigin = "https://remote-frame.test"
@@ -80,7 +91,7 @@ class ThirdPartyWebViewV3InstrumentationTest {
 
         instrumentation.runOnMainSync {
             webView = WebView(instrumentation.targetContext)
-            configureThirdPartyPluginWebView(webView)
+            PluginWebViewPolicy.configure(webView)
             WebViewCompat.addDocumentStartJavaScript(
                 webView,
                 "window.__bjtuDocumentStartSeen = true;",
@@ -177,52 +188,36 @@ class ThirdPartyWebViewV3InstrumentationTest {
     }
 
     @Test
-    fun lifecycleEventsReachBothPlainAndNamespacedContracts() {
-        assumeTrue(supportsThirdPartyV3Runtime())
+    fun contractRuntimeBlocksBrowserManagedPersistenceBeforePluginCode() {
+        assumeTrue(PluginWebViewPolicy.supportsSecureTransport())
         val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val origin = "https://v3-lifecycle.test"
-        val received = CopyOnWriteArrayList<String>()
-        val messages = CountDownLatch(2)
-        val dispatched = AtomicBoolean(false)
+        val origin = "https://managed-storage.test"
+        val result = AtomicReference<String>()
+        val message = CountDownLatch(1)
         lateinit var webView: WebView
 
         instrumentation.runOnMainSync {
             webView = WebView(instrumentation.targetContext)
-            configureThirdPartyPluginWebView(webView)
+            PluginWebViewPolicy.configure(webView)
             WebViewCompat.addDocumentStartJavaScript(
                 webView,
-                """
-                    window.addEventListener('theme', function () {
-                      lifecycleBridge.postMessage('theme');
-                    });
-                    window.addEventListener('bjtu:theme', function () {
-                      lifecycleBridge.postMessage('bjtu:theme');
-                    });
-                """.trimIndent(),
+                PluginWebViewPolicy.managedStorageGuardScript(),
                 setOf(origin),
             )
             WebViewCompat.addWebMessageListener(
                 webView,
-                "lifecycleBridge",
+                "storageProbe",
                 setOf(origin),
                 object : WebViewCompat.WebMessageListener {
                     override fun onPostMessage(
                         view: WebView,
-                        message: WebMessageCompat,
+                        payload: WebMessageCompat,
                         sourceOrigin: Uri,
                         isMainFrame: Boolean,
                         replyProxy: JavaScriptReplyProxy,
                     ) {
-                        if (
-                            ThirdPartyWebViewAccessPolicy.isTrustedBridgeMessage(
-                                isMainFrame,
-                                sourceOrigin.toString(),
-                                origin,
-                            )
-                        ) {
-                            received += message.data.orEmpty()
-                            messages.countDown()
-                        }
+                        result.set(payload.data.orEmpty())
+                        message.countDown()
                     }
                 },
             )
@@ -230,34 +225,64 @@ class ThirdPartyWebViewV3InstrumentationTest {
                 override fun shouldInterceptRequest(
                     view: WebView,
                     request: WebResourceRequest,
-                ): WebResourceResponse? =
-                    if (request.url.host == "v3-lifecycle.test") {
-                        WebResourceResponse(
-                            "text/html",
-                            "UTF-8",
-                            ByteArrayInputStream("<html><body>ready</body></html>".toByteArray()),
-                        )
-                    } else {
-                        null
-                    }
-
-                override fun onPageFinished(view: WebView, url: String?) {
-                    if (dispatched.compareAndSet(false, true)) {
-                        dispatchRuntimeEvent(view, "theme", buildJsonObject {
-                            put("color_scheme", "dark")
-                        })
-                    }
+                ): WebResourceResponse? {
+                    if (request.url.host != "managed-storage.test") return null
+                    val html = """
+                        <!doctype html>
+                        <script>
+                          var probe = function (name, read) {
+                            try {
+                              read();
+                              return name + ':allowed';
+                            } catch (error) {
+                              return name + ':' + String(error && error.name);
+                            }
+                          };
+                          storageProbe.postMessage([
+                            'guard:' + String(window.__BJTU_MANAGED_STORAGE_ONLY__ === true),
+                            probe('localStorage', function () { return window.localStorage; }),
+                            probe('sessionStorage', function () { return window.sessionStorage; }),
+                            probe('indexedDB', function () { return window.indexedDB; }),
+                            probe('caches', function () { return window.caches; }),
+                            probe('cookie', function () { return document.cookie; }),
+                            probe('worker', function () { return window.Worker; }),
+                            probe('serviceWorker', function () { return navigator.serviceWorker; }),
+                            probe('storage', function () { return navigator.storage; })
+                          ].join('|'));
+                        </script>
+                    """.trimIndent()
+                    return WebResourceResponse(
+                        "text/html",
+                        "UTF-8",
+                        ByteArrayInputStream(html.toByteArray()),
+                    )
                 }
             }
             webView.loadUrl("$origin/index.html")
         }
 
         try {
-            assertTrue("Timed out waiting for lifecycle events", messages.await(15, TimeUnit.SECONDS))
-            assertTrue("theme" in received)
-            assertTrue("bjtu:theme" in received)
+            assertTrue(
+                "Timed out waiting for storage policy probe",
+                message.await(15, TimeUnit.SECONDS),
+            )
+            assertEquals(
+                "guard:true|" +
+                    "localStorage:SecurityError|" +
+                    "sessionStorage:SecurityError|" +
+                    "indexedDB:SecurityError|" +
+                    "caches:SecurityError|" +
+                    "cookie:SecurityError|" +
+                    "worker:SecurityError|" +
+                    "serviceWorker:SecurityError|" +
+                    "storage:SecurityError",
+                result.get(),
+            )
         } finally {
             instrumentation.runOnMainSync {
+                runCatching {
+                    WebViewCompat.removeWebMessageListener(webView, "storageProbe")
+                }
                 webView.stopLoading()
                 webView.destroy()
             }
@@ -265,34 +290,84 @@ class ThirdPartyWebViewV3InstrumentationTest {
     }
 
     @Test
+    fun backAcknowledgementHandledTrueCompletesImmediately() {
+        assumeTrue(PluginWebViewPolicy.supportsSecureTransport())
+
+        val observation = runBackAcknowledgementProbe(
+            handled = true,
+            acknowledgementTimeoutMs = 5_000L,
+        )
+
+        assertTrue(observation.handled)
+        assertTrue(
+            "Handled acknowledgement waited ${observation.elapsedMs}ms",
+            observation.elapsedMs < ACK_COMPLETION_DEADLINE_MS,
+        )
+    }
+
+    @Test
+    fun backAcknowledgementHandledFalseCompletesImmediately() {
+        assumeTrue(PluginWebViewPolicy.supportsSecureTransport())
+
+        val observation = runBackAcknowledgementProbe(
+            handled = false,
+            acknowledgementTimeoutMs = 5_000L,
+        )
+
+        assertFalse(observation.handled)
+        assertTrue(
+            "Unhandled acknowledgement waited ${observation.elapsedMs}ms",
+            observation.elapsedMs < ACK_COMPLETION_DEADLINE_MS,
+        )
+    }
+
+    @Test
+    fun backAcknowledgementTimesOutWhenSdkDoesNotReply() {
+        assumeTrue(PluginWebViewPolicy.supportsSecureTransport())
+
+        val observation = runBackAcknowledgementProbe(
+            handled = null,
+            acknowledgementTimeoutMs = ACK_TIMEOUT_PROBE_MS,
+        )
+
+        assertFalse(observation.handled)
+        assertTrue(
+            "Missing acknowledgement returned before its timeout: ${observation.elapsedMs}ms",
+            observation.elapsedMs >= ACK_TIMEOUT_MINIMUM_MS,
+        )
+    }
+
+    @Test
     fun cspBindsConnectMediaAndFrameOriginsSeparately() {
-        val headers = thirdPartySecurityHeaders(
+        val headers = PluginWebViewPolicy.securityHeaders(
             ThirdPartyServiceManifest(
                 schemaVersion = 3,
                 id = "bjtu.security",
                 name = "Security",
-                description = "Security headers",
                 version = "1.0.0",
-                runtimeVersion = 1,
-                minRuntimeVersion = 1,
-                requiredCapabilities = listOf("runtime.lifecycle.v1", "remote.frame.v1"),
-                dataSchemaVersion = 1,
                 entrypoint = "index.html",
                 icon = "icon.svg",
+                capabilities = ThirdPartyCapabilityDeclaration(
+                    required = listOf("runtime.lifecycle@1", "remote.frame@1"),
+                ),
+                origins = ThirdPartyOriginDeclaration(
+                    connect = listOf("https://api.example.com"),
+                    media = listOf("https://media.example.com"),
+                    frame = listOf("https://frame.example.com"),
+                    navigation = listOf("https://navigation.example.com"),
+                ),
+                description = "Security headers",
                 author = "BJTU",
-                connectOrigins = listOf("https://api.example.com"),
-                mediaOrigins = listOf("https://media.example.com"),
-                frameOrigins = listOf("https://frame.example.com"),
-                navigationOrigins = listOf("https://navigation.example.com"),
-                bridgeOrigins = listOf("self"),
                 marketplace = ThirdPartyMarketplaceMetadata(category = "other"),
-            )
+            ),
+            setOf("runtime.lifecycle@1", "remote.frame@1"),
         )
         val csp = headers.getValue("Content-Security-Policy")
 
         assertTrue(csp.contains("connect-src 'self' https://api.example.com"))
         assertTrue(csp.contains("media-src 'self' https://media.example.com"))
         assertTrue(csp.contains("frame-src 'self' https://frame.example.com"))
+        assertTrue(csp.contains("worker-src 'none'"))
         assertFalse(csp.contains("navigation.example.com"))
         assertEquals("nosniff", headers["X-Content-Type-Options"])
         assertEquals("no-referrer", headers["Referrer-Policy"])
@@ -326,9 +401,201 @@ class ThirdPartyWebViewV3InstrumentationTest {
         }
     }
 
+    private fun runBackAcknowledgementProbe(
+        handled: Boolean?,
+        acknowledgementTimeoutMs: Long,
+    ): BackAcknowledgementObservation {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val service = backAcknowledgementService(context.cacheDir)
+        val origin = ThirdPartyServiceSandbox.originFor(
+            service.serviceId,
+            service.publisherSubjectId,
+        )
+        val host = Uri.parse(origin).host
+        val bridgeReady = CountDownLatch(1)
+        val bridgeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val binaryDirectory = File(context.cacheDir, "plugin-bridge-${UUID.randomUUID()}")
+        val transport = BridgeTransport(
+            service = service,
+            apiRegistry = ThirdPartyServiceApiRegistry(
+                moduleRepository = null,
+                mailRepository = null,
+            ),
+            confirmer = ThirdPartySensitiveActionConfirmer { _, _ -> true },
+            scope = bridgeScope,
+            navigationController = PluginNavigationController(service) {},
+            closePlugin = {},
+            diagnostics = PluginDiagnostics(service.serviceId),
+            binaryDirectory = binaryDirectory,
+        )
+        val acknowledgementStatement = handled?.let { value ->
+            """
+                bridge.postMessage({
+                  protocolVersion: 2,
+                  kind: 'eventAck',
+                  requestId: message.requestId,
+                  handled: $value
+                });
+            """.trimIndent()
+        }.orEmpty()
+        val html = """
+            <!doctype html>
+            <script>
+              var bridge = window.__BJTU_PLUGIN_BRIDGE_V2__;
+              bridge.addEventListener(function (message) {
+                if (
+                  message.capability === 'runtime.lifecycle@1' &&
+                  message.event === 'back' &&
+                  message.requiresAcknowledgement === true
+                ) {
+                  $acknowledgementStatement
+                }
+              });
+              bridge.postMessage({
+                protocolVersion: 2,
+                kind: 'cancel',
+                requestId: 'bootstrap'
+              });
+            </script>
+        """.trimIndent()
+        lateinit var webView: WebView
+
+        instrumentation.runOnMainSync {
+            webView = WebView(context)
+            PluginWebViewPolicy.configure(webView)
+            WebViewCompat.addDocumentStartJavaScript(
+                webView,
+                PluginWebViewPolicy.managedStorageGuardScript() +
+                    "\n" +
+                    BridgeTransport.documentStartScript(PluginWebViewPolicy.supportsArrayBuffer()),
+                setOf(origin),
+            )
+            WebViewCompat.addWebMessageListener(
+                webView,
+                BridgeTransport.OBJECT_NAME,
+                setOf(origin),
+                object : WebViewCompat.WebMessageListener {
+                    override fun onPostMessage(
+                        view: WebView,
+                        message: WebMessageCompat,
+                        sourceOrigin: Uri,
+                        isMainFrame: Boolean,
+                        replyProxy: JavaScriptReplyProxy,
+                    ) {
+                        transport.onMessage(
+                            view,
+                            message,
+                            sourceOrigin,
+                            isMainFrame,
+                            replyProxy,
+                        )
+                        if (message.data.orEmpty().contains("\"requestId\":\"bootstrap\"")) {
+                            bridgeReady.countDown()
+                        }
+                    }
+                },
+            )
+            webView.webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): WebResourceResponse? {
+                    if (request.url.host != host) return null
+                    return WebResourceResponse(
+                        "text/html",
+                        "UTF-8",
+                        ByteArrayInputStream(html.toByteArray()),
+                    )
+                }
+            }
+            webView.loadUrl("$origin/index.html")
+        }
+
+        try {
+            assertTrue(
+                "Timed out waiting for the bridge bootstrap message",
+                bridgeReady.await(15, TimeUnit.SECONDS),
+            )
+            val startedAt = System.nanoTime()
+            val acknowledged = runBlocking {
+                withTimeout(ACK_COMPLETION_DEADLINE_MS) {
+                    transport.sendEventAwaitingAcknowledgement(
+                        PluginRuntimeEvent(
+                            capability = "runtime.lifecycle@1",
+                            event = "back",
+                        ),
+                        timeoutMs = acknowledgementTimeoutMs,
+                    )
+                }
+            }
+            return BackAcknowledgementObservation(
+                handled = acknowledged,
+                elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
+            )
+        } finally {
+            transport.close()
+            instrumentation.runOnMainSync {
+                runCatching {
+                    WebViewCompat.removeWebMessageListener(webView, BridgeTransport.OBJECT_NAME)
+                }
+                webView.stopLoading()
+                webView.destroy()
+            }
+            binaryDirectory.deleteRecursively()
+        }
+    }
+
+    private fun backAcknowledgementService(cacheDir: File): ThirdPartyService {
+        val manifest = ThirdPartyServiceManifest(
+            schemaVersion = 3,
+            id = "io.example.back-ack",
+            name = "Back acknowledgement test",
+            version = "1.0.0",
+            entrypoint = "index.html",
+            icon = "icon.svg",
+            capabilities = ThirdPartyCapabilityDeclaration(
+                required = listOf("runtime.lifecycle@1"),
+            ),
+        )
+        return ThirdPartyService(
+            serviceId = manifest.id,
+            manifest = manifest,
+            sourceUrl = "https://example.invalid/plugin.zip",
+            githubOwner = "example",
+            githubRepo = "back-ack",
+            defaultBranch = "main",
+            commitSha = "a".repeat(40),
+            packageDigestSha256 = "b".repeat(64),
+            installDir = File(cacheDir, "plugin-back-ack").absolutePath,
+            grantedCapabilities = setOf("runtime.lifecycle@1"),
+            allowedOrigins = emptyList(),
+            enabled = true,
+            needsReview = false,
+            installedAt = "2026-07-30T00:00:00Z",
+            updatedAt = "2026-07-30T00:00:00Z",
+            publisherSubjectId = "test-publisher",
+            runtimeProfile = ThirdPartyRuntimeProfile.ContractV1.value,
+            runtimeFloor = 2,
+            compatibilityState = ThirdPartyRuntimeProfile.ContractV1.value,
+            verificationLevel = "test",
+        )
+    }
+
     private data class BridgeObservation(
         val data: String,
         val mainFrame: Boolean,
         val trusted: Boolean,
     )
+
+    private data class BackAcknowledgementObservation(
+        val handled: Boolean,
+        val elapsedMs: Long,
+    )
+
+    private companion object {
+        const val ACK_COMPLETION_DEADLINE_MS = 2_000L
+        const val ACK_TIMEOUT_PROBE_MS = 200L
+        const val ACK_TIMEOUT_MINIMUM_MS = 100L
+    }
 }

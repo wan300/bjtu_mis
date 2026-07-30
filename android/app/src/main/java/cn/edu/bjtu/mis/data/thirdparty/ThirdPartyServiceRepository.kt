@@ -14,6 +14,8 @@ class ThirdPartyServiceRepository(
     private val bundledProvider: ThirdPartyBundledServiceProvider? = null,
     private val configurationStore: ThirdPartyConfigurationStore = InMemoryThirdPartyConfigurationStore(),
     private val kvStore: ThirdPartyKvStore? = null,
+    private val resourceStore: ThirdPartyResourceStore? = null,
+    private val commandReceiptStore: PluginCommandReceiptStore? = null,
     private val migrationRunner: ThirdPartyDataMigrationRunner? = null,
     private val webStorageCleaner: ThirdPartyWebStorageCleaner = NoOpThirdPartyWebStorageCleaner,
 ) {
@@ -43,14 +45,14 @@ class ThirdPartyServiceRepository(
                 val installed = provider.installMissingOrUpdated(existingById)
                 installed.forEach { bundled ->
                     val existing = existingById[bundled.packageInfo.manifest.id]
-                    val defaultGranted = bundled.defaultGrantedPermissionsForInstalledManifest()
-                    val required = bundled.packageInfo.manifest.permissions.required.toSet()
+                    val defaultGranted = bundled.defaultGrantedCapabilitiesForInstalledManifest()
+                    val required = bundled.packageInfo.manifest.requiredCapabilities.toSet()
                     val defaultEnabled = defaultGranted.containsAll(required)
                     dao.saveService(
                         bundled.packageInfo.toEntity(
                             existing = existing,
                             now = nowIso(),
-                            grantedPermissions = defaultGranted,
+                            grantedCapabilities = defaultGranted,
                             enabled = defaultEnabled,
                             needsReview = !defaultEnabled,
                         )
@@ -108,6 +110,7 @@ class ThirdPartyServiceRepository(
             pluginId = prepared.manifest.id,
         )
         var kvSnapshotCreated = false
+        var blobSnapshotCreated = false
         if (existing != null) {
             val requiresMigration = prepared.manifest.dataSchemaVersion > existing.dataSchemaVersion
             val store = kvStore
@@ -136,6 +139,8 @@ class ThirdPartyServiceRepository(
                     }
                 }
             }
+            resourceStore?.snapshotBlobIndex(namespace)
+            blobSnapshotCreated = resourceStore != null
         }
         val installed = try {
             installer.commitPreparedImport(token)
@@ -144,24 +149,36 @@ class ThirdPartyServiceRepository(
                 runCatching { kvStore?.restoreSnapshot(namespace) }
                     .onFailure(error::addSuppressed)
             }
+            if (blobSnapshotCreated) {
+                runCatching { resourceStore?.restoreBlobIndex(namespace) }
+                    .onFailure(error::addSuppressed)
+            }
             throw error
         }
         val now = nowIso()
+        val declaredCapabilities = (
+            installed.manifest.requiredCapabilities + installed.manifest.optionalCapabilities
+            ).toSet()
+        val previousDeclaredCapabilities = previousService?.manifest?.let {
+            (it.requiredCapabilities + it.optionalCapabilities).toSet()
+        }.orEmpty()
+        val preservedCapabilities =
+            previousService?.grantedCapabilities.orEmpty() intersect declaredCapabilities
+        val requiresSecurityReview = previousService == null ||
+            previousService.needsReview ||
+            existing?.runtimeProfile != ThirdPartyRuntimeProfile.ContractV1.value ||
+            (installed.manifest.requiredCapabilities.toSet() - previousDeclaredCapabilities).isNotEmpty() ||
+            (declaredCapabilities - previousDeclaredCapabilities).isNotEmpty() ||
+            (installed.manifest.remoteOrigins.toSet() -
+                previousService?.manifest?.remoteOrigins.orEmpty().toSet()).isNotEmpty()
         val entity = installed.toEntity(
             existing = existing,
             now = now,
-            grantedPermissions = if (previousService == null) {
-                emptySet()
-            } else {
-                val declared = (
-                    installed.manifest.permissions.required +
-                        installed.manifest.permissions.optional
-                    ).toSet()
-                (previousService.grantedPermissions intersect declared) +
-                    (installed.manifest.permissions.required - previousManifest?.permissions?.required.orEmpty())
-            },
-            enabled = previousService?.enabled == true,
-            needsReview = previousService?.needsReview ?: true,
+            grantedCapabilities = preservedCapabilities,
+            enabled = previousService?.enabled == true &&
+                !requiresSecurityReview &&
+                preservedCapabilities.containsAll(installed.manifest.requiredCapabilities),
+            needsReview = requiresSecurityReview,
         )
         val mergedConfiguration = mergeThirdPartyConfiguration(
             previousManifest?.configuration.orEmpty(),
@@ -177,6 +194,10 @@ class ThirdPartyServiceRepository(
             }.onFailure(error::addSuppressed)
             if (kvSnapshotCreated) {
                 runCatching { kvStore?.restoreSnapshot(namespace) }
+                    .onFailure(error::addSuppressed)
+            }
+            if (blobSnapshotCreated) {
+                runCatching { resourceStore?.restoreBlobIndex(namespace) }
                     .onFailure(error::addSuppressed)
             }
             throw error
@@ -204,31 +225,52 @@ class ThirdPartyServiceRepository(
         installer.cleanupStalePreparedImports()
     }
 
-    suspend fun grantService(serviceId: String, grantedPermissions: Set<String>): ThirdPartyService {
-        val service = getService(serviceId) ?: throw ThirdPartyServiceException("第三方服务不存在：$serviceId")
-        val required = service.manifest.permissions.required.toSet()
-        val declared = (service.manifest.permissions.required + service.manifest.permissions.optional).toSet()
-        val normalized = grantedPermissions.map { it.trim() }.filter { it.isNotBlank() }.toSet()
+    suspend fun grantCapabilities(
+        serviceId: String,
+        grantedCapabilities: Set<String>,
+    ): ThirdPartyService {
+        val service = getService(serviceId)
+            ?: throw ThirdPartyServiceException("插件不存在：$serviceId")
+        return grantCapabilities(service, grantedCapabilities)
+    }
+
+    private suspend fun grantCapabilities(
+        service: ThirdPartyService,
+        grantedCapabilities: Set<String>,
+    ): ThirdPartyService {
+        if (service.runtimeProfile != ThirdPartyRuntimeProfile.ContractV1.value) {
+            throw ThirdPartyServiceException("旧版插件仅可救援数据，不能授予运行权限")
+        }
+        val required = service.manifest.requiredCapabilities.toSet()
+        val declared = (
+            service.manifest.requiredCapabilities + service.manifest.optionalCapabilities
+            ).toSet()
+        val normalized =
+            grantedCapabilities.map(String::trim).filter(String::isNotBlank).toSet()
         if (!normalized.containsAll(required)) {
-            throw ThirdPartyServiceException("必须授权的权限未全部同意")
+            throw ThirdPartyServiceException("必须授权的 capabilities 未全部同意")
         }
         val unknown = normalized - declared
         if (unknown.isNotEmpty()) {
-            throw ThirdPartyServiceException("授权包含服务未声明的权限：${unknown.joinToString()}")
+            throw ThirdPartyServiceException(
+                "授权包含插件未声明的 capabilities：${unknown.joinToString()}",
+            )
         }
-        normalized.forEach { ThirdPartyPermissionRegistry.requireKnown(it) }
-        val missingConfiguration = missingConfigurationKeys(service.manifest, configurationStore.load(serviceId))
+        normalized.forEach(ThirdPartyCapabilityRegistry::requireKnown)
+        val missingConfiguration =
+            missingConfigurationKeys(service.manifest, configurationStore.load(service.serviceId))
         if (missingConfiguration.isNotEmpty()) {
             throw ThirdPartyServiceException("请先填写必填插件配置：${missingConfiguration.joinToString()}")
         }
         dao.updateGrantState(
-            serviceId = serviceId,
-            grantedPermissionsJson = AppJson.encodeToString(normalized.sorted()),
+            serviceId = service.serviceId,
+            grantedCapabilitiesJson = AppJson.encodeToString(normalized.sorted()),
             enabled = true,
             needsReview = false,
             updatedAt = nowIso(),
         )
-        return getService(serviceId) ?: throw ThirdPartyServiceException("第三方服务不存在：$serviceId")
+        return getService(service.serviceId)
+            ?: throw ThirdPartyServiceException("插件不存在：${service.serviceId}")
     }
 
     suspend fun getConfiguration(serviceId: String): Map<String, String> {
@@ -248,11 +290,14 @@ class ThirdPartyServiceRepository(
             .filterValues(String::isNotBlank)
         configurationStore.save(serviceId, normalized)
         val complete = missingConfigurationKeys(service.manifest, normalized).isEmpty()
-        val requiredPermissions = service.manifest.permissions.required.toSet()
+        val requiredCapabilities = service.manifest.requiredCapabilities.toSet()
         dao.updateGrantState(
             serviceId = serviceId,
-            grantedPermissionsJson = AppJson.encodeToString(service.grantedPermissions.sorted()),
-            enabled = !service.needsReview && complete && service.grantedPermissions.containsAll(requiredPermissions),
+            grantedCapabilitiesJson = AppJson.encodeToString(service.grantedCapabilities.sorted()),
+            enabled = service.runtimeProfile == ThirdPartyRuntimeProfile.ContractV1.value &&
+                !service.needsReview &&
+                complete &&
+                service.grantedCapabilities.containsAll(requiredCapabilities),
             needsReview = service.needsReview,
             updatedAt = nowIso(),
         )
@@ -263,7 +308,7 @@ class ThirdPartyServiceRepository(
         val service = getService(serviceId) ?: throw ThirdPartyServiceException("第三方服务不存在：$serviceId")
         dao.updateGrantState(
             serviceId = serviceId,
-            grantedPermissionsJson = AppJson.encodeToString(service.grantedPermissions.sorted()),
+            grantedCapabilitiesJson = AppJson.encodeToString(service.grantedCapabilities.sorted()),
             enabled = false,
             needsReview = true,
             updatedAt = nowIso(),
@@ -312,11 +357,14 @@ class ThirdPartyServiceRepository(
         runCatching { configurationStore.remove(tombstone.serviceId) }
             .onFailure(::recordFailure)
         tombstone.publisherSubjectId.takeIf(String::isNotBlank)?.let { publisher ->
+            val namespace = ThirdPartyKvNamespace(publisher, tombstone.serviceId)
             runCatching {
-                kvStore?.deleteNamespace(
-                    ThirdPartyKvNamespace(publisher, tombstone.serviceId),
-                )
+                kvStore?.deleteNamespace(namespace)
             }.onFailure(::recordFailure)
+            runCatching { resourceStore?.deleteNamespace(namespace) }
+                .onFailure(::recordFailure)
+            runCatching { commandReceiptStore?.deleteNamespace(namespace) }
+                .onFailure(::recordFailure)
         }
         runCatching { webStorageCleaner.deleteOrigin(tombstone.webStorageOrigin) }
             .onFailure(::recordFailure)
@@ -358,7 +406,14 @@ class ThirdPartyServiceRepository(
                 throw error
             }
         }
+        val blobIndexSwapped = if (resourceStore != null) {
+            resourceStore.swapBlobIndexWithSnapshot(namespace)
+        } else {
+            false
+        }
         val now = nowIso()
+        val restoresContractRuntime =
+            snapshot.runtimeProfile == ThirdPartyRuntimeProfile.ContractV1.value
         val restored = ThirdPartyServiceEntity(
             serviceId = serviceId,
             name = snapshot.manifest.name,
@@ -372,18 +427,28 @@ class ThirdPartyServiceRepository(
             commitSha = snapshot.commitSha,
             packageDigestSha256 = snapshot.packageDigestSha256,
             manifestJson = AppJson.encodeToString(snapshot.manifest),
-            grantedPermissionsJson = AppJson.encodeToString(snapshot.grantedPermissions.sorted()),
-            allowedOriginsJson = AppJson.encodeToString(snapshot.manifest.remoteOrigins),
+            grantedPermissionsJson = AppJson.encodeToString(
+                ThirdPartyCapabilityRegistry.permissionsFor(snapshot.grantedCapabilities).sorted(),
+            ),
+            grantedCapabilitiesJson = AppJson.encodeToString(snapshot.grantedCapabilities.sorted()),
+            allowedOriginsJson = AppJson.encodeToString(snapshot.allowedOrigins),
             publisherSubjectId = snapshot.publisherSubjectId,
             dataSchemaVersion = snapshot.dataSchemaVersion,
-            compatibilityState = ThirdPartyCompatibilityState.Compatible.value,
+            runtimeProfile = snapshot.runtimeProfile,
+            runtimeFloor = snapshot.runtimeFloor,
+            compatibilityState = if (restoresContractRuntime) {
+                ThirdPartyCompatibilityState.Compatible.value
+            } else {
+                ThirdPartyCompatibilityState.LegacyDisabled.value
+            },
             verificationLevel = snapshot.verificationLevel,
+            marketplaceJson = snapshot.marketplace?.let { AppJson.encodeToString(it) },
             previousVersionJson = null,
             installDir = snapshot.installDir,
             entrypoint = snapshot.manifest.entrypoint,
             icon = snapshot.manifest.icon,
-            enabled = snapshot.enabled,
-            needsReview = snapshot.needsReview,
+            enabled = restoresContractRuntime && snapshot.enabled,
+            needsReview = !restoresContractRuntime || snapshot.needsReview,
             installedAt = current.installedAt,
             updatedAt = now,
         )
@@ -392,6 +457,10 @@ class ThirdPartyServiceRepository(
         } catch (error: Exception) {
             if (currentKvShadowed && store != null) {
                 runCatching { store.commitShadow(namespace) }
+                    .onFailure(error::addSuppressed)
+            }
+            if (blobIndexSwapped) {
+                runCatching { resourceStore?.swapBlobIndexWithSnapshot(namespace) }
                     .onFailure(error::addSuppressed)
             }
             throw ThirdPartyServiceException("无法原子回滚插件版本与数据", error)
@@ -407,8 +476,8 @@ class ThirdPartyServiceRepository(
         existing: ThirdPartyServiceEntity?,
     ): ThirdPartyServiceImportPreview {
         val previous = existing?.toModel()
-        val previousRequired = previous?.manifest?.permissions?.required.orEmpty().toSet()
-        val previousOptional = previous?.manifest?.permissions?.optional.orEmpty().toSet()
+        val previousRequired = previous?.manifest?.requiredCapabilities.orEmpty().toSet()
+        val previousOptional = previous?.manifest?.optionalCapabilities.orEmpty().toSet()
         val previousOrigins = previous?.manifest?.remoteOrigins.orEmpty().toSet()
         val nextOrigins = manifest.remoteOrigins.toSet()
         return ThirdPartyServiceImportPreview(
@@ -429,11 +498,13 @@ class ThirdPartyServiceRepository(
             publisherSubjectId = publisherSubjectId,
             verificationLevel = verificationLevel,
             previousService = previous,
-            addedRequiredPermissions = (manifest.permissions.required.toSet() - previousRequired).sorted(),
-            addedOptionalPermissions = (manifest.permissions.optional.toSet() - previousOptional).sorted(),
-            removedPermissions = (
+            addedRequiredCapabilities =
+                (manifest.requiredCapabilities.toSet() - previousRequired).sorted(),
+            addedOptionalCapabilities =
+                (manifest.optionalCapabilities.toSet() - previousOptional).sorted(),
+            removedCapabilities = (
                 (previousRequired + previousOptional) -
-                    (manifest.permissions.required + manifest.permissions.optional).toSet()
+                    (manifest.requiredCapabilities + manifest.optionalCapabilities).toSet()
                 ).sorted(),
             addedOrigins = (nextOrigins - previousOrigins).sorted(),
             removedOrigins = (previousOrigins - nextOrigins).sorted(),
@@ -448,8 +519,15 @@ class ThirdPartyServiceRepository(
             throw ThirdPartyServiceException("内置插件不能被大厅或开发者导入覆盖")
         }
         if (existing == null) return
-        if (existing.compatibilityState != ThirdPartyCompatibilityState.Compatible.value) {
-            throw ThirdPartyServiceException("Manifest v1/v2 legacy 插件不能原位更新；请使用只读救援入口处理旧数据")
+        if (
+            existing.runtimeProfile !in setOf(
+                ThirdPartyRuntimeProfile.ContractV1.value,
+                ThirdPartyRuntimeProfile.LegacyV3P0a.value,
+            )
+        ) {
+            throw ThirdPartyServiceException(
+                "legacy_v1_v2 插件不能原位更新；请使用无桥、无网络救援入口处理旧数据",
+            )
         }
         if (existing.publisherSubjectId != prepared.publisherSubjectId) {
             throw ThirdPartyServiceException("检测到 publisher subject 变化，拒绝原位更新")
@@ -468,7 +546,7 @@ class ThirdPartyServiceRepository(
     private fun InstalledThirdPartyServicePackage.toEntity(
         existing: ThirdPartyServiceEntity?,
         now: String,
-        grantedPermissions: Set<String> = emptySet(),
+        grantedCapabilities: Set<String> = emptySet(),
         enabled: Boolean = false,
         needsReview: Boolean = true,
     ): ThirdPartyServiceEntity =
@@ -485,12 +563,20 @@ class ThirdPartyServiceRepository(
             commitSha = commitSha,
             packageDigestSha256 = packageDigestSha256,
             manifestJson = AppJson.encodeToString(manifest),
-            grantedPermissionsJson = AppJson.encodeToString(grantedPermissions.sorted()),
+            grantedPermissionsJson = AppJson.encodeToString(
+                ThirdPartyCapabilityRegistry.permissionsFor(grantedCapabilities).sorted(),
+            ),
+            grantedCapabilitiesJson = AppJson.encodeToString(grantedCapabilities.sorted()),
             allowedOriginsJson = AppJson.encodeToString(manifest.remoteOrigins),
             publisherSubjectId = publisherSubjectId,
             dataSchemaVersion = manifest.dataSchemaVersion,
+            runtimeProfile = ThirdPartyRuntimeProfile.ContractV1.value,
+            runtimeFloor = ThirdPartyCapabilityRegistry.runtimeFloor(
+                manifest.requiredCapabilities,
+            ),
             compatibilityState = ThirdPartyCompatibilityState.Compatible.value,
             verificationLevel = verificationLevel,
+            marketplaceJson = manifest.marketplace?.let { AppJson.encodeToString(it) },
             previousVersionJson = existing?.toModel()?.toVersionSnapshot()?.let {
                 AppJson.encodeToString(it)
             },
@@ -504,9 +590,30 @@ class ThirdPartyServiceRepository(
         )
 
     private fun ThirdPartyServiceEntity.toModel(): ThirdPartyService {
-        val manifest = AppJson.decodeFromString<ThirdPartyServiceManifest>(manifestJson)
+        val decodedManifest = runCatching {
+            AppJson.decodeFromString<ThirdPartyServiceManifest>(manifestJson)
+        }.getOrElse {
+            ThirdPartyServiceManifest(
+                id = serviceId,
+                name = name,
+                version = version,
+                entrypoint = entrypoint,
+                icon = icon,
+            )
+        }
+        val marketplace = marketplaceJson?.let { json ->
+            runCatching {
+                AppJson.decodeFromString<ThirdPartyMarketplaceMetadata>(json)
+            }.getOrNull()
+        }
+        val manifest = decodedManifest.copy(
+            name = decodedManifest.name.ifBlank { name },
+            description = marketplace?.description ?: description,
+            author = marketplace?.author ?: author,
+            marketplace = marketplace,
+        )
         val granted = runCatching {
-            AppJson.decodeFromString<List<String>>(grantedPermissionsJson).toSet()
+            AppJson.decodeFromString<List<String>>(grantedCapabilitiesJson).toSet()
         }.getOrDefault(emptySet())
         val origins = runCatching {
             AppJson.decodeFromString<List<String>>(allowedOriginsJson)
@@ -524,7 +631,7 @@ class ThirdPartyServiceRepository(
             commitSha = commitSha,
             packageDigestSha256 = packageDigestSha256,
             installDir = installDir,
-            grantedPermissions = granted,
+            grantedCapabilities = granted,
             allowedOrigins = origins,
             enabled = enabled,
             needsReview = needsReview,
@@ -532,6 +639,8 @@ class ThirdPartyServiceRepository(
             updatedAt = updatedAt,
             publisherSubjectId = publisherSubjectId,
             dataSchemaVersion = dataSchemaVersion,
+            runtimeProfile = runtimeProfile,
+            runtimeFloor = runtimeFloor,
             compatibilityState = compatibilityState,
             verificationLevel = verificationLevel,
             previousVersion = previousVersion,
@@ -545,15 +654,19 @@ class ThirdPartyServiceRepository(
             packageDigestSha256 = packageDigestSha256,
             installDir = installDir,
             manifest = manifest,
+            marketplace = manifest.marketplace,
             dataSchemaVersion = dataSchemaVersion,
             sourceUrl = sourceUrl,
             githubOwner = githubOwner,
             githubRepo = githubRepo,
             defaultBranch = defaultBranch,
             publisherSubjectId = publisherSubjectId,
-            grantedPermissions = grantedPermissions,
+            grantedCapabilities = grantedCapabilities,
+            allowedOrigins = allowedOrigins,
             enabled = enabled,
             needsReview = needsReview,
+            runtimeProfile = runtimeProfile,
+            runtimeFloor = runtimeFloor,
             verificationLevel = verificationLevel,
         )
 }
@@ -590,14 +703,17 @@ private const val BundledThirdPartySourceUrlPrefix = "asset://third-party-servic
 
 private fun nowIso(): String = OffsetDateTime.now(ZoneOffset.UTC).toString()
 
-private fun InstalledBundledThirdPartyService.defaultGrantedPermissionsForInstalledManifest(): Set<String> {
+private fun InstalledBundledThirdPartyService.defaultGrantedCapabilitiesForInstalledManifest(): Set<String> {
     val declared = (
-        packageInfo.manifest.permissions.required +
-            packageInfo.manifest.permissions.optional
+        packageInfo.manifest.requiredCapabilities +
+            packageInfo.manifest.optionalCapabilities
         ).toSet()
     val requested = defaultGrantedPermissions
         .map { it.trim() }
         .filter { it.isNotBlank() }
         .toSet()
-    return requested.filter { it in declared }.toSet()
+    return declared.filterTo(linkedSetOf()) { capability ->
+        val permission = ThirdPartyCapabilityRegistry.requireKnown(capability).permission
+        permission == null || permission in requested
+    }
 }

@@ -25,16 +25,24 @@ test('migrations create the plugin catalog tables', { skip: !databaseUrl }, asyn
         )) OR
         (table_name='plugin_versions' AND column_name IN (
           'manifest_schema_version','runtime_version','min_runtime_version',
-          'data_schema_version','compatibility_state','verification_level'
-        ))
+          'data_schema_version','compatibility_state','verification_level',
+          'contract_profile','runtime_floor','capabilities_json','marketplace_json',
+          'manifest_file_name'
+        )) OR
+        (table_name='submissions' AND column_name='contract_profile')
       )
     `);
-    assert.equal(columns.rowCount, 11);
+    assert.equal(columns.rowCount, 17);
     const repositoryIdentityIndex = await db.query(`
       SELECT indexname FROM pg_indexes
       WHERE schemaname='public' AND indexname='plugins_github_repository_id_idx'
     `);
     assert.equal(repositoryIdentityIndex.rowCount, 1);
+    const contractIndex = await db.query(`
+      SELECT indexname FROM pg_indexes
+      WHERE schemaname='public' AND indexname='plugin_versions_contract_v1_catalog_idx'
+    `);
+    assert.equal(contractIndex.rowCount, 1);
   } finally {
     await db.end();
   }

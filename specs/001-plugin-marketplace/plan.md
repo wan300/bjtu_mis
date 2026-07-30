@@ -1,23 +1,24 @@
 # Archived ExecPlan: 插件大厅、投稿平台与 Android 配置能力
 
-**Status**: Superseded on 2026-07-28
+**Status**: Superseded on 2026-07-29
 
 > 本文件保留 2026-07-17 至 2026-07-22 的实现历史，不再定义当前安全策略。其 Manifest
 > v1/v2 兼容、`allowed_origins`、commit 绑定 sandbox、明文身份/通用 HTTP 桥、
 > 立即清理旧版本和“无 Room migration”等假设，均由 constitution 原则 VII、
-> `docs/third-party-services.md`、Manifest v3 schema 以及
-> `docs/plugin-platform-manifest-v3-p0a-execplan.md` 覆盖。后续实现、评审、发布和回滚
+> `docs/third-party-services.md`、contract_v1 schema 以及
+> `docs/plugin-runtime-contract-p0-p1-execplan.md` 覆盖。后续实现、评审、发布和回滚
 > MUST 只使用上述当前基线；本文件中的冲突内容不得作为兼容承诺或安全例外。
 
 ## 当前规范替代项
 
-- 新客户端只安装、更新和运行 Manifest v3；v1/v2 仅保留无桥、无网络的救援入口。
-- `/api/v2`、不可变 GitHub owner/repository 数值身份和稳定 publisher+plugin origin
-  替代旧目录与 commit origin 假设。
-- connect/media/frame/navigation origin 分离，`bridge_origins` 只能是 `["self"]`；
-  bridge 只服务稳定本地 main frame。
-- `app.storage`、影子 migration、上一版本包与 KV 快照、增量授权和 tombstone 清理
-  替代旧的非事务更新策略。
+- 新客户端只安装、更新和运行 Manifest v3 / contract_v1；v1/v2 与 P0-A v3
+  仅保留无桥、无网络的救援入口。
+- `/api/v3`、不可变 GitHub owner/repository 数值身份和稳定 publisher+plugin origin
+  替代旧目录与 commit origin 假设；`/api/v2` 冻结为旧客户端只读目录。
+- connect/media/frame/navigation origin 分离；`bridge_origins` 不再由作者声明，
+  self bridge 是宿主固定不变量且只服务稳定本地 main frame。
+- `storage.kv@2`、Blob/Cache、影子 migration、上一版本包与数据快照、
+  Capability 增量授权和 tombstone 清理替代旧的非事务更新策略。
 - 校园访问只能使用 MIS/AA/VE 只读 `campus.request` registry；明文凭据读取和通用原生
   HTTP bridge 被永久移除。
 

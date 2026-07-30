@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name="cn.edu.bjtu.mis.data.thirdparty.PluginDevelopmentReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="cn.edu.bjtu.mis.debug.PLUGIN_DEVELOPMENT" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

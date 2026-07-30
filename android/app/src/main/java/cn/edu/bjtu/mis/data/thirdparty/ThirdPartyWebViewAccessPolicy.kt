@@ -26,7 +26,8 @@ object ThirdPartyWebViewAccessPolicy {
         if (scheme !in setOf("http", "https")) return null
         val host = uri.host?.lowercase().orEmpty()
         if (host.isBlank()) return null
-        val port = uri.port.takeIf { it != -1 }?.let { ":$it" }.orEmpty()
+        val defaultPort = if (scheme == "https") 443 else 80
+        val port = uri.port.takeIf { it != -1 && it != defaultPort }?.let { ":$it" }.orEmpty()
         return "$scheme://$host$port"
     }
 }

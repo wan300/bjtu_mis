@@ -6,20 +6,48 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import yauzl from 'yauzl';
 import yazl from 'yazl';
+import { PLUGIN_PACKAGE_LIMITS } from './generated/plugin-contract.js';
 
-const MAX_ARCHIVE_BYTES = 25 * 1024 * 1024;
-const MAX_EXTRACTED_BYTES = 50 * 1024 * 1024;
-const MAX_FILES = 1000;
+const MAX_ARCHIVE_BYTES = PLUGIN_PACKAGE_LIMITS.archiveBytes;
+const MAX_EXTRACTED_BYTES = PLUGIN_PACKAGE_LIMITS.extractedBytes;
+const MAX_FILES = PLUGIN_PACKAGE_LIMITS.files;
 
 interface LintResult { errors: string[]; warnings: string[] }
-interface LintSchema { permissions: string[]; categories: string[]; configurationTypes: string[] }
+interface LintSchema {
+  permissions: string[];
+  capabilities: string[];
+  categories: string[];
+  configurationTypes: string[];
+  contractProfile: string;
+  protocolVersion: number;
+  runtimeFloor: number;
+  packageLimits: {
+    archiveBytes: number;
+    extractedBytes: number;
+    files: number;
+    iconBytes: number;
+  };
+  contracts: Array<{ id: string; runtimeFloor: number }>;
+}
 interface LintModule {
-  lintPlugin(root: string, result: LintResult, schema: LintSchema): LintResult;
+  lintPlugin(
+    root: string,
+    result: LintResult,
+    schema: LintSchema,
+    options?: { requireMarketplace?: boolean }
+  ): LintResult;
   loadManifestSchema(repositoryRoot: string, result: LintResult): LintSchema;
 }
 
 export interface ValidatedPackage {
   manifest: Record<string, unknown>;
+  marketplace: Record<string, unknown>;
+  contractProfile: string;
+  runtimeFloor: number;
+  capabilities: {
+    required: string[];
+    optional: string[];
+  };
   warnings: string[];
   packageDigestSha256: string;
   packageFileCount: number;
@@ -100,10 +128,12 @@ export async function extractZipSecure(zipPath: string, destination: string): Pr
 }
 
 async function locatePackageRoot(extractedRoot: string): Promise<string> {
-  if (isFile(path.join(extractedRoot, 'bjtu-service.json'))) return extractedRoot;
+  if (isFile(path.join(extractedRoot, 'bjtu-plugin.json'))) return extractedRoot;
   const entries = await fs.readdir(extractedRoot, { withFileTypes: true });
-  const candidates = entries.filter((entry) => entry.isDirectory() && isFile(path.join(extractedRoot, entry.name, 'bjtu-service.json')));
-  if (candidates.length !== 1) throw new Error('插件仓库根目录缺少 bjtu-service.json');
+  const candidates = entries.filter((entry) => entry.isDirectory() && isFile(path.join(extractedRoot, entry.name, 'bjtu-plugin.json')));
+  if (candidates.length !== 1) {
+    throw new Error('插件仓库根目录缺少 bjtu-plugin.json；P0-A bjtu-service.json 不再允许发布');
+  }
   return path.join(extractedRoot, candidates[0]!.name);
 }
 
@@ -152,10 +182,16 @@ async function fileSha256(file: string): Promise<string> {
   return digest.digest('hex');
 }
 
-async function createCanonicalArtifact(packageRoot: string, manifest: Record<string, unknown>, artifactPath: string): Promise<void> {
+async function createCanonicalArtifact(
+  packageRoot: string,
+  manifest: Record<string, unknown>,
+  marketplace: Record<string, unknown>,
+  artifactPath: string
+): Promise<void> {
   const zip = new yazl.ZipFile();
   const epoch = new Date('1980-01-01T00:00:00Z');
-  zip.addBuffer(Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8'), 'bjtu-service.json', { mtime: epoch, mode: 0o100644 });
+  zip.addBuffer(Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8'), 'bjtu-plugin.json', { mtime: epoch, mode: 0o100644 });
+  zip.addBuffer(Buffer.from(`${JSON.stringify(marketplace, null, 2)}\n`, 'utf8'), 'bjtu-marketplace.json', { mtime: epoch, mode: 0o100644 });
   const distRoot = path.join(packageRoot, 'dist');
   for (const file of await filesUnder(distRoot)) {
     zip.addFile(file.absolute, `dist/${file.relative}`, { mtime: epoch, mode: 0o100644 });
@@ -185,13 +221,36 @@ export async function validateAndBuildPackage(options: {
   const require = createRequire(import.meta.url);
   const lint = require(path.join(options.repositoryRoot, 'tools', 'third-party-service-lint.cjs')) as LintModule;
   const lintSchema = lint.loadManifestSchema(options.repositoryRoot, lintResult);
-  lint.lintPlugin(packageRoot, lintResult, lintSchema);
+  lint.lintPlugin(packageRoot, lintResult, lintSchema, { requireMarketplace: true });
   if (lintResult.errors.length) throw new Error(lintResult.errors.join('\n'));
-  const manifest = JSON.parse(await fs.readFile(path.join(packageRoot, 'bjtu-service.json'), 'utf8')) as Record<string, unknown>;
+  const manifest = JSON.parse(
+    await fs.readFile(path.join(packageRoot, 'bjtu-plugin.json'), 'utf8')
+  ) as Record<string, unknown>;
+  const marketplace = JSON.parse(
+    await fs.readFile(path.join(packageRoot, 'bjtu-marketplace.json'), 'utf8')
+  ) as Record<string, unknown>;
   if (manifest.schema_version !== 3) throw new Error('插件大厅投稿必须使用 schema_version 3');
+  const declaration = manifest.capabilities as {
+    required?: unknown;
+    optional?: unknown;
+  };
+  const capabilities = {
+    required: Array.isArray(declaration?.required)
+      ? declaration.required.filter((value): value is string => typeof value === 'string')
+      : [],
+    optional: Array.isArray(declaration?.optional)
+      ? declaration.optional.filter((value): value is string => typeof value === 'string')
+      : []
+  };
+  const runtimeFloor = Math.max(
+    lintSchema.runtimeFloor,
+    ...[...capabilities.required, ...capabilities.optional].map(
+      (id) => lintSchema.contracts.find((contract) => contract.id === id)?.runtimeFloor ?? 0
+    )
+  );
   const distRoot = path.join(packageRoot, 'dist');
   const digest = await computeDistDigest(distRoot);
-  await createCanonicalArtifact(packageRoot, manifest, options.artifactPath);
+  await createCanonicalArtifact(packageRoot, manifest, marketplace, options.artifactPath);
   const artifactStat = await fs.stat(options.artifactPath);
   if (artifactStat.size > MAX_ARCHIVE_BYTES) throw new Error('规范化插件包超过 25 MiB 限制');
   const icon = String(manifest.icon ?? '');
@@ -201,6 +260,10 @@ export async function validateAndBuildPackage(options: {
   await fs.copyFile(iconSource, options.iconPath, fsSync.constants.COPYFILE_EXCL);
   return {
     manifest,
+    marketplace,
+    contractProfile: lintSchema.contractProfile,
+    runtimeFloor,
+    capabilities,
     warnings: lintResult.warnings,
     packageDigestSha256: digest.sha256,
     packageFileCount: digest.fileCount,

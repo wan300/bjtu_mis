@@ -1,0 +1,7 @@
+{
+  "description": "Shows that a declared remote frame remains outside the native bridge boundary.",
+  "author": "BJTU MIS",
+  "category": "other",
+  "tags": ["example", "iframe"],
+  "license": "MIT"
+}

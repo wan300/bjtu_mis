@@ -36,6 +36,7 @@ BJTU MIS Android 是面向北京交通大学学生的校园学习服务 Android 
 - `android/app/src/test/resources/fixtures/`：解析器与 provider 测试 fixture。
 - `web/`：bjtu.cc 静态前端、插件大厅页面和共享 schema。
 - `web/platform/`：插件平台 API、worker、SQL migration、Dockerfile 与自动化测试。
+- `plugin-tooling/`：Capability Contract Registry、确定性生成器、TypeScript SDK、CLI、Mock Host 与默认 Vite 模板。
 - `deploy/`：插件平台 Docker Compose 与 bjtu.cc Nginx 配置。
 - `docs/`：README 图片、插件 Manifest v3 权威开发文档、共享 schema 与各专项 ExecPlan。
 
@@ -107,6 +108,15 @@ Open WebUI：
 - `npm run test:integration`：设置 `TEST_DATABASE_URL` 时执行真实 PostgreSQL migration 与约束测试；未设置时相关用例会跳过。
 - `npm run test:e2e`：运行 API health e2e 测试。
 
+插件工具链：
+
+- `Set-Location plugin-tooling`
+- `npm ci`
+- `npm run generate:check`：确认 schema、TypeScript、Kotlin 与文档生成物没有漂移。
+- `npm run typecheck`
+- `npm test`
+- `npm run pack:check`：验证 npm 包和插件 ZIP 可确定性构建。
+
 ## 4. Coding conventions
 
 Android/Kotlin：
@@ -114,7 +124,7 @@ Android/Kotlin：
 - 遵循 `android/gradle.properties` 中的 `kotlin.code.style=official`。
 - 新增 Android 依赖优先加入 `android/gradle/libs.versions.toml`，再在 Gradle 模块中引用。
 - 共享 JSON 配置使用 `cn.edu.bjtu.mis.data.AppJson`，其配置包括 `ignoreUnknownKeys = true`、`explicitNulls = false`、`JsonNamingStrategy.SnakeCase`、`encodeDefaults = true`。
-- 插件平台 `/api/v2` 使用 camelCase；目录客户端必须使用专用 JSON 编解码器，不得复用带 SnakeCase naming strategy 的 `AppJson`。
+- 插件平台 `/api/v3` 使用 camelCase；目录客户端必须使用专用 JSON 编解码器，不得复用带 SnakeCase naming strategy 的 `AppJson`。`/api/v2` 仅保留 P0-A 只读目录兼容。
 - 与外部系统交互的 suspend 函数多位于 provider/repository 层，网络错误通常以 `IOException` 或业务异常抛出，并在 UI 层用 `runCatching` 转为加载/错误状态。
 - UI 延续 Compose 模式，优先复用 `MaterialTheme`、现有共享组件、`LoadState`、`ProgressiveModuleState`、`remember`、`LaunchedEffect`、`rememberCoroutineScope`。
 - 模块 key 放在 `ModuleKeys`，不要在多个位置重复硬编码路由或模块字符串。
@@ -145,13 +155,13 @@ Open WebUI：
 - `ui` 只通过 repository/container 获取数据，不应直接访问校园服务。
 - `openwebui` 包下的 Android 插件负责 WebView/Capacitor 与原生工具桥接。
 - `android/open-webui/src/lib/local-first/` 负责前端侧本地优先 Agent loop、工具注册和 Android 参数传递。
-- `data/thirdparty` 与 `ThirdPartyServiceScreens.kt` 共同实现 Manifest v3 插件 runtime；只允许稳定本地 origin 的 main frame 获得桥，远程 frame 永远无桥。
+- `data/thirdparty` 与 `ThirdPartyServiceScreens.kt` 共同实现 Manifest v3 / contract_v1 插件 runtime；只允许稳定本地 origin 的 main frame 获得桥，远程 frame 永远无桥。
 - 插件公网访问按 connect/media/frame/navigation origin 分离；校园会话访问只允许走 MIS/AA/VE 的只读 `campus.request` registry。
 - 插件重要数据使用按 publisher subject + plugin ID 隔离的加密 `app.storage`，更新必须保持影子迁移、上一版本包/KV 快照和失败原子回滚。
 
 谨慎区域：
 
-- Room 数据库当前版本为 11；`MIGRATION_10_11` 增加插件 publisher/data schema/兼容/验证/上一版本元数据并把旧记录标记为 `legacy_disabled`。
+- Room 数据库当前版本为 12；`MIGRATION_11_12` 将插件区分为 `legacy_v1_v2`、`legacy_v3_p0a` 与 `contract_v1`，新增 granted capabilities、contract profile、runtime floor 和独立 marketplace 元数据。旧 runtime 仅保留救援数据。
 - `android/app/src/main/assets/bjtu_captcha_crnn.pt` 是验证码识别模型，避免无依据替换。
 - `NativeAgentToolsPlugin`、`WorkspaceManager`、归档/文件工具涉及本地文件安全边界，改动必须覆盖路径穿越、大小限制、条目数量等测试。
 - 邮件发送、作业提交、选课、会话保活是高风险用户操作，必须保持用户确认和明确错误反馈。
@@ -172,8 +182,9 @@ Open WebUI：
 - 修改 provider/repository 时，优先使用 MockWebServer、fixture 或已有 fake/store 模式，避免依赖真实校园服务。
 - 修改 Agent 工具、workspace、归档、文档或邮件工具时，补充对应 `data/agent` 或 `data/agent/tools` 单元测试。
 - 修改 Open WebUI local-first、handoff、工具参数或流式输出时，运行前端 Vitest。
-- 修改第三方插件 Manifest、publisher、WebView、KV、迁移、回滚、清理或校园代理时，补充对应 JVM 测试，并编译或执行 `androidTest` 中的 Room 10→11 和 WebView 安全场景。
-- 数据库迁移必须同时维护 `android/app/schemas/` 与迁移测试；第三方插件迁移当前覆盖 Room 10→11。
+- 修改第三方插件 Manifest、publisher、WebView、KV、迁移、回滚、清理或校园代理时，补充对应 JVM 测试，并编译或执行 `androidTest` 中的 Room 11→12 和 WebView 安全场景。
+- 修改 Capability 契约时，先改 `plugin-tooling/contracts/capability-contracts.json`，运行生成器并提交全部生成物；不得直接手改生成的 SDK、Kotlin descriptor/schema 或 API 文档。
+- 数据库迁移必须同时维护 `android/app/schemas/` 与迁移测试；第三方插件迁移当前覆盖 Room 11→12。
 
 完成前应按改动范围验证：
 
@@ -182,6 +193,7 @@ Open WebUI：
 - Open WebUI local-first 或前端逻辑改动：`Set-Location android\open-webui; npm run test:frontend -- --run`。
 - Open WebUI 类型检查：可运行 `npm run check`，但当前基线失败需在汇报中说明。
 - 插件平台改动：`Set-Location web\platform; npm run typecheck; npm test; npm run test:integration; npm run test:e2e`。
+- 插件契约或工具链改动：`Set-Location plugin-tooling; npm run generate:check; npm run typecheck; npm test; npm run pack:check`。
 - 插件 Manifest 改动：运行 `tools/third-party-service-lint.cjs` 覆盖模板和示例，并确认 `docs/` 与 `web/assets/schemas/` 下的 v3 schema 字节一致。
 - 插件 WebView 安全改动：至少运行 `.\gradlew.bat :app:compileDebugAndroidTestKotlin`；有设备时执行 API 26/35 instrumentation，缺少设备时必须记录并交由阻塞 CI。
 
@@ -193,8 +205,8 @@ Open WebUI：
 - 邮件发送必须保留用户确认流程；`agent_mail_send` 不应静默发送。
 - Agent 不得自动提交课程平台作业。
 - 文件、归档和结果打包工具必须限制 workspace 边界，防止路径穿越和超大文件写入。
-- 新客户端不得安装、更新或运行 Manifest v1/v2，不得接受 `allowed_origins`；legacy 插件只能进入无桥、无网络救援入口。
-- `bridge_origins` 必须严格为 `["self"]`；桥接消息必须来自稳定本地 origin 的 main frame 并精确匹配 source origin。不得恢复 `identity.get_credentials`、`identity.credentials.read` 或 `app.http_request`。
+- 新客户端不得安装、更新或运行 Manifest v1/v2 或 P0-A v3，不得接受 `allowed_origins`；legacy 插件只能进入无桥、无网络救援入口。
+- `bridge_origins` 是宿主固定为 self 的不变量，禁止出现在 Manifest；桥接消息必须来自稳定本地 origin 的 main frame 并精确匹配 source origin。不得恢复 `identity.get_credentials`、`identity.credentials.read`、`window.BjtuService` 或 `app.http_request`。
 - 公网 origin 必须按 connect/media/frame/navigation 最小声明；公共制品只允许 HTTPS，开发者模式仅允许 localhost HTTP，普通 origin 不得指向校园、私网、回环或链路本地地址。
 - 插件更新必须保留增量授权、影子 KV migration、上一版本包和数据快照；删除清理失败必须保留 tombstone 并重试。
 - `campus.request` 只能调用 registry 中 MIS/AA/VE 的 `GET`/`HEAD` 只读路径，且不得向插件暴露 Cookie、认证头或明文凭据。
@@ -217,7 +229,7 @@ Open WebUI：
 - 对失败命令记录失败类型、是否为已知基线问题，以及对本次改动的影响。
 - 没有提交 secrets、本机配置、构建产物或生成缓存。
 - 文档中的不确定信息使用 `TODO: confirm`，没有把猜测写成事实。
-- 插件相关变更已证明符合 constitution 原则 VII；旧 spec/plan 中的冲突策略没有重新进入代码、文档、模板或测试。
+- 插件相关变更已证明符合 constitution 原则 VII 和 contract_v1；旧 spec/plan 中的冲突策略没有重新进入代码、文档、模板或测试。
 - 最终汇报包含文件变更、主要规则、TODO/不确定项和验证命令结果。
 
 ## 10. When to use `PLANS.md`

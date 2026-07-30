@@ -101,6 +101,8 @@ test/
 !android/app/src/test/**
 !web/platform/test/
 !web/platform/test/**
+!plugin-tooling/test/
+!plugin-tooling/test/**
 
 # Website backend runtime state
 web/platform/.data/

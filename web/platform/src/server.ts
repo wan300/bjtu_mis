@@ -53,6 +53,11 @@ interface CatalogRow {
   data_schema_version: number;
   compatibility_state: string;
   verification_level: string;
+  contract_profile: string;
+  runtime_floor: number;
+  capabilities_json: Record<string, unknown>;
+  marketplace_json: Record<string, unknown> | null;
+  manifest_file_name: string;
 }
 
 function randomToken(bytes = 32): string {
@@ -131,6 +136,66 @@ function catalogPlugin(row: CatalogRow, config: PlatformConfig, apiVersion: 'v1'
     : plugin;
 }
 
+function contractCatalogPlugin(row: CatalogRow, config: PlatformConfig) {
+  const manifest = row.manifest_json;
+  const capabilities = row.capabilities_json ?? {};
+  const marketplace = row.marketplace_json ?? {};
+  const origins = (
+    manifest.origins && typeof manifest.origins === 'object'
+      ? manifest.origins
+      : {}
+  ) as Record<string, unknown>;
+  return {
+    id: row.plugin_id,
+    name: String(manifest.name ?? ''),
+    version: row.version,
+    description: String(marketplace.description ?? ''),
+    author: String(marketplace.author ?? ''),
+    category: String(marketplace.category ?? 'other'),
+    tags: stringList(marketplace.tags),
+    license: typeof marketplace.license === 'string' ? marketplace.license : null,
+    screenshots: Array.isArray(marketplace.screenshots) ? marketplace.screenshots : [],
+    repositoryUrl: row.source_url,
+    repository: `${row.repo_owner}/${row.repo_name}`,
+    commitSha: row.commit_sha,
+    archiveSha256: row.archive_sha256,
+    packageDigestSha256: row.package_digest_sha256,
+    packageBytes: Number(row.package_bytes),
+    packageFileCount: row.package_file_count,
+    schemaVersion: row.manifest_schema_version,
+    contractProfile: row.contract_profile,
+    runtimeFloor: row.runtime_floor,
+    capabilities: {
+      required: stringList(capabilities.required),
+      optional: stringList(capabilities.optional)
+    },
+    origins: {
+      connect: stringList(origins.connect),
+      media: stringList(origins.media),
+      frame: stringList(origins.frame),
+      navigation: stringList(origins.navigation)
+    },
+    dataSchemaVersion: row.data_schema_version || null,
+    migrationEntrypoint:
+      typeof manifest.migration_entrypoint === 'string' ? manifest.migration_entrypoint : null,
+    configuration: Array.isArray(manifest.configuration) ? manifest.configuration : [],
+    validationWarnings: Array.isArray(row.warnings_json) ? row.warnings_json : [],
+    verificationLevel: row.verification_level,
+    compatibilityState: row.compatibility_state,
+    publisherSubjectId: row.publisher_subject_id,
+    publisherIdentity: {
+      subjectId: row.publisher_subject_id,
+      ownerId: row.publisher_owner_id,
+      login: row.publisher_owner_login,
+      type: row.publisher_owner_type,
+      transferStatus: row.publisher_transfer_status
+    },
+    publishedAt: row.published_at.toISOString(),
+    iconUrl: `${config.publicBaseUrl}/api/v3/plugins/${encodeURIComponent(row.plugin_id)}/versions/${row.commit_sha}/icon`,
+    artifactUrl: `${config.publicBaseUrl}/api/v3/plugins/${encodeURIComponent(row.plugin_id)}/versions/${row.commit_sha}/artifact`
+  };
+}
+
 function catalogSelect(): string {
   return `SELECT p.plugin_id, p.source_url, p.repo_owner, p.repo_name, p.publisher_subject_id,
     p.publisher_owner_id, p.publisher_owner_login, p.publisher_owner_type, p.publisher_transfer_status,
@@ -138,7 +203,8 @@ function catalogSelect(): string {
     v.commit_sha, v.manifest_json, v.warnings_json, v.archive_sha256, v.package_digest_sha256,
     v.package_bytes, v.package_file_count, v.artifact_path, v.icon_path, v.published_at,
     v.manifest_schema_version, v.runtime_version, v.min_runtime_version, v.data_schema_version,
-    v.compatibility_state, v.verification_level
+    v.compatibility_state, v.verification_level, v.contract_profile, v.runtime_floor,
+    v.capabilities_json, v.marketplace_json, v.manifest_file_name
     FROM plugins p JOIN plugin_versions v ON v.id=p.latest_version_id`;
 }
 
@@ -193,7 +259,12 @@ function isAdmin(user: UserRow, config: PlatformConfig): boolean {
   return config.adminGithubIds.has(user.github_id);
 }
 
-async function createSubmission(db: Database, userId: string, sourceUrl: string): Promise<string> {
+async function createSubmission(
+  db: Database,
+  userId: string,
+  sourceUrl: string,
+  contractProfile: 'legacy' | 'contract_v1' = 'contract_v1'
+): Promise<string> {
   const repository = parseGitHubRepositoryUrl(sourceUrl);
   const active = await db.query(`SELECT 1 FROM submissions
     WHERE lower(repo_owner)=lower($1) AND lower(repo_name)=lower($2)
@@ -204,8 +275,16 @@ async function createSubmission(db: Database, userId: string, sourceUrl: string)
   const submissionId = id();
   try {
     await transaction(db, async (client) => {
-      await client.query(`INSERT INTO submissions(id,user_id,source_url,repo_owner,repo_name,status)
-        VALUES($1,$2,$3,$4,$5,'queued')`, [submissionId, userId, repository.canonicalUrl, repository.owner, repository.repo]);
+      await client.query(`INSERT INTO submissions(
+          id,user_id,source_url,repo_owner,repo_name,status,contract_profile
+        ) VALUES($1,$2,$3,$4,$5,'queued',$6)`, [
+        submissionId,
+        userId,
+        repository.canonicalUrl,
+        repository.owner,
+        repository.repo,
+        contractProfile
+      ]);
       await client.query("INSERT INTO validation_jobs(id,submission_id,status) VALUES($1,$2,'queued')", [id(), submissionId]);
     });
   } catch (error) {
@@ -241,6 +320,17 @@ export async function buildServer(options: { config?: PlatformConfig; db?: Datab
         410,
         'legacy_api_read_only',
         'Manifest v1/v2 API 已进入只读迁移期；请改用 /api/v2'
+      );
+    }
+    const frozenV2Mutation = request.method !== 'GET' &&
+      pathName.startsWith('/api/v2/') &&
+      pathName !== '/api/v2/plugins/resolve-updates';
+    if (frozenV2Mutation) {
+      return apiError(
+        reply,
+        410,
+        'legacy_catalog_read_only',
+        '/api/v2 已冻结为 P0-A 只读目录；请迁移至 /api/v3'
       );
     }
   });
@@ -404,6 +494,7 @@ export async function buildServer(options: { config?: PlatformConfig; db?: Datab
       'NOT p.admin_suspended',
       'v.manifest_schema_version=3',
       "v.compatibility_state='compatible'",
+      "v.contract_profile='legacy_v3_p0a'",
       "p.publisher_subject_id ~ '^github-owner:[1-9][0-9]*$'",
       "p.publisher_owner_id ~ '^[1-9][0-9]*$'"
     ];
@@ -442,6 +533,7 @@ export async function buildServer(options: { config?: PlatformConfig; db?: Datab
     const result = await db.query<CatalogRow>(`${catalogSelect()} WHERE p.plugin_id=$1
       AND p.status='published' AND NOT p.admin_suspended
       AND v.manifest_schema_version=3 AND v.compatibility_state='compatible'
+      AND v.contract_profile='legacy_v3_p0a'
       AND p.publisher_subject_id ~ '^github-owner:[1-9][0-9]*$'
       AND p.publisher_owner_id ~ '^[1-9][0-9]*$'`, [pluginId]);
     const row = result.rows[0];
@@ -459,6 +551,7 @@ export async function buildServer(options: { config?: PlatformConfig; db?: Datab
     const result = await db.query<CatalogRow>(`${catalogSelect()} WHERE p.plugin_id=ANY($1::text[])
       AND p.status='published' AND NOT p.admin_suspended
       AND v.manifest_schema_version=3 AND v.compatibility_state='compatible'
+      AND v.contract_profile='legacy_v3_p0a'
       AND p.publisher_subject_id ~ '^github-owner:[1-9][0-9]*$'
       AND p.publisher_owner_id ~ '^[1-9][0-9]*$'`, [ids]);
     const current = new Map(installed.map((item) => [item.id, item]));
@@ -491,6 +584,7 @@ export async function buildServer(options: { config?: PlatformConfig; db?: Datab
       JOIN plugin_versions v ON v.plugin_id=p.plugin_id
       WHERE p.plugin_id=$1 AND v.commit_sha=$2
         AND v.manifest_schema_version=3 AND v.compatibility_state='compatible'
+        AND v.contract_profile='legacy_v3_p0a'
     `, [params.id, params.commit]);
     const row = result.rows[0];
     if (!row) return apiError(reply, 404, 'artifact_not_found', 'Manifest v3 插件版本不存在');
@@ -512,6 +606,7 @@ export async function buildServer(options: { config?: PlatformConfig; db?: Datab
       JOIN plugin_versions v ON v.plugin_id=p.plugin_id
       WHERE p.plugin_id=$1 AND v.commit_sha=$2
         AND v.manifest_schema_version=3 AND v.compatibility_state='compatible'
+        AND v.contract_profile='legacy_v3_p0a'
     `, [params.id, params.commit]);
     const row = result.rows[0];
     if (!row || row.status !== 'published' || row.admin_suspended) {
@@ -529,6 +624,258 @@ export async function buildServer(options: { config?: PlatformConfig; db?: Datab
     reply.header('Content-Security-Policy', "sandbox; default-src 'none'");
     reply.header('X-Content-Type-Options', 'nosniff');
     return reply.send(createReadStream(file));
+  });
+
+  app.get('/api/v3/plugins', async (request) => {
+    const query = request.query as {
+      query?: string;
+      category?: string;
+      cursor?: string;
+      limit?: string;
+    };
+    const limit = Math.min(50, Math.max(1, Number.parseInt(query.limit ?? '20', 10) || 20));
+    const parameters: unknown[] = [];
+    const clauses = [
+      "p.status='published'",
+      'NOT p.admin_suspended',
+      'v.manifest_schema_version=3',
+      "v.compatibility_state='compatible'",
+      "v.contract_profile='contract_v1'",
+      "v.manifest_file_name='bjtu-plugin.json'",
+      "p.publisher_subject_id ~ '^github-owner:[1-9][0-9]*$'",
+      "p.publisher_owner_id ~ '^[1-9][0-9]*$'"
+    ];
+    if (query.query?.trim()) {
+      parameters.push(`%${query.query.trim()}%`);
+      clauses.push(`(
+        v.manifest_json->>'name' ILIKE $${parameters.length}
+        OR v.marketplace_json->>'description' ILIKE $${parameters.length}
+        OR v.marketplace_json->>'author' ILIKE $${parameters.length}
+        OR p.plugin_id ILIKE $${parameters.length}
+        OR (v.marketplace_json->'tags')::text ILIKE $${parameters.length}
+      )`);
+    }
+    if (query.category?.trim()) {
+      parameters.push(query.category.trim());
+      clauses.push(`v.marketplace_json->>'category'=$${parameters.length}`);
+    }
+    if (query.cursor) {
+      const [publishedAt, pluginId] = Buffer.from(query.cursor, 'base64url')
+        .toString('utf8')
+        .split('|');
+      if (publishedAt && pluginId) {
+        parameters.push(publishedAt, pluginId);
+        clauses.push(
+          `(v.published_at, p.plugin_id) < ($${parameters.length - 1}::timestamptz, $${parameters.length})`
+        );
+      }
+    }
+    parameters.push(limit + 1);
+    const result = await db.query<CatalogRow>(
+      `${catalogSelect()} WHERE ${clauses.join(' AND ')}
+       ORDER BY v.published_at DESC, p.plugin_id DESC LIMIT $${parameters.length}`,
+      parameters
+    );
+    const hasMore = result.rows.length > limit;
+    const rows = result.rows.slice(0, limit);
+    const last = rows.at(-1);
+    return {
+      apiVersion: 3,
+      contractProfile: 'contract_v1',
+      items: rows.map((row) => contractCatalogPlugin(row, config)),
+      nextCursor:
+        hasMore && last
+          ? Buffer.from(`${last.published_at.toISOString()}|${last.plugin_id}`).toString(
+              'base64url'
+            )
+          : null
+    };
+  });
+
+  app.get('/api/v3/plugins/:id', async (request, reply) => {
+    const pluginId = (request.params as { id: string }).id;
+    const result = await db.query<CatalogRow>(
+      `${catalogSelect()} WHERE p.plugin_id=$1
+       AND p.status='published' AND NOT p.admin_suspended
+       AND v.manifest_schema_version=3 AND v.compatibility_state='compatible'
+       AND v.contract_profile='contract_v1' AND v.manifest_file_name='bjtu-plugin.json'
+       AND p.publisher_subject_id ~ '^github-owner:[1-9][0-9]*$'
+       AND p.publisher_owner_id ~ '^[1-9][0-9]*$'`,
+      [pluginId]
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return apiError(reply, 404, 'plugin_not_found', '插件不存在、已下架或不是 contract_v1');
+    }
+    return {
+      apiVersion: 3,
+      ...contractCatalogPlugin(row, config)
+    };
+  });
+
+  app.post('/api/v3/plugins/resolve-updates', async (request) => {
+    const body = request.body as {
+      installed?: Array<{
+        id?: string;
+        commitSha?: string;
+        publisherSubjectId?: string;
+        contractProfile?: string;
+      }>;
+    };
+    const installed = Array.isArray(body?.installed) ? body.installed.slice(0, 100) : [];
+    const ids = installed.map((item) => item.id || '').filter(Boolean);
+    if (!ids.length) return { apiVersion: 3, contractProfile: 'contract_v1', items: [] };
+    const result = await db.query<CatalogRow>(
+      `${catalogSelect()} WHERE p.plugin_id=ANY($1::text[])
+       AND p.status='published' AND NOT p.admin_suspended
+       AND v.manifest_schema_version=3 AND v.compatibility_state='compatible'
+       AND v.contract_profile='contract_v1' AND v.manifest_file_name='bjtu-plugin.json'
+       AND p.publisher_subject_id ~ '^github-owner:[1-9][0-9]*$'
+       AND p.publisher_owner_id ~ '^[1-9][0-9]*$'`,
+      [ids]
+    );
+    const current = new Map(installed.map((item) => [item.id, item]));
+    return {
+      apiVersion: 3,
+      contractProfile: 'contract_v1',
+      items: result.rows.map((row) => {
+        const installedVersion = current.get(row.plugin_id);
+        const publisherMismatch = Boolean(
+          installedVersion?.publisherSubjectId &&
+            installedVersion.publisherSubjectId !== row.publisher_subject_id
+        );
+        const profileMismatch =
+          installedVersion?.contractProfile !== undefined &&
+          installedVersion.contractProfile !== 'contract_v1';
+        return {
+          ...contractCatalogPlugin(row, config),
+          updateAvailable:
+            !publisherMismatch &&
+            installedVersion?.commitSha !== row.commit_sha,
+          publisherMismatch,
+          replacesLegacyP0a: profileMismatch
+        };
+      })
+    };
+  });
+
+  app.get('/api/v3/plugins/:id/versions/:commit/artifact', async (request, reply) => {
+    const params = request.params as { id: string; commit: string };
+    const result = await db.query<{
+      status: string;
+      admin_suspended: boolean;
+      artifact_path: string;
+      archive_sha256: string;
+    }>(`
+      SELECT p.status,p.admin_suspended,v.artifact_path,v.archive_sha256
+      FROM plugins p JOIN plugin_versions v ON v.plugin_id=p.plugin_id
+      WHERE p.plugin_id=$1 AND v.commit_sha=$2
+        AND v.manifest_schema_version=3 AND v.compatibility_state='compatible'
+        AND v.contract_profile='contract_v1' AND v.manifest_file_name='bjtu-plugin.json'
+    `, [params.id, params.commit]);
+    const row = result.rows[0];
+    if (!row) return apiError(reply, 404, 'artifact_not_found', 'contract_v1 插件版本不存在');
+    if (row.status !== 'published' || row.admin_suspended) {
+      return apiError(reply, 410, 'plugin_unlisted', '插件已下架');
+    }
+    const file = safePath(config.artifactRoot, row.artifact_path);
+    await fs.access(file);
+    reply.header('Content-Type', 'application/zip');
+    reply.header(
+      'Content-Disposition',
+      `attachment; filename="${params.id}-${params.commit.slice(0, 8)}.zip"`
+    );
+    reply.header('ETag', `"${row.archive_sha256}"`);
+    reply.header(
+      'Digest',
+      `sha-256=${Buffer.from(row.archive_sha256, 'hex').toString('base64')}`
+    );
+    reply.header('X-Content-Type-Options', 'nosniff');
+    return reply.send(createReadStream(file));
+  });
+
+  app.get('/api/v3/plugins/:id/versions/:commit/icon', async (request, reply) => {
+    const params = request.params as { id: string; commit: string };
+    const result = await db.query<{
+      status: string;
+      admin_suspended: boolean;
+      icon_path: string;
+    }>(`
+      SELECT p.status,p.admin_suspended,v.icon_path
+      FROM plugins p JOIN plugin_versions v ON v.plugin_id=p.plugin_id
+      WHERE p.plugin_id=$1 AND v.commit_sha=$2
+        AND v.manifest_schema_version=3 AND v.compatibility_state='compatible'
+        AND v.contract_profile='contract_v1' AND v.manifest_file_name='bjtu-plugin.json'
+    `, [params.id, params.commit]);
+    const row = result.rows[0];
+    if (!row || row.status !== 'published' || row.admin_suspended) {
+      return apiError(reply, 404, 'icon_not_found', '插件图标不存在');
+    }
+    const file = safePath(config.artifactRoot, row.icon_path);
+    const contentTypes: Record<string, string> = {
+      '.svg': 'image/svg+xml',
+      '.png': 'image/png',
+      '.webp': 'image/webp',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg'
+    };
+    reply.header(
+      'Content-Type',
+      contentTypes[path.extname(file).toLowerCase()] || 'application/octet-stream'
+    );
+    reply.header('Content-Security-Policy', "sandbox; default-src 'none'");
+    reply.header('X-Content-Type-Options', 'nosniff');
+    return reply.send(createReadStream(file));
+  });
+
+  app.post('/api/v3/submissions', async (request, reply) => {
+    const auth = await requireUser(request, reply, db, config);
+    if (!auth) return;
+    try {
+      const submissionId = await createSubmission(
+        db,
+        auth.user.id,
+        String((request.body as { repositoryUrl?: string })?.repositoryUrl ?? ''),
+        'contract_v1'
+      );
+      return reply.code(202).send({
+        apiVersion: 3,
+        id: submissionId,
+        status: 'queued',
+        requiredSchemaVersion: 3,
+        requiredManifest: 'bjtu-plugin.json',
+        requiredMarketplace: 'bjtu-marketplace.json',
+        contractProfile: 'contract_v1'
+      });
+    } catch (error) {
+      return apiError(
+        reply,
+        400,
+        'submission_rejected',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  });
+
+  app.get('/api/v3/submissions/:id', async (request, reply) => {
+    const auth = await requireUser(request, reply, db, config, false);
+    if (!auth) return;
+    const submissionId = (request.params as { id: string }).id;
+    const result = await db.query(
+      `SELECT id,source_url,status,plugin_id,commit_sha,error_text,created_at,updated_at,
+        user_id,contract_profile FROM submissions WHERE id=$1`,
+      [submissionId]
+    );
+    const row = result.rows[0];
+    if (
+      !row ||
+      row.contract_profile !== 'contract_v1' ||
+      (row.user_id !== auth.user.id && !isAdmin(auth.user, config))
+    ) {
+      return apiError(reply, 404, 'submission_not_found', '投稿不存在');
+    }
+    const { user_id: _private, ...publicRow } = row;
+    return { apiVersion: 3, ...publicRow };
   });
 
   app.post('/api/v2/submissions', async (request, reply) => {
@@ -675,6 +1022,291 @@ export async function buildServer(options: { config?: PlatformConfig; db?: Datab
     const result = await db.query('UPDATE reports SET status=$2,resolved_at=now() WHERE id=$1 RETURNING id', [reportId, status]);
     if (!result.rowCount) return apiError(reply, 404, 'report_not_found', '举报不存在');
     return { ok: true };
+  });
+
+  app.get('/api/v3/me/plugins', async (request, reply) => {
+    const auth = await requireUser(request, reply, db, config, false);
+    if (!auth) return;
+    const submissions = await db.query(`
+      SELECT s.id,s.source_url,s.status,s.plugin_id,s.commit_sha,s.error_text,
+        s.created_at,s.updated_at,s.contract_profile,
+        p.publisher_subject_id,p.publisher_owner_id,p.publisher_owner_login,
+        p.publisher_transfer_status
+      FROM submissions s LEFT JOIN plugins p ON p.plugin_id=s.plugin_id
+      WHERE s.user_id=$1 AND s.contract_profile='contract_v1'
+      ORDER BY s.created_at DESC LIMIT 100
+    `, [auth.user.id]);
+    return { apiVersion: 3, contractProfile: 'contract_v1', items: submissions.rows };
+  });
+
+  app.post('/api/v3/plugins/:id/revalidate', async (request, reply) => {
+    const auth = await requireUser(request, reply, db, config);
+    if (!auth) return;
+    const pluginId = (request.params as { id: string }).id;
+    const result = await db.query<{
+      source_url: string;
+      submitter_user_id: string;
+      admin_suspended: boolean;
+      publisher_transfer_status: string;
+    }>(`
+      SELECT source_url,submitter_user_id,admin_suspended,publisher_transfer_status
+      FROM plugins WHERE plugin_id=$1
+    `, [pluginId]);
+    const plugin = result.rows[0];
+    if (!plugin || plugin.submitter_user_id !== auth.user.id) {
+      return apiError(reply, 404, 'plugin_not_found', '插件不存在');
+    }
+    if (plugin.admin_suspended) {
+      return apiError(reply, 409, 'admin_suspended', '插件已被管理员下架');
+    }
+    if (plugin.publisher_transfer_status === 'pending') {
+      return apiError(
+        reply,
+        409,
+        'publisher_transfer_pending',
+        'publisher transfer 尚待管理员审批'
+      );
+    }
+    try {
+      const submissionId = await createSubmission(
+        db,
+        auth.user.id,
+        plugin.source_url,
+        'contract_v1'
+      );
+      return reply.code(202).send({
+        apiVersion: 3,
+        contractProfile: 'contract_v1',
+        id: submissionId,
+        status: 'queued'
+      });
+    } catch (error) {
+      return apiError(
+        reply,
+        400,
+        'revalidation_rejected',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  });
+
+  app.post('/api/v3/plugins/:id/unpublish', async (request, reply) => {
+    const auth = await requireUser(request, reply, db, config);
+    if (!auth) return;
+    const pluginId = (request.params as { id: string }).id;
+    const result = await db.query(`
+      UPDATE plugins SET status='withdrawn',updated_at=now()
+      WHERE plugin_id=$1 AND submitter_user_id=$2 AND NOT admin_suspended
+      RETURNING plugin_id
+    `, [pluginId, auth.user.id]);
+    if (!result.rowCount) {
+      return apiError(reply, 404, 'plugin_not_found', '插件不存在或无法下架');
+    }
+    await db.query(
+      "INSERT INTO audit_log(id,actor_user_id,action,plugin_id) VALUES($1,$2,'developer_unpublished',$3)",
+      [id(), auth.user.id, pluginId]
+    );
+    return { apiVersion: 3, ok: true };
+  });
+
+  app.post('/api/v3/plugins/:id/reports', async (request, reply) => {
+    const auth = await requireUser(request, reply, db, config);
+    if (!auth) return;
+    const pluginId = (request.params as { id: string }).id;
+    const body = request.body as { reason?: string; details?: string };
+    const reason = String(body?.reason ?? '').trim().slice(0, 80);
+    const details = String(body?.details ?? '').trim().slice(0, 1000);
+    if (!reason) return apiError(reply, 400, 'reason_required', '请选择举报原因');
+    const exists = await db.query(`
+      SELECT 1 FROM plugins p JOIN plugin_versions v ON v.id=p.latest_version_id
+      WHERE p.plugin_id=$1 AND p.status='published'
+        AND v.contract_profile='contract_v1'
+        AND v.manifest_schema_version=3 AND v.compatibility_state='compatible'
+    `, [pluginId]);
+    if (!exists.rowCount) return apiError(reply, 404, 'plugin_not_found', '插件不存在');
+    await db.query(
+      'INSERT INTO reports(id,plugin_id,reporter_user_id,reason,details) VALUES($1,$2,$3,$4,$5)',
+      [id(), pluginId, auth.user.id, reason, details]
+    );
+    return reply.code(201).send({ apiVersion: 3, ok: true });
+  });
+
+  app.get('/api/v3/admin/overview', async (request, reply) => {
+    const auth = await requireUser(request, reply, db, config, false);
+    if (!auth || !isAdmin(auth.user, config)) {
+      return auth ? apiError(reply, 403, 'admin_required', '需要管理员权限') : undefined;
+    }
+    const [plugins, jobs, reports] = await Promise.all([
+      db.query(`
+        SELECT p.plugin_id,p.source_url,p.status,p.admin_suspended,p.updated_at,
+          p.publisher_subject_id,p.publisher_owner_id,p.publisher_owner_login,
+          p.pending_owner_id,p.pending_owner_login,p.publisher_transfer_status,
+          v.version,v.commit_sha,v.manifest_schema_version,v.compatibility_state,
+          v.contract_profile,v.runtime_floor
+        FROM plugins p LEFT JOIN plugin_versions v ON v.id=p.latest_version_id
+        ORDER BY p.updated_at DESC LIMIT 200
+      `),
+      db.query(`
+        SELECT j.id,j.status,j.attempt,j.diagnostics_json,j.created_at,j.finished_at,
+          s.source_url,s.plugin_id,s.contract_profile
+        FROM validation_jobs j JOIN submissions s ON s.id=j.submission_id
+        ORDER BY j.created_at DESC LIMIT 200
+      `),
+      db.query(`
+        SELECT r.id,r.plugin_id,r.reason,r.details,r.status,r.created_at,u.login AS reporter
+        FROM reports r JOIN users u ON u.id=r.reporter_user_id
+        ORDER BY r.created_at DESC LIMIT 200
+      `)
+    ]);
+    return { apiVersion: 3, plugins: plugins.rows, jobs: jobs.rows, reports: reports.rows };
+  });
+
+  app.post('/api/v3/admin/plugins/:id/unpublish', async (request, reply) => {
+    const auth = await requireUser(request, reply, db, config);
+    if (!auth || !isAdmin(auth.user, config)) {
+      return auth ? apiError(reply, 403, 'admin_required', '需要管理员权限') : undefined;
+    }
+    const pluginId = (request.params as { id: string }).id;
+    const reason = String((request.body as { reason?: string })?.reason ?? '')
+      .trim()
+      .slice(0, 500);
+    const result = await db.query(`
+      UPDATE plugins SET status='unlisted',admin_suspended=true,updated_at=now()
+      WHERE plugin_id=$1 RETURNING plugin_id
+    `, [pluginId]);
+    if (!result.rowCount) return apiError(reply, 404, 'plugin_not_found', '插件不存在');
+    await db.query(`
+      INSERT INTO audit_log(id,actor_user_id,action,plugin_id,metadata_json)
+      VALUES($1,$2,'admin_unpublished',$3,$4::jsonb)
+    `, [id(), auth.user.id, pluginId, JSON.stringify({ reason })]);
+    return { apiVersion: 3, ok: true };
+  });
+
+  app.post('/api/v3/admin/plugins/:id/restore', async (request, reply) => {
+    const auth = await requireUser(request, reply, db, config);
+    if (!auth || !isAdmin(auth.user, config)) {
+      return auth ? apiError(reply, 403, 'admin_required', '需要管理员权限') : undefined;
+    }
+    const pluginId = (request.params as { id: string }).id;
+    const result = await db.query(`
+      UPDATE plugins SET status='published',admin_suspended=false,source_failure_count=0,
+        updated_at=now()
+      WHERE plugin_id=$1 AND latest_version_id IS NOT NULL RETURNING plugin_id
+    `, [pluginId]);
+    if (!result.rowCount) {
+      return apiError(reply, 404, 'plugin_not_found', '插件不存在或没有可恢复版本');
+    }
+    await db.query(
+      "INSERT INTO audit_log(id,actor_user_id,action,plugin_id) VALUES($1,$2,'admin_restored',$3)",
+      [id(), auth.user.id, pluginId]
+    );
+    return { apiVersion: 3, ok: true };
+  });
+
+  app.post('/api/v3/admin/plugins/:id/publisher-transfer/approve', async (request, reply) => {
+    const auth = await requireUser(request, reply, db, config);
+    if (!auth || !isAdmin(auth.user, config)) {
+      return auth ? apiError(reply, 403, 'admin_required', '需要管理员权限') : undefined;
+    }
+    const pluginId = (request.params as { id: string }).id;
+    const result = await transaction(db, async (client) => {
+      const updated = await client.query<{
+        publisher_subject_id: string;
+        publisher_owner_id: string;
+        publisher_owner_login: string;
+      }>(`
+        UPDATE plugins
+        SET publisher_owner_id=pending_owner_id,
+          publisher_owner_login=pending_owner_login,
+          publisher_owner_type=pending_owner_type,
+          repo_owner=pending_owner_login,
+          source_url='https://github.com/' || pending_owner_login || '/' || repo_name,
+          pending_owner_id=NULL,pending_owner_login=NULL,pending_owner_type=NULL,
+          publisher_transfer_status='approved',updated_at=now()
+        WHERE plugin_id=$1
+          AND publisher_transfer_status='pending'
+          AND pending_owner_id IS NOT NULL
+        RETURNING publisher_subject_id,publisher_owner_id,publisher_owner_login
+      `, [pluginId]);
+      const row = updated.rows[0];
+      if (!row) return null;
+      await client.query(`
+        INSERT INTO audit_log(id,actor_user_id,action,plugin_id,metadata_json)
+        VALUES($1,$2,'publisher_transfer_approved',$3,$4::jsonb)
+      `, [
+        id(),
+        auth.user.id,
+        pluginId,
+        JSON.stringify({
+          publisherSubjectId: row.publisher_subject_id,
+          newOwnerId: row.publisher_owner_id,
+          newOwnerLogin: row.publisher_owner_login
+        })
+      ]);
+      return row;
+    });
+    if (!result) {
+      return apiError(
+        reply,
+        409,
+        'publisher_transfer_not_pending',
+        '没有待审批的 publisher transfer'
+      );
+    }
+    return { apiVersion: 3, ok: true, publisher: result };
+  });
+
+  app.post('/api/v3/admin/plugins/:id/publisher-transfer/reject', async (request, reply) => {
+    const auth = await requireUser(request, reply, db, config);
+    if (!auth || !isAdmin(auth.user, config)) {
+      return auth ? apiError(reply, 403, 'admin_required', '需要管理员权限') : undefined;
+    }
+    const pluginId = (request.params as { id: string }).id;
+    const reason = String((request.body as { reason?: string })?.reason ?? '')
+      .trim()
+      .slice(0, 500);
+    const result = await transaction(db, async (client) => {
+      const pending = await client.query(`
+        UPDATE plugins
+        SET pending_owner_id=NULL,pending_owner_login=NULL,pending_owner_type=NULL,
+          publisher_transfer_status='rejected',updated_at=now()
+        WHERE plugin_id=$1 AND publisher_transfer_status='pending'
+        RETURNING plugin_id
+      `, [pluginId]);
+      if (!pending.rowCount) return false;
+      await client.query(`
+        INSERT INTO audit_log(id,actor_user_id,action,plugin_id,metadata_json)
+        VALUES($1,$2,'publisher_transfer_rejected',$3,$4::jsonb)
+      `, [id(), auth.user.id, pluginId, JSON.stringify({ reason })]);
+      return true;
+    });
+    if (!result) {
+      return apiError(
+        reply,
+        409,
+        'publisher_transfer_not_pending',
+        '没有待审批的 publisher transfer'
+      );
+    }
+    return { apiVersion: 3, ok: true };
+  });
+
+  app.post('/api/v3/admin/reports/:id/resolve', async (request, reply) => {
+    const auth = await requireUser(request, reply, db, config);
+    if (!auth || !isAdmin(auth.user, config)) {
+      return auth ? apiError(reply, 403, 'admin_required', '需要管理员权限') : undefined;
+    }
+    const reportId = (request.params as { id: string }).id;
+    const status =
+      (request.body as { status?: string })?.status === 'dismissed'
+        ? 'dismissed'
+        : 'resolved';
+    const result = await db.query(
+      'UPDATE reports SET status=$2,resolved_at=now() WHERE id=$1 RETURNING id',
+      [reportId, status]
+    );
+    if (!result.rowCount) return apiError(reply, 404, 'report_not_found', '举报不存在');
+    return { apiVersion: 3, ok: true };
   });
 
   app.get('/api/v2/me/plugins', async (request, reply) => {

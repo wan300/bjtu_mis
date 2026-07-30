@@ -650,6 +650,8 @@ fun BjtuMisApp(
                                 serviceId = thirdPartyServiceId,
                                 repository = container.thirdPartyServiceRepository,
                                 apiRegistry = container.thirdPartyServiceApiRegistry,
+                                resourceStore = container.thirdPartyResourceStore,
+                                kvStore = container.thirdPartyKvStore,
                                 onBackToServices = { current = THIRD_PARTY_SERVICES_ROUTE },
                                 onBackHandlerChanged = { thirdPartyServiceBackHandler = it },
                             )

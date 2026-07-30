@@ -85,6 +85,26 @@ class ThirdPartyCampusPolicyTest {
     }
 
     @Test
+    fun campusRequestUsesContractCapabilityAndRequiresItsGrant() {
+        requireCampusRequestCapability(campusService(granted = true))
+
+        val missingGrant = assertThrows(ThirdPartyCampusProxyException::class.java) {
+            requireCampusRequestCapability(campusService(granted = false))
+        }
+        assertEquals("permission_denied", missingGrant.code)
+
+        val legacyId = assertThrows(ThirdPartyCampusProxyException::class.java) {
+            requireCampusRequestCapability(
+                campusService(
+                    granted = true,
+                    capability = "campus.request.v1",
+                ),
+            )
+        }
+        assertEquals("capability_unavailable", legacyId.code)
+    }
+
+    @Test
     fun redirectsCannotChangeServicePermissionOrIntroduceQueryKeys() {
         val timetable = CampusRegistry.authorize(
             "aa",
@@ -124,4 +144,35 @@ class ThirdPartyCampusPolicyTest {
             )
         )
     }
+
+    private fun campusService(
+        granted: Boolean,
+        capability: String = "campus.request@1",
+    ): ThirdPartyService = ThirdPartyService(
+        serviceId = "io.example.campus",
+        manifest = ThirdPartyServiceManifest(
+            schemaVersion = 3,
+            id = "io.example.campus",
+            name = "Campus",
+            version = "1.0.0",
+            entrypoint = "index.html",
+            icon = "icon.svg",
+            capabilities = ThirdPartyCapabilityDeclaration(required = listOf(capability)),
+        ),
+        sourceUrl = "https://github.com/example/campus",
+        githubOwner = "example",
+        githubRepo = "campus",
+        defaultBranch = "main",
+        commitSha = "a".repeat(40),
+        packageDigestSha256 = "b".repeat(64),
+        installDir = "unused",
+        grantedCapabilities = if (granted) setOf(capability) else emptySet(),
+        allowedOrigins = emptyList(),
+        enabled = true,
+        needsReview = false,
+        installedAt = "2026-07-29T00:00:00Z",
+        updatedAt = "2026-07-29T00:00:00Z",
+        runtimeProfile = ThirdPartyRuntimeProfile.ContractV1.value,
+        runtimeFloor = THIRD_PARTY_RUNTIME_VERSION,
+    )
 }

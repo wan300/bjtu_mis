@@ -12,23 +12,30 @@ import java.io.File
 
 class ThirdPartyManifestSchemaSyncTest {
     @Test
-    fun docsAndWebSchemasMatchPermissionRegistry() {
+    fun generatedSchemasMatchCapabilityRegistry() {
         val docsSchema = repoFile("docs/third-party-service-manifest.schema.json")
         val webSchema = repoFile("web/assets/schemas/third-party-service-manifest.schema.json")
+        val docsMarketplaceSchema = repoFile("docs/bjtu-marketplace.schema.json")
+        val webMarketplaceSchema = repoFile("web/assets/schemas/bjtu-marketplace.schema.json")
 
         assertTrue("Missing docs schema", docsSchema.isFile)
         assertTrue("Missing web schema", webSchema.isFile)
         assertEquals(docsSchema.readText(), webSchema.readText())
+        assertTrue("Missing docs marketplace schema", docsMarketplaceSchema.isFile)
+        assertTrue("Missing web marketplace schema", webMarketplaceSchema.isFile)
+        assertEquals(docsMarketplaceSchema.readText(), webMarketplaceSchema.readText())
 
         val schema = AppJson.parseToJsonElement(docsSchema.readText()).jsonObject
-        val enumValues = schema["\$defs"]!!.jsonObject["permission_array"]!!
+        val enumValues = schema["properties"]!!.jsonObject["capabilities"]!!
+            .jsonObject["properties"]!!
+            .jsonObject["required"]!!
             .jsonObject["items"]!!
             .jsonObject["enum"]!!
             .jsonArray
             .map { it.jsonPrimitive.contentOrNull.orEmpty() }
             .toSet()
 
-        assertEquals(ThirdPartyPermissionRegistry.allIds(), enumValues)
+        assertEquals(ThirdPartyCapabilityRegistry.capabilities.map { it.id }.toSet(), enumValues)
     }
 
     private fun repoFile(relativePath: String): File {

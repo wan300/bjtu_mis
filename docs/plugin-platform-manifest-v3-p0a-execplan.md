@@ -1,6 +1,7 @@
 # ExecPlan: 插件平台 Manifest v3 / P0-A 安全与兼容基线
 
-> **状态：当前有效。** 本计划替代
+> **状态：已被取代，仅保留作历史与救援依据。** 当前有效计划为
+> `docs/plugin-runtime-contract-p0-p1-execplan.md`。本计划曾替代
 > `specs/001-plugin-marketplace/plan.md` 中的 Manifest v1/v2、聚合 origin、明文身份/
 > 通用 HTTP 桥、
 > commit 绑定 origin 和无 Room migration 等旧安全假设。冲突时以 constitution 原则 VII、

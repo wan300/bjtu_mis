@@ -2,6 +2,8 @@ package cn.edu.bjtu.mis.data.thirdparty
 
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
@@ -93,6 +95,64 @@ class ThirdPartyKvStoreTest {
 
         assertEquals(40, store.keys(namespace).size)
         assertEquals(40, store.usage(namespace).keyCount)
+    }
+
+    @Test
+    fun transactionUsesCasAndPublishesOneAtomicWatchEvent() = runBlocking {
+        val store = FileThirdPartyKvStore(temp.newFolder("transaction"), TestKvCipher())
+        val namespace = ThirdPartyKvNamespace("github-owner:1", "bjtu.demo")
+        val event = async(start = CoroutineStart.UNDISPATCHED) {
+            store.watch(namespace).first()
+        }
+
+        val result = store.transact(
+            namespace = namespace,
+            expectedRevision = 0,
+            mutations = listOf(
+                ThirdPartyKvMutation.Set("a", JsonPrimitive(1)),
+                ThirdPartyKvMutation.Set("b", JsonPrimitive(2)),
+            ),
+        )
+
+        assertEquals(1, result.revision)
+        assertEquals(setOf("a", "b"), result.changedKeys)
+        assertEquals(setOf("a", "b"), event.await().changedKeys)
+        assertThrows(ThirdPartyKvRevisionConflict::class.java) {
+            runBlocking {
+                store.transact(
+                    namespace,
+                    expectedRevision = 0,
+                    mutations = listOf(ThirdPartyKvMutation.Remove("a")),
+                )
+            }
+        }
+        assertEquals(JsonPrimitive(1), store.get(namespace, "a"))
+        assertEquals(JsonPrimitive(2), store.get(namespace, "b"))
+    }
+
+    @Test
+    fun clearPlusMaximumKeysSupportsAtomicImportAndExport() = runBlocking {
+        val store = FileThirdPartyKvStore(temp.newFolder("import-export"), TestKvCipher())
+        val namespace = ThirdPartyKvNamespace("github-owner:1", "bjtu.demo")
+        store.set(namespace, "old", JsonPrimitive("remove-me"))
+
+        val result = store.transact(
+            namespace = namespace,
+            expectedRevision = 1,
+            mutations = buildList {
+                add(ThirdPartyKvMutation.Clear)
+                repeat(THIRD_PARTY_KV_MAX_KEYS) { index ->
+                    add(ThirdPartyKvMutation.Set("key-$index", JsonPrimitive(index)))
+                }
+            },
+        )
+        val exported = store.export(namespace)
+
+        assertEquals(2, result.revision)
+        assertEquals(THIRD_PARTY_KV_MAX_KEYS, result.usage.keyCount)
+        assertEquals(result.revision, exported.revision)
+        assertEquals(THIRD_PARTY_KV_MAX_KEYS, exported.values.size)
+        assertNull(exported.values["old"])
     }
 }
 

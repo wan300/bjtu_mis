@@ -5,6 +5,9 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import cn.edu.bjtu.mis.data.AppJson
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -53,24 +56,126 @@ data class ThirdPartyKvUsage(
     val keyLimit: Int = THIRD_PARTY_KV_MAX_KEYS,
 )
 
+data class ThirdPartyKvEntry(
+    val value: JsonElement?,
+    val revision: Long,
+)
+
+sealed interface ThirdPartyKvMutation {
+    data class Set(val key: String, val value: JsonElement) : ThirdPartyKvMutation
+    data class Remove(val key: String) : ThirdPartyKvMutation
+    data object Clear : ThirdPartyKvMutation
+}
+
+data class ThirdPartyKvTransactionResult(
+    val revision: Long,
+    val usage: ThirdPartyKvUsage,
+    val changedKeys: Set<String>,
+)
+
+data class ThirdPartyKvChange(
+    val revision: Long,
+    val changedKeys: Set<String>,
+    val cleared: Boolean,
+)
+
+data class ThirdPartyKvExport(
+    val revision: Long,
+    val values: Map<String, JsonElement>,
+)
+
+class ThirdPartyKvRevisionConflict(
+    val expectedRevision: Long,
+    val actualRevision: Long,
+) : ThirdPartyServiceException(
+    "KV revision conflict: expected $expectedRevision, actual $actualRevision",
+)
+
 interface ThirdPartyKvStore {
-    suspend fun get(namespace: ThirdPartyKvNamespace, key: String, space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current): JsonElement?
-    suspend fun set(namespace: ThirdPartyKvNamespace, key: String, value: JsonElement, space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current): ThirdPartyKvUsage
-    suspend fun remove(namespace: ThirdPartyKvNamespace, key: String, space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current): Boolean
-    suspend fun keys(namespace: ThirdPartyKvNamespace, space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current): List<String>
-    suspend fun usage(namespace: ThirdPartyKvNamespace, space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current): ThirdPartyKvUsage
-    suspend fun clear(namespace: ThirdPartyKvNamespace, space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current)
+    suspend fun get(
+        namespace: ThirdPartyKvNamespace,
+        key: String,
+        space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current,
+    ): JsonElement?
+
+    suspend fun set(
+        namespace: ThirdPartyKvNamespace,
+        key: String,
+        value: JsonElement,
+        space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current,
+    ): ThirdPartyKvUsage
+
+    suspend fun remove(
+        namespace: ThirdPartyKvNamespace,
+        key: String,
+        space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current,
+    ): Boolean
+
+    suspend fun keys(
+        namespace: ThirdPartyKvNamespace,
+        space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current,
+    ): List<String>
+
+    suspend fun usage(
+        namespace: ThirdPartyKvNamespace,
+        space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current,
+    ): ThirdPartyKvUsage
+
+    suspend fun clear(
+        namespace: ThirdPartyKvNamespace,
+        space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current,
+    )
+
     suspend fun snapshot(namespace: ThirdPartyKvNamespace)
     suspend fun restoreSnapshot(namespace: ThirdPartyKvNamespace): Boolean
     suspend fun beginShadow(namespace: ThirdPartyKvNamespace)
     suspend fun commitShadow(namespace: ThirdPartyKvNamespace)
     suspend fun discardShadow(namespace: ThirdPartyKvNamespace)
     suspend fun deleteNamespace(namespace: ThirdPartyKvNamespace)
+
+    suspend fun getEntry(
+        namespace: ThirdPartyKvNamespace,
+        key: String,
+        space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current,
+    ): ThirdPartyKvEntry = ThirdPartyKvEntry(get(namespace, key, space), 0)
+
+    suspend fun getMany(
+        namespace: ThirdPartyKvNamespace,
+        keys: List<String>,
+        space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current,
+    ): Map<String, JsonElement?> = keys.associateWith { get(namespace, it, space) }
+
+    suspend fun revision(
+        namespace: ThirdPartyKvNamespace,
+        space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current,
+    ): Long = 0
+
+    suspend fun export(
+        namespace: ThirdPartyKvNamespace,
+        space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current,
+    ): ThirdPartyKvExport {
+        val keys = keys(namespace, space)
+        return ThirdPartyKvExport(
+            revision = revision(namespace, space),
+            values = getMany(namespace, keys, space).mapNotNull { (key, value) ->
+                value?.let { key to it }
+            }.toMap(),
+        )
+    }
+
+    suspend fun transact(
+        namespace: ThirdPartyKvNamespace,
+        expectedRevision: Long?,
+        mutations: List<ThirdPartyKvMutation>,
+        space: ThirdPartyKvSpace = ThirdPartyKvSpace.Current,
+    ): ThirdPartyKvTransactionResult =
+        throw ThirdPartyServiceException("storage.kv@2 atomic transactions are unavailable")
+
+    fun watch(namespace: ThirdPartyKvNamespace): Flow<ThirdPartyKvChange> = emptyFlow()
 }
 
 interface ThirdPartyKvCipher {
     fun encrypt(plaintext: ByteArray, associatedData: ByteArray): ByteArray
-
     fun decrypt(payload: ByteArray, associatedData: ByteArray): ByteArray
 }
 
@@ -132,14 +237,53 @@ class FileThirdPartyKvStore(
 
     private val root = root.absoluteFile
     private val locks = ConcurrentHashMap<String, Mutex>()
+    private val changeStreams = ConcurrentHashMap<String, MutableSharedFlow<ThirdPartyKvChange>>()
 
     override suspend fun get(
         namespace: ThirdPartyKvNamespace,
         key: String,
         space: ThirdPartyKvSpace,
-    ): JsonElement? = locked(namespace) {
+    ): JsonElement? = getEntry(namespace, key, space).value
+
+    override suspend fun getEntry(
+        namespace: ThirdPartyKvNamespace,
+        key: String,
+        space: ThirdPartyKvSpace,
+    ): ThirdPartyKvEntry = locked(namespace) {
         validateKey(key)
-        read(namespace, space).values[key]
+        val document = read(namespace, space)
+        ThirdPartyKvEntry(document.values[key], document.revision)
+    }
+
+    override suspend fun getMany(
+        namespace: ThirdPartyKvNamespace,
+        keys: List<String>,
+        space: ThirdPartyKvSpace,
+    ): Map<String, JsonElement?> = locked(namespace) {
+        if (keys.size > THIRD_PARTY_KV_MAX_KEYS) {
+            throw PluginRuntimeException(
+                "invalid_request",
+                "storage.kv.getMany exceeds 1024 keys",
+            )
+        }
+        keys.forEach(::validateKey)
+        val values = read(namespace, space).values
+        keys.distinct().associateWith(values::get)
+    }
+
+    override suspend fun revision(
+        namespace: ThirdPartyKvNamespace,
+        space: ThirdPartyKvSpace,
+    ): Long = locked(namespace) {
+        read(namespace, space).revision
+    }
+
+    override suspend fun export(
+        namespace: ThirdPartyKvNamespace,
+        space: ThirdPartyKvSpace,
+    ): ThirdPartyKvExport = locked(namespace) {
+        val document = read(namespace, space)
+        ThirdPartyKvExport(document.revision, document.values.toMap())
     }
 
     override suspend fun set(
@@ -147,25 +291,12 @@ class FileThirdPartyKvStore(
         key: String,
         value: JsonElement,
         space: ThirdPartyKvSpace,
-    ): ThirdPartyKvUsage = locked(namespace) {
-        validateKey(key)
-        val itemBytes = AppJson.encodeToString(value).toByteArray(Charsets.UTF_8).size
-        if (itemBytes > THIRD_PARTY_KV_ITEM_BYTES) {
-            throw ThirdPartyServiceException("app.storage 单项超过 256 KiB 配额")
-        }
-        val current = read(namespace, space).values.toMutableMap()
-        if (key !in current && current.size >= THIRD_PARTY_KV_MAX_KEYS) {
-            throw ThirdPartyServiceException("app.storage key 数量超过 1024")
-        }
-        current[key] = value
-        val document = ThirdPartyKvDocument(current.toSortedMap())
-        val usage = usageOf(document)
-        if (usage.bytesUsed > THIRD_PARTY_KV_TOTAL_BYTES) {
-            throw ThirdPartyServiceException("app.storage 总量超过 10 MiB 配额")
-        }
-        write(namespace, space.fileName, document)
-        usage
-    }
+    ): ThirdPartyKvUsage = transact(
+        namespace,
+        expectedRevision = null,
+        mutations = listOf(ThirdPartyKvMutation.Set(key, value)),
+        space = space,
+    ).usage
 
     override suspend fun remove(
         namespace: ThirdPartyKvNamespace,
@@ -173,10 +304,14 @@ class FileThirdPartyKvStore(
         space: ThirdPartyKvSpace,
     ): Boolean = locked(namespace) {
         validateKey(key)
-        val current = read(namespace, space).values.toMutableMap()
-        val removed = current.remove(key) != null
-        if (removed) write(namespace, space.fileName, ThirdPartyKvDocument(current.toSortedMap()))
-        removed
+        val current = read(namespace, space)
+        if (key !in current.values) return@locked false
+        val values = current.values.toMutableMap()
+        values.remove(key)
+        val next = checkedDocument(values, current.revision + 1)
+        write(namespace, space.fileName, next)
+        emitChange(namespace, space, next.revision, setOf(key), cleared = false)
+        true
     }
 
     override suspend fun keys(
@@ -197,8 +332,62 @@ class FileThirdPartyKvStore(
         namespace: ThirdPartyKvNamespace,
         space: ThirdPartyKvSpace,
     ) = locked(namespace) {
-        write(namespace, space.fileName, ThirdPartyKvDocument())
+        val current = read(namespace, space)
+        val next = ThirdPartyKvDocument(revision = current.revision + 1)
+        write(namespace, space.fileName, next)
+        emitChange(namespace, space, next.revision, current.values.keys, cleared = true)
     }
+
+    override suspend fun transact(
+        namespace: ThirdPartyKvNamespace,
+        expectedRevision: Long?,
+        mutations: List<ThirdPartyKvMutation>,
+        space: ThirdPartyKvSpace,
+    ): ThirdPartyKvTransactionResult = locked(namespace) {
+        if (
+            mutations.isEmpty() ||
+            mutations.size > THIRD_PARTY_KV_MAX_KEYS + 1 ||
+            mutations.count { it == ThirdPartyKvMutation.Clear } > 1
+        ) {
+            throw PluginRuntimeException(
+                "invalid_request",
+                "storage.kv transaction requires 1-1024 key operations and at most one clear",
+            )
+        }
+        val current = read(namespace, space)
+        if (expectedRevision != null && expectedRevision != current.revision) {
+            throw ThirdPartyKvRevisionConflict(expectedRevision, current.revision)
+        }
+        val values = current.values.toMutableMap()
+        val changedKeys = linkedSetOf<String>()
+        var cleared = false
+        mutations.forEach { mutation ->
+            when (mutation) {
+                is ThirdPartyKvMutation.Set -> {
+                    validateKey(mutation.key)
+                    validateItem(mutation.value)
+                    values[mutation.key] = mutation.value
+                    changedKeys += mutation.key
+                }
+                is ThirdPartyKvMutation.Remove -> {
+                    validateKey(mutation.key)
+                    if (values.remove(mutation.key) != null) changedKeys += mutation.key
+                }
+                ThirdPartyKvMutation.Clear -> {
+                    changedKeys += values.keys
+                    values.clear()
+                    cleared = true
+                }
+            }
+        }
+        val next = checkedDocument(values, current.revision + 1)
+        write(namespace, space.fileName, next)
+        emitChange(namespace, space, next.revision, changedKeys, cleared)
+        ThirdPartyKvTransactionResult(next.revision, usageOf(next), changedKeys)
+    }
+
+    override fun watch(namespace: ThirdPartyKvNamespace): Flow<ThirdPartyKvChange> =
+        changeStream(namespace)
 
     override suspend fun snapshot(namespace: ThirdPartyKvNamespace) = locked(namespace) {
         write(namespace, SNAPSHOT_FILE, read(namespace, ThirdPartyKvSpace.Current))
@@ -207,7 +396,15 @@ class FileThirdPartyKvStore(
     override suspend fun restoreSnapshot(namespace: ThirdPartyKvNamespace): Boolean = locked(namespace) {
         val file = namespaceFile(namespace, SNAPSHOT_FILE)
         if (!file.isFile) return@locked false
-        write(namespace, ThirdPartyKvSpace.Current.fileName, readFile(namespace, SNAPSHOT_FILE))
+        val restored = readFile(namespace, SNAPSHOT_FILE)
+        write(namespace, ThirdPartyKvSpace.Current.fileName, restored)
+        emitChange(
+            namespace,
+            ThirdPartyKvSpace.Current,
+            restored.revision,
+            restored.values.keys,
+            cleared = true,
+        )
         true
     }
 
@@ -222,6 +419,13 @@ class FileThirdPartyKvStore(
         write(namespace, SNAPSHOT_FILE, read(namespace, ThirdPartyKvSpace.Current))
         write(namespace, ThirdPartyKvSpace.Current.fileName, migrated)
         if (!shadow.delete()) throw ThirdPartyServiceException("无法清理已提交的迁移影子 KV")
+        emitChange(
+            namespace,
+            ThirdPartyKvSpace.Current,
+            migrated.revision,
+            migrated.values.keys,
+            cleared = true,
+        )
     }
 
     override suspend fun discardShadow(namespace: ThirdPartyKvNamespace) = locked(namespace) {
@@ -229,11 +433,13 @@ class FileThirdPartyKvStore(
         Unit
     }
 
-    override suspend fun deleteNamespace(namespace: ThirdPartyKvNamespace) = locked(namespace) {
+    override suspend fun deleteNamespace(namespace: ThirdPartyKvNamespace): Unit = locked(namespace) {
         val directory = namespaceDirectory(namespace)
         if (directory.exists() && !directory.deleteRecursively()) {
-            throw ThirdPartyServiceException("无法删除插件 app.storage 数据")
+            throw ThirdPartyServiceException("无法删除插件 storage.kv 数据")
         }
+        changeStreams.remove(namespace.identity)
+        Unit
     }
 
     private suspend fun <T> locked(
@@ -254,8 +460,28 @@ class FileThirdPartyKvStore(
             val plaintext = cipher.decrypt(file.readBytes(), associatedData(namespace, fileName))
             AppJson.decodeFromString(plaintext.toString(Charsets.UTF_8))
         } catch (error: Exception) {
-            throw ThirdPartyServiceException("插件 app.storage 数据损坏或无法解密", error)
+            throw ThirdPartyServiceException("插件 storage.kv 数据损坏或无法解密", error)
         }
+    }
+
+    private fun checkedDocument(
+        values: Map<String, JsonElement>,
+        revision: Long,
+    ): ThirdPartyKvDocument {
+        if (values.size > THIRD_PARTY_KV_MAX_KEYS) {
+            throw PluginRuntimeException(
+                "quota_exceeded",
+                "storage.kv key count exceeds 1024",
+            )
+        }
+        val document = ThirdPartyKvDocument(values.toSortedMap(), revision)
+        if (usageOf(document).bytesUsed > THIRD_PARTY_KV_TOTAL_BYTES) {
+            throw PluginRuntimeException(
+                "quota_exceeded",
+                "storage.kv quota exceeds 10 MiB",
+            )
+        }
+        return document
     }
 
     private fun write(
@@ -287,7 +513,7 @@ class FileThirdPartyKvStore(
             }.getOrThrow()
         } catch (error: Exception) {
             temp.delete()
-            throw ThirdPartyServiceException("无法原子保存插件 app.storage", error)
+            throw ThirdPartyServiceException("无法原子保存插件 storage.kv", error)
         }
     }
 
@@ -299,16 +525,46 @@ class FileThirdPartyKvStore(
 
     private fun validateKey(key: String) {
         if (key.isBlank() || key.length > 256 || key.any { it.code < 0x20 }) {
-            throw ThirdPartyServiceException("app.storage key 必须为 1-256 个可打印字符")
+            throw PluginRuntimeException(
+                "invalid_request",
+                "storage.kv key 必须为 1-256 个可打印字符",
+            )
         }
     }
+
+    private fun validateItem(value: JsonElement) {
+        val itemBytes = AppJson.encodeToString(value).toByteArray(Charsets.UTF_8).size
+        if (itemBytes > THIRD_PARTY_KV_ITEM_BYTES) {
+            throw PluginRuntimeException(
+                "resource_too_large",
+                "storage.kv item exceeds 256 KiB",
+            )
+        }
+    }
+
+    private fun emitChange(
+        namespace: ThirdPartyKvNamespace,
+        space: ThirdPartyKvSpace,
+        revision: Long,
+        keys: Set<String>,
+        cleared: Boolean,
+    ) {
+        if (space == ThirdPartyKvSpace.Current) {
+            changeStream(namespace).tryEmit(ThirdPartyKvChange(revision, keys, cleared))
+        }
+    }
+
+    private fun changeStream(namespace: ThirdPartyKvNamespace): MutableSharedFlow<ThirdPartyKvChange> =
+        changeStreams.getOrPut(namespace.identity) {
+            MutableSharedFlow(extraBufferCapacity = 64)
+        }
 
     private fun namespaceDirectory(namespace: ThirdPartyKvNamespace): File =
         File(root, sha256(namespace.identity)).absoluteFile.also { directory ->
             val rootPath = root.canonicalFile
             val candidate = directory.canonicalFile
             if (!candidate.path.startsWith(rootPath.path + File.separator)) {
-                throw ThirdPartyServiceException("插件 app.storage namespace 越界")
+                throw ThirdPartyServiceException("插件 storage.kv namespace 越界")
             }
         }
 
@@ -316,7 +572,8 @@ class FileThirdPartyKvStore(
         File(namespaceDirectory(namespace), fileName)
 
     private fun associatedData(namespace: ThirdPartyKvNamespace, fileName: String): ByteArray =
-        "bjtu-mis-third-party-kv-v1\u0000${namespace.identity}\u0000$fileName".toByteArray(Charsets.UTF_8)
+        "bjtu-mis-third-party-kv-v1\u0000${namespace.identity}\u0000$fileName"
+            .toByteArray(Charsets.UTF_8)
 
     private fun sha256(value: String): String =
         MessageDigest.getInstance("SHA-256")
@@ -331,4 +588,5 @@ class FileThirdPartyKvStore(
 @Serializable
 private data class ThirdPartyKvDocument(
     val values: Map<String, JsonElement> = emptyMap(),
+    val revision: Long = 0,
 )

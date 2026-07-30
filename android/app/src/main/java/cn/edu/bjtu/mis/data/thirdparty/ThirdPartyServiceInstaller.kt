@@ -92,7 +92,7 @@ class ThirdPartyServiceInstaller(
                 commitSha = commitSha,
                 zipFile = zipFile,
                 publisherSubjectId = "github-owner:$ownerId",
-                allowDevelopmentOrigins = true,
+                allowDevelopmentOrigins = false,
             )
         } finally {
             tempDir.deleteRecursively()
@@ -109,8 +109,9 @@ class ThirdPartyServiceInstaller(
         val source = parseGitHubRepositoryUrl(plugin.repositoryUrl)
         if (
             plugin.schemaVersion != THIRD_PARTY_SERVICE_SCHEMA_VERSION ||
+            plugin.contractProfile != THIRD_PARTY_CONTRACT_PROFILE ||
             plugin.compatibilityState != ThirdPartyCompatibilityState.Compatible.value ||
-            plugin.minRuntimeVersion > THIRD_PARTY_RUNTIME_VERSION
+            plugin.runtimeFloor > THIRD_PARTY_RUNTIME_VERSION
         ) {
             throw ThirdPartyServiceException("插件目录版本与当前 Manifest v3 runtime 不兼容")
         }
@@ -142,6 +143,20 @@ class ThirdPartyServiceInstaller(
             if (prepared.manifest.id != plugin.id || prepared.manifest.version != plugin.version) {
                 discardPreparedImport(prepared.token)
                 throw ThirdPartyServiceException("插件快照 manifest 与目录元数据不一致")
+            }
+            if (prepared.manifest.marketplace == null) {
+                discardPreparedImport(prepared.token)
+                throw ThirdPartyServiceException(
+                    "插件大厅制品缺少 $THIRD_PARTY_MARKETPLACE_FILE_NAME",
+                )
+            }
+            if (
+                prepared.manifest.capabilities != plugin.capabilities ||
+                prepared.manifest.origins != plugin.origins ||
+                prepared.manifest.dataSchemaVersion != (plugin.dataSchemaVersion ?: 0)
+            ) {
+                discardPreparedImport(prepared.token)
+                throw ThirdPartyServiceException("插件快照 contract 与目录派生元数据不一致")
             }
             if (!prepared.packageDigestSha256.equals(plugin.packageDigestSha256, ignoreCase = true)) {
                 discardPreparedImport(prepared.token)
@@ -447,9 +462,11 @@ class ThirdPartyServiceInstaller(
         val children = extractedDir.listFiles().orEmpty().filter { it.name != "__MACOSX" }
         val singleDir = children.singleOrNull()?.takeIf { it.isDirectory }
         return when {
-            File(extractedDir, "bjtu-service.json").isFile -> extractedDir
-            singleDir != null && File(singleDir, "bjtu-service.json").isFile -> singleDir
-            else -> throw ThirdPartyServiceException("第三方服务包根目录缺少 bjtu-service.json")
+            File(extractedDir, THIRD_PARTY_MANIFEST_FILE_NAME).isFile -> extractedDir
+            singleDir != null && File(singleDir, THIRD_PARTY_MANIFEST_FILE_NAME).isFile -> singleDir
+            else -> throw ThirdPartyServiceException(
+                "插件包根目录缺少 $THIRD_PARTY_MANIFEST_FILE_NAME",
+            )
         }.canonicalFile
     }
 
@@ -461,13 +478,29 @@ class ThirdPartyServiceInstaller(
         publisherSubjectId: String,
         allowDevelopmentOrigins: Boolean = false,
     ): PreparedThirdPartyServicePackage {
-        val manifestFile = File(packageRoot, "bjtu-service.json")
-        if (!manifestFile.isFile) throw ThirdPartyServiceException("第三方服务缺少 bjtu-service.json")
-        val manifest = ThirdPartyManifestValidator.decodeAndValidate(
+        val manifestFile = File(packageRoot, THIRD_PARTY_MANIFEST_FILE_NAME)
+        if (!manifestFile.isFile) {
+            throw ThirdPartyServiceException("插件缺少 $THIRD_PARTY_MANIFEST_FILE_NAME")
+        }
+        val developmentFile = File(packageRoot, THIRD_PARTY_DEVELOPMENT_FILE_NAME)
+        if (developmentFile.exists() && !allowDevelopmentOrigins) {
+            throw ThirdPartyServiceException(
+                "$THIRD_PARTY_DEVELOPMENT_FILE_NAME 仅用于 Debug 联调，禁止进入发布包",
+            )
+        }
+        val decodedManifest = ThirdPartyManifestValidator.decodeAndValidate(
             manifestFile.readText(Charsets.UTF_8),
             packageRoot,
             allowDevelopmentOrigins,
         )
+        val marketplace = File(packageRoot, THIRD_PARTY_MARKETPLACE_FILE_NAME)
+            .takeIf(File::isFile)
+            ?.let {
+                ThirdPartyManifestValidator.decodeAndValidateMarketplace(
+                    it.readText(Charsets.UTF_8),
+                )
+            }
+        val manifest = ThirdPartyManifestValidator.attachMarketplace(decodedManifest, marketplace)
         val token = UUID.randomUUID().toString()
         val stagingDir = File(stagingRoot, token).canonicalFile.safeChildOf(stagingRoot)
         if (stagingDir.exists() && !stagingDir.deleteRecursively()) {

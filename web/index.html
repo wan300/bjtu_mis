@@ -120,7 +120,7 @@
             <p class="eyebrow">Developer platform</p>
             <h2>第三方插件开发</h2>
             <p>
-              第三方插件是安装在应用内的 Manifest v3 静态 Web 服务。插件通过细粒度权限读取受控校园数据，通过用途拆分的 connect、media、frame 与 navigation origin 使用远程资源；原生桥只对稳定本地 origin 的 main frame 开放。开发者文档覆盖 capability、加密 KV、事务迁移、只读校园代理、制品 digest、lint 和发布检查清单。
+              第三方插件是 SDK-first、Capability 驱动的 Manifest v3 / contract_v1 Web 应用。插件通过类型化 SDK 读取受控校园数据，通过用途拆分的 connect、media、frame 与 navigation origin 使用远程资源；原生桥只对稳定本地 origin 的 main frame 开放。开发者文档覆盖自动生成契约、KV/Blob/Cache、事务迁移、只读校园代理、确定性打包和发布检查清单。
             </p>
             <div class="developer-panel__actions">
               <a class="btn btn--primary" href="developers.html">阅读开发者文档</a>
@@ -130,7 +130,7 @@
           <ul class="developer-panel__list" aria-label="第三方插件能力摘要">
             <li>公开 GitHub 仓库导入</li>
             <li>纯静态 Web 包运行</li>
-            <li>Manifest v3 capability 与权限</li>
+            <li>版本化 Capability 与增量授权</li>
             <li>四类远程 origin 边界</li>
             <li>导入预检与 digest</li>
             <li>稳定 main-frame WebView 桥</li>

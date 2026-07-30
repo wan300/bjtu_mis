@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "declaration": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "baseUrl": ".",
+    "paths": {
+      "@bjtu-mis/plugin-sdk": ["packages/plugin-sdk/src/index.ts"],
+      "@bjtu-mis/plugin-sdk/mock": ["packages/plugin-sdk/src/mock.ts"],
+      "@bjtu-mis/plugin-cli": ["packages/plugin-cli/src/index.ts"]
+    }
+  },
+  "include": [
+    "packages/*/src/**/*.ts"
+  ]
+}

@@ -1,0 +1,3219 @@
+/* This file is generated from plugin-tooling/contracts/capability-contracts.json. */
+/* Do not edit by hand. Run `npm run generate` from plugin-tooling. */
+
+export const CONTRACT_PROFILE = "contract_v1" as const;
+export const MANIFEST_SCHEMA_VERSION = 3 as const;
+export const PROTOCOL_VERSION = 2 as const;
+export const RUNTIME_FLOOR = 2 as const;
+export const PACKAGE_LIMITS = {
+  "archiveBytes": 26214400,
+  "extractedBytes": 52428800,
+  "files": 1000,
+  "iconBytes": 1048576
+} as const;
+export const PLUGIN_ERROR_CODES = [
+  "permission_denied",
+  "capability_unavailable",
+  "invalid_request",
+  "origin_denied",
+  "network_timeout",
+  "request_timeout",
+  "http_error",
+  "quota_exceeded",
+  "resource_too_large",
+  "migration_failed",
+  "user_cancelled",
+  "idempotency_conflict"
+] as const;
+export type PluginErrorCode = (typeof PLUGIN_ERROR_CODES)[number];
+export const CAPABILITY_IDS = [
+  "runtime.lifecycle@1",
+  "configuration.read@1",
+  "remote.frame@1",
+  "navigation.external@1",
+  "identity.profile@1",
+  "academic.timetable@1",
+  "academic.scores@1",
+  "academic.exams@1",
+  "academic.calendar@1",
+  "academic.progress@1",
+  "academic.homework@1",
+  "academic.resources@1",
+  "mail.read@1",
+  "campus.request@1",
+  "network.request@1",
+  "storage.kv@2",
+  "storage.blob@1",
+  "cache.resource@1",
+  "academic.userCourses.command@1",
+  "academic.homework.submit@1",
+  "mail.send@1"
+] as const;
+export type CapabilityId = (typeof CAPABILITY_IDS)[number];
+
+export interface CapabilityMethodMap {
+  "runtime.lifecycle@1#handshake": { request: { "sdkVersion": string }; response: { "protocolVersion": number; "contractProfile": string; "runtimeFloor": number; "availableCapabilities": Array<string>; "binaryTransport"?: boolean } };
+  "runtime.lifecycle@1#ready": { request: Record<string, never>; response: { "ready": boolean } };
+  "runtime.lifecycle@1#close": { request: Record<string, never>; response: { "closed": boolean } };
+  "configuration.read@1#get": { request: { "key": string }; response: { "value": string | null } };
+  "navigation.external@1#open": { request: { "url": string }; response: { "opened": boolean } };
+  "identity.profile@1#getProfile": { request: { "forceRefresh"?: boolean }; response: { "data": { "name"?: string; "studentId"?: string; "account"?: string; "gender"?: string; "birthday"?: string; "college"?: string; "major"?: string; "className"?: string; "grade"?: string; "educationLevel"?: string; "studentStatus"?: string; "campus"?: string; "phone"?: string; "email"?: string; "avatarUrl"?: string; "fields": Array<Record<string, unknown>>; "sections": Array<Record<string, unknown>> }; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "academic.timetable@1#getTimetable": { request: { "forceRefresh"?: boolean }; response: { "data": { "days": Array<string>; "periods": Array<string>; "entries": Array<Record<string, unknown>>; "currentTerm"?: string; "availableTerms": Array<Record<string, unknown>> }; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "academic.scores@1#getScores": { request: { "term"?: string; "courseType"?: string; "forceRefresh"?: boolean }; response: { "data": { "currentTerm"?: string; "availableTerms": Array<Record<string, unknown>>; "items": Array<Record<string, unknown>> }; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "academic.scores@1#getHistoryScores": { request: { "term"?: string; "forceRefresh"?: boolean }; response: { "data": { "currentTerm"?: string; "availableTerms": Array<Record<string, unknown>>; "items": Array<Record<string, unknown>> }; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "academic.exams@1#getExams": { request: { "term"?: string; "forceRefresh"?: boolean }; response: { "data": { "currentTerm"?: string; "availableTerms": Array<Record<string, unknown>>; "items": Array<Record<string, unknown>> }; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "academic.calendar@1#getCalendar": { request: { "month"?: string; "forceRefresh"?: boolean }; response: { "data": { "month": string; "currentWeek"?: string; "currentTerm"?: string; "availableTerms": Array<Record<string, unknown>>; "items": Array<Record<string, unknown>> }; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "academic.progress@1#getProgress": { request: { "forceRefresh"?: boolean }; response: { "data": { "currentTerm"?: string; "summary": Record<string, unknown>; "buckets": Array<Record<string, unknown>>; "mergedBuckets": Array<Record<string, unknown>>; "detailBuckets": Array<Record<string, unknown>>; "courses": Array<Record<string, unknown>>; "replaceCourses": Array<Record<string, unknown>>; "fields": Array<Record<string, unknown>> }; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "academic.homework@1#getHomework": { request: { "status"?: string; "forceRefresh"?: boolean }; response: { "data": { "currentTerm"?: string; "courses": Array<Record<string, unknown>>; "items": Array<Record<string, unknown>> }; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "academic.resources@1#getCourseResources": { request: { "term"?: string; "courseId": string; "folderId"?: string; "search"?: string; "categoryKey"?: string; "forceRefresh"?: boolean }; response: { "data": { "currentTerm"?: string; "courses": Array<Record<string, unknown>>; "selectedCourseId"?: number; "folderId": string; "categories": Array<Record<string, unknown>>; "selectedCategoryKey": string; "tree": Array<Record<string, unknown>>; "folders": Array<Record<string, unknown>>; "resources": Array<Record<string, unknown>> }; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "mail.read@1#listFolders": { request: { "forceRefresh"?: boolean }; response: { "data": { "folders": Array<Record<string, unknown>> }; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "mail.read@1#listMessages": { request: { "folderId"?: string; "start"?: number; "limit"?: number; "forceRefresh"?: boolean }; response: { "data": { "folderId": string; "start": number; "limit": number; "total": number; "messages": Array<Record<string, unknown>> }; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "mail.read@1#getMessage": { request: { "messageId": string; "mailbox"?: string }; response: { "data": { "messageId": string; "folderId": string; "subject": string; "fromText": string; "toText": string; "sender"?: string; "sentAt"?: string; "receivedAt"?: string; "modifiedAt"?: string; "size": number; "read": boolean; "attached": boolean; "priority"?: number; "summary"?: string; "fromList": Array<string>; "toList": Array<string>; "ccList": Array<string>; "bccList": Array<string>; "htmlContent": string; "headers": Record<string, unknown>; "attachments": Array<Record<string, unknown>> }; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "campus.request@1#request": { request: { "service": "mis" | "aa" | "ve"; "method"?: "GET" | "HEAD"; "path": string; "query"?: Record<string, unknown>; "accept"?: string }; response: { "data": unknown; "meta": { "syncedAt": string; "source": "cache" | "network" | "mixed"; "coverage": "complete" | "partial" | "unknown"; "fromCache": boolean } } };
+  "network.request@1#request": { request: { "url": string; "method"?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"; "headers"?: Record<string, unknown>; "body"?: unknown; "bodyType"?: "json" | "text" | "formData" | "blob"; "timeoutMs"?: number }; response: { "status": number; "headers": Record<string, unknown>; "bodyType": "json" | "text" | "resource"; "body"?: unknown; "resource"?: { "handle": string; "size": number; "contentType": string; "url": string; "etag"?: string; "pinned"?: boolean }; "finalUrl": string; "redirects": number; "contentType"?: string } };
+  "storage.kv@2#get": { request: { "key": string }; response: { "value": unknown; "revision": number; [key: string]: unknown } };
+  "storage.kv@2#set": { request: { "key": string; "value": unknown; "ifRevision"?: number }; response: { "revision": number; "usage": { "bytesUsed": number; "byteLimit": number; "keyCount": number; "keyLimit": number; "revision": number }; "changedKeys": Array<string> } };
+  "storage.kv@2#remove": { request: { "key": string; "ifRevision"?: number }; response: { "removed": boolean; "revision": number; "usage": { "bytesUsed": number; "byteLimit": number; "keyCount": number; "keyLimit": number; "revision": number }; "changedKeys": Array<string> } };
+  "storage.kv@2#keys": { request: Record<string, never>; response: { "keys": Array<string>; "revision": number; [key: string]: unknown } };
+  "storage.kv@2#usage": { request: Record<string, never>; response: { "bytesUsed": number; "byteLimit": number; "keyCount": number; "keyLimit": number; "revision": number } };
+  "storage.kv@2#batch": { request: { "operations": Array<Record<string, unknown>> }; response: { "revision": number; "usage": { "bytesUsed": number; "byteLimit": number; "keyCount": number; "keyLimit": number; "revision": number }; "changedKeys": Array<string> } };
+  "storage.kv@2#transaction": { request: { "ifRevision": number; "operations": Array<Record<string, unknown>> }; response: { "revision": number; "usage": { "bytesUsed": number; "byteLimit": number; "keyCount": number; "keyLimit": number; "revision": number }; "changedKeys": Array<string> } };
+  "storage.kv@2#export": { request: Record<string, never>; response: { "handle": string; "size": number; "contentType": string; "url": string; "etag"?: string; "pinned"?: boolean } };
+  "storage.kv@2#import": { request: { "handle": string; "ifRevision"?: number }; response: { "revision": number; "usage": { "bytesUsed": number; "byteLimit": number; "keyCount": number; "keyLimit": number; "revision": number }; "changedKeys": Array<string> } };
+  "storage.blob@1#put": { request: { "contentType": string; "size": number }; response: { "handle": string; "size": number; "contentType": string; "url": string; "etag"?: string; "pinned"?: boolean } };
+  "storage.blob@1#getInfo": { request: { "handle": string }; response: { "handle": string; "size": number; "contentType": string; "url": string; "etag"?: string; "pinned"?: boolean } };
+  "storage.blob@1#delete": { request: { "handle": string }; response: { "deleted": boolean } };
+  "cache.resource@1#put": { request: { "key": string; "contentType": string; "size": number; "pin"?: boolean }; response: { "handle": string; "size": number; "contentType": string; "url": string; "etag"?: string; "pinned"?: boolean } };
+  "cache.resource@1#promote": { request: { "handle": string; "key": string; "pinned"?: boolean }; response: { "handle": string; "size": number; "contentType": string; "url": string; "etag"?: string; "pinned"?: boolean } };
+  "cache.resource@1#deleteHandle": { request: { "handle": string }; response: { "deleted": boolean } };
+  "cache.resource@1#match": { request: { "key": string }; response: { "handle": string; "size": number; "contentType": string; "url": string; "etag"?: string; "pinned"?: boolean } | null };
+  "cache.resource@1#delete": { request: { "key": string }; response: { "deleted": boolean } };
+  "cache.resource@1#pin": { request: { "key": string; "pinned": boolean }; response: { "pinned": boolean } };
+  "cache.resource@1#usage": { request: Record<string, never>; response: { "bytesUsed": number; "byteLimit": number; "globalByteLimit": number } };
+  "academic.userCourses.command@1#save": { request: { "idempotencyKey": string; "course": Record<string, unknown>; [key: string]: unknown }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "academic.userCourses.command@1#delete": { request: { "idempotencyKey": string; "id": number }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "academic.homework.submit@1#submit": { request: { "idempotencyKey": string; "homeworkId": number; "courseId": number; "content"?: string; "attachmentHandles"?: Array<string>; [key: string]: unknown }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "mail.send@1#send": { request: { "idempotencyKey": string; "to": Array<string>; "cc"?: Array<string>; "bcc"?: Array<string>; "subject": string; "text"?: string; "html"?: string; "attachmentHandles"?: Array<string>; [key: string]: unknown }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+}
+
+export interface CapabilityEventMap {
+  "runtime.lifecycle@1#resume": { data: Record<string, never>; requiresAcknowledgement: false };
+  "runtime.lifecycle@1#pause": { data: Record<string, never>; requiresAcknowledgement: false };
+  "runtime.lifecycle@1#theme": { data: { "colorScheme": "light" | "dark"; "reducedMotion": boolean; "highContrast": boolean }; requiresAcknowledgement: false };
+  "runtime.lifecycle@1#resize": { data: { "viewportWidthPx": number; "viewportHeightPx": number; "density": number; "fontScale": number; "orientation": "portrait" | "landscape"; "safeAreaTopPx": number; "safeAreaRightPx": number; "safeAreaBottomPx": number; "safeAreaLeftPx": number; "imeHeightPx": number }; requiresAcknowledgement: false };
+  "runtime.lifecycle@1#network": { data: { "online": boolean; "validated": boolean; "metered": boolean; "transport": string }; requiresAcknowledgement: false };
+  "runtime.lifecycle@1#back": { data: Record<string, never>; requiresAcknowledgement: true };
+  "network.request@1#progress": { data: { "loaded": number; "total"?: number; "phase": "upload" | "response" }; requiresAcknowledgement: false };
+  "storage.kv@2#changed": { data: { "revision": number; "keys": Array<string>; "cleared": boolean }; requiresAcknowledgement: false };
+}
+
+export type CapabilityRoute = keyof CapabilityMethodMap;
+export type CapabilityRequest<Route extends CapabilityRoute> = CapabilityMethodMap[Route]["request"];
+export type CapabilityResponse<Route extends CapabilityRoute> = CapabilityMethodMap[Route]["response"];
+export type CapabilityEventRoute = keyof CapabilityEventMap;
+export type CapabilityEventData<Route extends CapabilityEventRoute> = CapabilityEventMap[Route]["data"];
+export type CapabilityEventAcknowledgement<Route extends CapabilityEventRoute> = CapabilityEventMap[Route]["requiresAcknowledgement"];
+
+export const CAPABILITY_MOCK_RESPONSES = {
+  "runtime.lifecycle@1#handshake": {
+    "protocolVersion": 0,
+    "contractProfile": "example",
+    "runtimeFloor": 0,
+    "availableCapabilities": []
+  },
+  "runtime.lifecycle@1#ready": {
+    "ready": false
+  },
+  "runtime.lifecycle@1#close": {
+    "closed": false
+  },
+  "configuration.read@1#get": {
+    "value": "example"
+  },
+  "navigation.external@1#open": {
+    "opened": false
+  },
+  "identity.profile@1#getProfile": {
+    "data": {
+      "fields": [],
+      "sections": []
+    },
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "academic.timetable@1#getTimetable": {
+    "data": {
+      "days": [],
+      "periods": [],
+      "entries": [],
+      "availableTerms": []
+    },
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "academic.scores@1#getScores": {
+    "data": {
+      "availableTerms": [],
+      "items": []
+    },
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "academic.scores@1#getHistoryScores": {
+    "data": {
+      "availableTerms": [],
+      "items": []
+    },
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "academic.exams@1#getExams": {
+    "data": {
+      "availableTerms": [],
+      "items": []
+    },
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "academic.calendar@1#getCalendar": {
+    "data": {
+      "month": "example",
+      "availableTerms": [],
+      "items": []
+    },
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "academic.progress@1#getProgress": {
+    "data": {
+      "summary": {},
+      "buckets": [],
+      "mergedBuckets": [],
+      "detailBuckets": [],
+      "courses": [],
+      "replaceCourses": [],
+      "fields": []
+    },
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "academic.homework@1#getHomework": {
+    "data": {
+      "courses": [],
+      "items": []
+    },
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "academic.resources@1#getCourseResources": {
+    "data": {
+      "courses": [],
+      "folderId": "example",
+      "categories": [],
+      "selectedCategoryKey": "example",
+      "tree": [],
+      "folders": [],
+      "resources": []
+    },
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "mail.read@1#listFolders": {
+    "data": {
+      "folders": []
+    },
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "mail.read@1#listMessages": {
+    "data": {
+      "folderId": "example",
+      "start": 0,
+      "limit": 0,
+      "total": 0,
+      "messages": []
+    },
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "mail.read@1#getMessage": {
+    "data": {
+      "messageId": "example",
+      "folderId": "example",
+      "subject": "example",
+      "fromText": "example",
+      "toText": "example",
+      "size": 0,
+      "read": false,
+      "attached": false,
+      "fromList": [],
+      "toList": [],
+      "ccList": [],
+      "bccList": [],
+      "htmlContent": "example",
+      "headers": {},
+      "attachments": []
+    },
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "campus.request@1#request": {
+    "data": null,
+    "meta": {
+      "syncedAt": "example",
+      "source": "cache",
+      "coverage": "complete",
+      "fromCache": false
+    }
+  },
+  "network.request@1#request": {
+    "status": 0,
+    "headers": {},
+    "bodyType": "json",
+    "finalUrl": "example",
+    "redirects": 0
+  },
+  "storage.kv@2#get": {
+    "value": null,
+    "revision": 0
+  },
+  "storage.kv@2#set": {
+    "revision": 0,
+    "usage": {
+      "bytesUsed": 0,
+      "byteLimit": 0,
+      "keyCount": 0,
+      "keyLimit": 0,
+      "revision": 0
+    },
+    "changedKeys": []
+  },
+  "storage.kv@2#remove": {
+    "removed": false,
+    "revision": 0,
+    "usage": {
+      "bytesUsed": 0,
+      "byteLimit": 0,
+      "keyCount": 0,
+      "keyLimit": 0,
+      "revision": 0
+    },
+    "changedKeys": []
+  },
+  "storage.kv@2#keys": {
+    "keys": [],
+    "revision": 0
+  },
+  "storage.kv@2#usage": {
+    "bytesUsed": 0,
+    "byteLimit": 0,
+    "keyCount": 0,
+    "keyLimit": 0,
+    "revision": 0
+  },
+  "storage.kv@2#batch": {
+    "revision": 0,
+    "usage": {
+      "bytesUsed": 0,
+      "byteLimit": 0,
+      "keyCount": 0,
+      "keyLimit": 0,
+      "revision": 0
+    },
+    "changedKeys": []
+  },
+  "storage.kv@2#transaction": {
+    "revision": 0,
+    "usage": {
+      "bytesUsed": 0,
+      "byteLimit": 0,
+      "keyCount": 0,
+      "keyLimit": 0,
+      "revision": 0
+    },
+    "changedKeys": []
+  },
+  "storage.kv@2#export": {
+    "handle": "example",
+    "size": 0,
+    "contentType": "example",
+    "url": "example"
+  },
+  "storage.kv@2#import": {
+    "revision": 0,
+    "usage": {
+      "bytesUsed": 0,
+      "byteLimit": 0,
+      "keyCount": 0,
+      "keyLimit": 0,
+      "revision": 0
+    },
+    "changedKeys": []
+  },
+  "storage.blob@1#put": {
+    "handle": "example",
+    "size": 0,
+    "contentType": "example",
+    "url": "example"
+  },
+  "storage.blob@1#getInfo": {
+    "handle": "example",
+    "size": 0,
+    "contentType": "example",
+    "url": "example"
+  },
+  "storage.blob@1#delete": {
+    "deleted": false
+  },
+  "cache.resource@1#put": {
+    "handle": "example",
+    "size": 0,
+    "contentType": "example",
+    "url": "example"
+  },
+  "cache.resource@1#promote": {
+    "handle": "example",
+    "size": 0,
+    "contentType": "example",
+    "url": "example"
+  },
+  "cache.resource@1#deleteHandle": {
+    "deleted": false
+  },
+  "cache.resource@1#match": {
+    "handle": "example",
+    "size": 0,
+    "contentType": "example",
+    "url": "example"
+  },
+  "cache.resource@1#delete": {
+    "deleted": false
+  },
+  "cache.resource@1#pin": {
+    "pinned": false
+  },
+  "cache.resource@1#usage": {
+    "bytesUsed": 0,
+    "byteLimit": 0,
+    "globalByteLimit": 0
+  },
+  "academic.userCourses.command@1#save": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "academic.userCourses.command@1#delete": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "academic.homework.submit@1#submit": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "mail.send@1#send": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  }
+} as const;
+
+export const CAPABILITY_REGISTRY = {
+  "$schema": "./capability-contracts.schema.json",
+  "contractProfile": "contract_v1",
+  "schemaVersion": 3,
+  "protocolVersion": 2,
+  "runtimeFloor": 2,
+  "packageLimits": {
+    "archiveBytes": 26214400,
+    "extractedBytes": 52428800,
+    "files": 1000,
+    "iconBytes": 1048576
+  },
+  "errors": [
+    "permission_denied",
+    "capability_unavailable",
+    "invalid_request",
+    "origin_denied",
+    "network_timeout",
+    "request_timeout",
+    "http_error",
+    "quota_exceeded",
+    "resource_too_large",
+    "migration_failed",
+    "user_cancelled",
+    "idempotency_conflict"
+  ],
+  "marketplaceCategories": [
+    "academic",
+    "campus",
+    "information",
+    "productivity",
+    "assistant",
+    "other"
+  ],
+  "configurationTypes": [
+    "text",
+    "secret",
+    "url",
+    "number",
+    "boolean",
+    "select"
+  ],
+  "schemas": {
+    "empty": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "readOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "forceRefresh": {
+          "type": "boolean"
+        }
+      }
+    },
+    "campusReadMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "syncedAt",
+        "source",
+        "coverage",
+        "fromCache"
+      ],
+      "properties": {
+        "syncedAt": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "cache",
+            "network",
+            "mixed"
+          ]
+        },
+        "coverage": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "unknown"
+          ]
+        },
+        "fromCache": {
+          "type": "boolean"
+        }
+      }
+    },
+    "campusRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {},
+        "meta": {
+          "$ref": "#/schemas/campusReadMeta"
+        }
+      }
+    },
+    "studentProfileRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fields",
+            "sections"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "studentId": {
+              "type": "string"
+            },
+            "account": {
+              "type": "string"
+            },
+            "gender": {
+              "type": "string"
+            },
+            "birthday": {
+              "type": "string"
+            },
+            "college": {
+              "type": "string"
+            },
+            "major": {
+              "type": "string"
+            },
+            "className": {
+              "type": "string"
+            },
+            "grade": {
+              "type": "string"
+            },
+            "educationLevel": {
+              "type": "string"
+            },
+            "studentStatus": {
+              "type": "string"
+            },
+            "campus": {
+              "type": "string"
+            },
+            "phone": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "avatarUrl": {
+              "type": "string"
+            },
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "sections": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "meta": {
+          "$ref": "#/schemas/campusReadMeta"
+        }
+      }
+    },
+    "timetableRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "days",
+            "periods",
+            "entries",
+            "availableTerms"
+          ],
+          "properties": {
+            "days": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "periods": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "currentTerm": {
+              "type": "string"
+            },
+            "availableTerms": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "meta": {
+          "$ref": "#/schemas/campusReadMeta"
+        }
+      }
+    },
+    "scoreRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "availableTerms",
+            "items"
+          ],
+          "properties": {
+            "currentTerm": {
+              "type": "string"
+            },
+            "availableTerms": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "meta": {
+          "$ref": "#/schemas/campusReadMeta"
+        }
+      }
+    },
+    "examRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "availableTerms",
+            "items"
+          ],
+          "properties": {
+            "currentTerm": {
+              "type": "string"
+            },
+            "availableTerms": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "meta": {
+          "$ref": "#/schemas/campusReadMeta"
+        }
+      }
+    },
+    "calendarRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "month",
+            "availableTerms",
+            "items"
+          ],
+          "properties": {
+            "month": {
+              "type": "string"
+            },
+            "currentWeek": {
+              "type": "string"
+            },
+            "currentTerm": {
+              "type": "string"
+            },
+            "availableTerms": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "meta": {
+          "$ref": "#/schemas/campusReadMeta"
+        }
+      }
+    },
+    "academicProgressRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "summary",
+            "buckets",
+            "mergedBuckets",
+            "detailBuckets",
+            "courses",
+            "replaceCourses",
+            "fields"
+          ],
+          "properties": {
+            "currentTerm": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "object"
+            },
+            "buckets": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "mergedBuckets": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "detailBuckets": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "courses": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "replaceCourses": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "meta": {
+          "$ref": "#/schemas/campusReadMeta"
+        }
+      }
+    },
+    "homeworkRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "courses",
+            "items"
+          ],
+          "properties": {
+            "currentTerm": {
+              "type": "string"
+            },
+            "courses": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "meta": {
+          "$ref": "#/schemas/campusReadMeta"
+        }
+      }
+    },
+    "courseResourcesRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "courses",
+            "folderId",
+            "categories",
+            "selectedCategoryKey",
+            "tree",
+            "folders",
+            "resources"
+          ],
+          "properties": {
+            "currentTerm": {
+              "type": "string"
+            },
+            "courses": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "selectedCourseId": {
+              "type": "integer"
+            },
+            "folderId": {
+              "type": "string"
+            },
+            "categories": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "selectedCategoryKey": {
+              "type": "string"
+            },
+            "tree": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "folders": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "resources": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "meta": {
+          "$ref": "#/schemas/campusReadMeta"
+        }
+      }
+    },
+    "mailFoldersRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "folders"
+          ],
+          "properties": {
+            "folders": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "meta": {
+          "$ref": "#/schemas/campusReadMeta"
+        }
+      }
+    },
+    "mailMessagesRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "folderId",
+            "start",
+            "limit",
+            "total",
+            "messages"
+          ],
+          "properties": {
+            "folderId": {
+              "type": "string"
+            },
+            "start": {
+              "type": "integer"
+            },
+            "limit": {
+              "type": "integer"
+            },
+            "total": {
+              "type": "integer"
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "meta": {
+          "$ref": "#/schemas/campusReadMeta"
+        }
+      }
+    },
+    "mailMessageRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "messageId",
+            "folderId",
+            "subject",
+            "fromText",
+            "toText",
+            "size",
+            "read",
+            "attached",
+            "fromList",
+            "toList",
+            "ccList",
+            "bccList",
+            "htmlContent",
+            "headers",
+            "attachments"
+          ],
+          "properties": {
+            "messageId": {
+              "type": "string"
+            },
+            "folderId": {
+              "type": "string"
+            },
+            "subject": {
+              "type": "string"
+            },
+            "fromText": {
+              "type": "string"
+            },
+            "toText": {
+              "type": "string"
+            },
+            "sender": {
+              "type": "string"
+            },
+            "sentAt": {
+              "type": "string"
+            },
+            "receivedAt": {
+              "type": "string"
+            },
+            "modifiedAt": {
+              "type": "string"
+            },
+            "size": {
+              "type": "integer"
+            },
+            "read": {
+              "type": "boolean"
+            },
+            "attached": {
+              "type": "boolean"
+            },
+            "priority": {
+              "type": "integer"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "fromList": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "toList": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "ccList": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "bccList": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "htmlContent": {
+              "type": "string"
+            },
+            "headers": {
+              "type": "object"
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "meta": {
+          "$ref": "#/schemas/campusReadMeta"
+        }
+      }
+    },
+    "commandReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receiptId",
+        "idempotencyKey",
+        "completedAt",
+        "result"
+      ],
+      "properties": {
+        "receiptId": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "completedAt": {
+          "type": "string"
+        },
+        "result": {}
+      }
+    },
+    "kvUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bytesUsed",
+        "byteLimit",
+        "keyCount",
+        "keyLimit",
+        "revision"
+      ],
+      "properties": {
+        "bytesUsed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "byteLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keyCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keyLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "kvTransaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "usage",
+        "changedKeys"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "usage": {
+          "$ref": "#/schemas/kvUsage"
+        },
+        "changedKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "kvRemove": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "removed",
+        "revision",
+        "usage",
+        "changedKeys"
+      ],
+      "properties": {
+        "removed": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "usage": {
+          "$ref": "#/schemas/kvUsage"
+        },
+        "changedKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "cacheUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bytesUsed",
+        "byteLimit",
+        "globalByteLimit"
+      ],
+      "properties": {
+        "bytesUsed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "byteLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "globalByteLimit": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "resourceHandle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "handle",
+        "size",
+        "contentType",
+        "url"
+      ],
+      "properties": {
+        "handle": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contentType": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "etag": {
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        }
+      }
+    },
+    "resourceHandleOrNull": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "handle",
+        "size",
+        "contentType",
+        "url"
+      ],
+      "properties": {
+        "handle": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contentType": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "etag": {
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        }
+      }
+    },
+    "deletionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deleted"
+      ],
+      "properties": {
+        "deleted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "pinResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pinned"
+      ],
+      "properties": {
+        "pinned": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "capabilities": [
+    {
+      "id": "runtime.lifecycle@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": null,
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 5000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "handshake",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sdkVersion"
+            ],
+            "properties": {
+              "sdkVersion": {
+                "type": "string"
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "protocolVersion",
+              "contractProfile",
+              "runtimeFloor",
+              "availableCapabilities"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer"
+              },
+              "contractProfile": {
+                "type": "string"
+              },
+              "runtimeFloor": {
+                "type": "integer"
+              },
+              "availableCapabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "binaryTransport": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": [
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "ready",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ready"
+            ],
+            "properties": {
+              "ready": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": []
+        },
+        {
+          "name": "close",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "closed"
+            ],
+            "properties": {
+              "closed": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": []
+        }
+      ],
+      "events": [
+        {
+          "name": "resume",
+          "data": {
+            "$ref": "#/schemas/empty"
+          }
+        },
+        {
+          "name": "pause",
+          "data": {
+            "$ref": "#/schemas/empty"
+          }
+        },
+        {
+          "name": "theme",
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "colorScheme",
+              "reducedMotion",
+              "highContrast"
+            ],
+            "properties": {
+              "colorScheme": {
+                "type": "string",
+                "enum": [
+                  "light",
+                  "dark"
+                ]
+              },
+              "reducedMotion": {
+                "type": "boolean"
+              },
+              "highContrast": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        {
+          "name": "resize",
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "viewportWidthPx",
+              "viewportHeightPx",
+              "density",
+              "fontScale",
+              "orientation",
+              "safeAreaTopPx",
+              "safeAreaRightPx",
+              "safeAreaBottomPx",
+              "safeAreaLeftPx",
+              "imeHeightPx"
+            ],
+            "properties": {
+              "viewportWidthPx": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "viewportHeightPx": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "density": {
+                "type": "number",
+                "minimum": 0
+              },
+              "fontScale": {
+                "type": "number",
+                "minimum": 0
+              },
+              "orientation": {
+                "type": "string",
+                "enum": [
+                  "portrait",
+                  "landscape"
+                ]
+              },
+              "safeAreaTopPx": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "safeAreaRightPx": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "safeAreaBottomPx": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "safeAreaLeftPx": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "imeHeightPx": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "name": "network",
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "online",
+              "validated",
+              "metered",
+              "transport"
+            ],
+            "properties": {
+              "online": {
+                "type": "boolean"
+              },
+              "validated": {
+                "type": "boolean"
+              },
+              "metered": {
+                "type": "boolean"
+              },
+              "transport": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "name": "back",
+          "requiresAcknowledgement": true,
+          "data": {
+            "$ref": "#/schemas/empty"
+          }
+        }
+      ]
+    },
+    {
+      "id": "configuration.read@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "app.configuration.read",
+        "title": "读取插件配置",
+        "description": "读取用户为当前插件填写的已声明配置项。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 5000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "get",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key"
+            ],
+            "properties": {
+              "key": {
+                "type": "string"
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value"
+            ],
+            "properties": {
+              "value": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "errors": [
+            "permission_denied",
+            "invalid_request"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "remote.frame@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "remote.frame",
+        "title": "嵌入远程页面",
+        "description": "允许在无原生桥的 sandbox iframe 中加载已声明来源。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 0,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": []
+    },
+    {
+      "id": "navigation.external@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "navigation.external",
+        "title": "打开外部链接",
+        "description": "通过用户手势在系统浏览器打开已声明来源。"
+      },
+      "confirmation": "userGesture",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 5000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "open",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "opened"
+            ],
+            "properties": {
+              "opened": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": [
+            "origin_denied",
+            "user_cancelled"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "identity.profile@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "identity.profile.read",
+        "title": "读取个人身份信息",
+        "description": "读取姓名、学号、学院、专业和邮箱等本地同步资料。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 15000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "getProfile",
+          "request": {
+            "$ref": "#/schemas/readOptions"
+          },
+          "response": {
+            "$ref": "#/schemas/studentProfileRead"
+          },
+          "errors": [
+            "permission_denied",
+            "network_timeout"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic.timetable@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "academic.timetable.read",
+        "title": "读取课表",
+        "description": "读取本地或校园系统中的课程表。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 15000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "getTimetable",
+          "request": {
+            "$ref": "#/schemas/readOptions"
+          },
+          "response": {
+            "$ref": "#/schemas/timetableRead"
+          },
+          "errors": [
+            "permission_denied",
+            "network_timeout"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic.scores@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "academic.scores.read",
+        "title": "读取成绩",
+        "description": "读取当前与历史成绩。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 15000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "getScores",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "term": {
+                "type": "string"
+              },
+              "courseType": {
+                "type": "string"
+              },
+              "forceRefresh": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/scoreRead"
+          },
+          "errors": [
+            "permission_denied",
+            "network_timeout"
+          ]
+        },
+        {
+          "name": "getHistoryScores",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "term": {
+                "type": "string"
+              },
+              "forceRefresh": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/scoreRead"
+          },
+          "errors": [
+            "permission_denied",
+            "network_timeout"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic.exams@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "academic.exams.read",
+        "title": "读取考试安排",
+        "description": "读取考试时间与地点。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 15000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "getExams",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "term": {
+                "type": "string"
+              },
+              "forceRefresh": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/examRead"
+          },
+          "errors": [
+            "permission_denied",
+            "network_timeout"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic.calendar@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "academic.calendar.read",
+        "title": "读取校历",
+        "description": "读取校历与教学周信息。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 15000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "getCalendar",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "month": {
+                "type": "string"
+              },
+              "forceRefresh": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/calendarRead"
+          },
+          "errors": [
+            "permission_denied",
+            "network_timeout"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic.progress@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "academic.progress.read",
+        "title": "读取学业进度",
+        "description": "读取培养方案完成情况。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 15000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "getProgress",
+          "request": {
+            "$ref": "#/schemas/readOptions"
+          },
+          "response": {
+            "$ref": "#/schemas/academicProgressRead"
+          },
+          "errors": [
+            "permission_denied",
+            "network_timeout"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic.homework@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "academic.homework.read",
+        "title": "读取作业",
+        "description": "读取作业列表与状态。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 15000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "getHomework",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "forceRefresh": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/homeworkRead"
+          },
+          "errors": [
+            "permission_denied",
+            "network_timeout"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic.resources@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "academic.course_resources.read",
+        "title": "读取课程资源",
+        "description": "读取课程资料目录与资源元数据。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 15000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "getCourseResources",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "courseId"
+            ],
+            "properties": {
+              "term": {
+                "type": "string"
+              },
+              "courseId": {
+                "type": "string"
+              },
+              "folderId": {
+                "type": "string"
+              },
+              "search": {
+                "type": "string"
+              },
+              "categoryKey": {
+                "type": "string"
+              },
+              "forceRefresh": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/courseResourcesRead"
+          },
+          "errors": [
+            "permission_denied",
+            "network_timeout"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mail.read@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "mail.read",
+        "title": "读取校园邮件",
+        "description": "读取邮件文件夹、列表与正文。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": null,
+      "timeoutMs": 15000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "listFolders",
+          "request": {
+            "$ref": "#/schemas/readOptions"
+          },
+          "response": {
+            "$ref": "#/schemas/mailFoldersRead"
+          },
+          "errors": [
+            "permission_denied",
+            "network_timeout"
+          ]
+        },
+        {
+          "name": "listMessages",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "folderId": {
+                "type": "string"
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              },
+              "forceRefresh": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/mailMessagesRead"
+          },
+          "errors": [
+            "permission_denied",
+            "network_timeout"
+          ]
+        },
+        {
+          "name": "getMessage",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "messageId"
+            ],
+            "properties": {
+              "messageId": {
+                "type": "string"
+              },
+              "mailbox": {
+                "type": "string"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/mailMessageRead"
+          },
+          "errors": [
+            "permission_denied",
+            "network_timeout"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "campus.request@1",
+      "stability": "stable",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "campus.request",
+        "title": "访问只读校园代理",
+        "description": "调用宿主登记的 MIS、AA 或 VE 只读路径，不暴露会话信息。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "responseBytes": 5242880
+      },
+      "timeoutMs": 15000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "request",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "service",
+              "path"
+            ],
+            "properties": {
+              "service": {
+                "type": "string",
+                "enum": [
+                  "mis",
+                  "aa",
+                  "ve"
+                ]
+              },
+              "method": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "query": {
+                "type": "object"
+              },
+              "accept": {
+                "type": "string"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/campusRead"
+          },
+          "errors": [
+            "permission_denied",
+            "invalid_request",
+            "http_error",
+            "resource_too_large"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "network.request@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "network.request",
+        "title": "通过宿主访问公网",
+        "description": "使用不含 Cookie 和宿主认证信息的隔离网络客户端访问已声明来源。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "pluginConcurrency": 4,
+        "originConcurrency": 2,
+        "inlineResponseBytes": 1048576,
+        "redirects": 5
+      },
+      "timeoutMs": 15000,
+      "maxTimeoutMs": 60000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "request",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string",
+                "enum": [
+                  "GET",
+                  "HEAD",
+                  "POST",
+                  "PUT",
+                  "PATCH",
+                  "DELETE"
+                ]
+              },
+              "headers": {
+                "type": "object"
+              },
+              "body": {},
+              "bodyType": {
+                "type": "string",
+                "enum": [
+                  "json",
+                  "text",
+                  "formData",
+                  "blob"
+                ]
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60000
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "headers",
+              "bodyType",
+              "finalUrl",
+              "redirects"
+            ],
+            "properties": {
+              "status": {
+                "type": "integer"
+              },
+              "headers": {
+                "type": "object"
+              },
+              "bodyType": {
+                "type": "string",
+                "enum": [
+                  "json",
+                  "text",
+                  "resource"
+                ]
+              },
+              "body": {},
+              "resource": {
+                "$ref": "#/schemas/resourceHandle"
+              },
+              "finalUrl": {
+                "type": "string"
+              },
+              "redirects": {
+                "type": "integer"
+              },
+              "contentType": {
+                "type": "string"
+              }
+            }
+          },
+          "errors": [
+            "origin_denied",
+            "network_timeout",
+            "http_error",
+            "quota_exceeded",
+            "resource_too_large",
+            "user_cancelled"
+          ]
+        }
+      ],
+      "events": [
+        {
+          "name": "progress",
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "loaded",
+              "phase"
+            ],
+            "properties": {
+              "loaded": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "phase": {
+                "type": "string",
+                "enum": [
+                  "upload",
+                  "response"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "storage.kv@2",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "storage.kv",
+        "title": "保存插件数据",
+        "description": "在当前发布者与插件隔离的加密空间中保存 JSON 数据。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "pluginBytes": 10485760,
+        "itemBytes": 262144,
+        "keys": 1024
+      },
+      "timeoutMs": 10000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "get",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key"
+            ],
+            "properties": {
+              "key": {
+                "type": "string"
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "required": [
+              "value",
+              "revision"
+            ],
+            "properties": {
+              "value": {},
+              "revision": {
+                "type": "integer"
+              }
+            }
+          },
+          "errors": [
+            "invalid_request"
+          ]
+        },
+        {
+          "name": "set",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "value"
+            ],
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "value": {},
+              "ifRevision": {
+                "type": "integer"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/kvTransaction"
+          },
+          "errors": [
+            "invalid_request",
+            "quota_exceeded",
+            "resource_too_large",
+            "idempotency_conflict"
+          ]
+        },
+        {
+          "name": "remove",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key"
+            ],
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "ifRevision": {
+                "type": "integer"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/kvRemove"
+          },
+          "errors": [
+            "invalid_request",
+            "idempotency_conflict"
+          ]
+        },
+        {
+          "name": "keys",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "type": "object",
+            "required": [
+              "keys",
+              "revision"
+            ],
+            "properties": {
+              "keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "revision": {
+                "type": "integer"
+              }
+            }
+          },
+          "errors": []
+        },
+        {
+          "name": "usage",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "$ref": "#/schemas/kvUsage"
+          },
+          "errors": []
+        },
+        {
+          "name": "batch",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "operations"
+            ],
+            "properties": {
+              "operations": {
+                "type": "array",
+                "maxItems": 256,
+                "items": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/kvTransaction"
+          },
+          "errors": [
+            "invalid_request",
+            "quota_exceeded",
+            "resource_too_large",
+            "idempotency_conflict"
+          ]
+        },
+        {
+          "name": "transaction",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ifRevision",
+              "operations"
+            ],
+            "properties": {
+              "ifRevision": {
+                "type": "integer"
+              },
+              "operations": {
+                "type": "array",
+                "maxItems": 256,
+                "items": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/kvTransaction"
+          },
+          "errors": [
+            "invalid_request",
+            "quota_exceeded",
+            "resource_too_large",
+            "idempotency_conflict"
+          ]
+        },
+        {
+          "name": "export",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "$ref": "#/schemas/resourceHandle"
+          },
+          "errors": [
+            "resource_too_large"
+          ]
+        },
+        {
+          "name": "import",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "handle"
+            ],
+            "properties": {
+              "handle": {
+                "type": "string"
+              },
+              "ifRevision": {
+                "type": "integer"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/kvTransaction"
+          },
+          "errors": [
+            "invalid_request",
+            "quota_exceeded",
+            "resource_too_large",
+            "migration_failed",
+            "idempotency_conflict"
+          ]
+        }
+      ],
+      "events": [
+        {
+          "name": "changed",
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "revision",
+              "keys",
+              "cleared"
+            ],
+            "properties": {
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "cleared": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "storage.blob@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "storage.blob",
+        "title": "保存大文件",
+        "description": "在隔离的加密 Blob 空间保存不可变内容寻址数据。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "pluginBytes": 268435456,
+        "itemBytes": 67108864
+      },
+      "timeoutMs": 60000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "WEB_MESSAGE_ARRAY_BUFFER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "put",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "contentType",
+              "size"
+            ],
+            "properties": {
+              "contentType": {
+                "type": "string"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 67108864
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/resourceHandle"
+          },
+          "errors": [
+            "invalid_request",
+            "quota_exceeded",
+            "resource_too_large",
+            "user_cancelled"
+          ]
+        },
+        {
+          "name": "getInfo",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "handle"
+            ],
+            "properties": {
+              "handle": {
+                "type": "string"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/resourceHandle"
+          },
+          "errors": [
+            "invalid_request"
+          ]
+        },
+        {
+          "name": "delete",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "handle"
+            ],
+            "properties": {
+              "handle": {
+                "type": "string"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/deletionResult"
+          },
+          "errors": [
+            "invalid_request"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cache.resource@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "cache.resource",
+        "title": "缓存网络资源",
+        "description": "在可淘汰的隔离 LRU 缓存中保存资源。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "pluginBytes": 536870912,
+        "globalBytes": 1073741824,
+        "itemBytes": 262144000
+      },
+      "timeoutMs": 60000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "WEB_MESSAGE_ARRAY_BUFFER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "put",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "contentType",
+              "size"
+            ],
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "contentType": {
+                "type": "string"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 262144000
+              },
+              "pin": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/resourceHandle"
+          },
+          "errors": [
+            "invalid_request",
+            "quota_exceeded",
+            "resource_too_large",
+            "user_cancelled"
+          ]
+        },
+        {
+          "name": "promote",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "handle",
+              "key"
+            ],
+            "properties": {
+              "handle": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "pinned": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/resourceHandle"
+          },
+          "errors": [
+            "invalid_request",
+            "quota_exceeded"
+          ]
+        },
+        {
+          "name": "deleteHandle",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "handle"
+            ],
+            "properties": {
+              "handle": {
+                "type": "string"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/deletionResult"
+          },
+          "errors": [
+            "invalid_request"
+          ]
+        },
+        {
+          "name": "match",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key"
+            ],
+            "properties": {
+              "key": {
+                "type": "string"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/resourceHandleOrNull"
+          },
+          "errors": [
+            "invalid_request"
+          ]
+        },
+        {
+          "name": "delete",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key"
+            ],
+            "properties": {
+              "key": {
+                "type": "string"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/deletionResult"
+          },
+          "errors": [
+            "invalid_request"
+          ]
+        },
+        {
+          "name": "pin",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "pinned"
+            ],
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "pinned": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/pinResult"
+          },
+          "errors": [
+            "invalid_request"
+          ]
+        },
+        {
+          "name": "usage",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "$ref": "#/schemas/cacheUsage"
+          },
+          "errors": []
+        }
+      ]
+    },
+    {
+      "id": "academic.userCourses.command@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "academic.user_courses.write",
+        "title": "修改自定义课程",
+        "description": "新增、修改或删除用户自定义课程。"
+      },
+      "confirmation": "eachCall",
+      "idempotency": "required",
+      "quota": {
+        "receiptRetentionDays": 7,
+        "receiptsPerPlugin": 1024
+      },
+      "timeoutMs": 15000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "save",
+          "request": {
+            "type": "object",
+            "required": [
+              "idempotencyKey",
+              "course"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "course": {
+                "type": "object"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "permission_denied",
+            "user_cancelled",
+            "idempotency_conflict"
+          ]
+        },
+        {
+          "name": "delete",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "id"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "id": {
+                "type": "integer"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "permission_denied",
+            "user_cancelled",
+            "idempotency_conflict"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "academic.homework.submit@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "academic.homework.submit",
+        "title": "提交作业",
+        "description": "向课程平台提交作业；每次调用都需要用户确认。"
+      },
+      "confirmation": "eachCall",
+      "idempotency": "required",
+      "quota": {
+        "receiptRetentionDays": 7,
+        "receiptsPerPlugin": 1024
+      },
+      "timeoutMs": 60000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "submit",
+          "request": {
+            "type": "object",
+            "required": [
+              "idempotencyKey",
+              "homeworkId",
+              "courseId"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "homeworkId": {
+                "type": "integer"
+              },
+              "courseId": {
+                "type": "integer"
+              },
+              "content": {
+                "type": "string"
+              },
+              "attachmentHandles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "permission_denied",
+            "user_cancelled",
+            "idempotency_conflict",
+            "http_error"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mail.send@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "mail.send",
+        "title": "发送校园邮件",
+        "description": "发送校园邮件；每次调用都需要用户确认。"
+      },
+      "confirmation": "eachCall",
+      "idempotency": "required",
+      "quota": {
+        "receiptRetentionDays": 7,
+        "receiptsPerPlugin": 1024
+      },
+      "timeoutMs": 60000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "send",
+          "request": {
+            "type": "object",
+            "required": [
+              "idempotencyKey",
+              "to",
+              "subject"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string"
+              },
+              "to": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "cc": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "bcc": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "subject": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "html": {
+                "type": "string"
+              },
+              "attachmentHandles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "permission_denied",
+            "user_cancelled",
+            "idempotency_conflict",
+            "http_error"
+          ]
+        }
+      ]
+    }
+  ]
+} as const;

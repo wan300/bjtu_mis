@@ -1,0 +1,10 @@
+{
+  "description": "A minimal BJTU MIS plugin built with TypeScript and Vite.",
+  "author": "Your Name",
+  "category": "other",
+  "tags": [
+    "starter"
+  ],
+  "license": "MIT",
+  "screenshots": []
+}

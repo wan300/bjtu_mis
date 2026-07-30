@@ -33,7 +33,7 @@ test('dist digest is stable and sensitive to content and path changes', async (t
   assert.notEqual((await computeDistDigest(root)).sha256, first.sha256);
 });
 
-test('builds a canonical marketplace artifact containing only manifest and dist', async (t) => {
+test('builds a canonical contract_v1 artifact with separate marketplace metadata', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bjtu-plugin-package-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const sourceZip = path.join(root, 'source.zip');
@@ -42,26 +42,23 @@ test('builds a canonical marketplace artifact containing only manifest and dist'
     schema_version: 3,
     id: 'bjtu.demo',
     name: 'Demo',
-    description: 'Demo plugin',
     version: '1.0.0',
     entrypoint: 'index.html',
     icon: 'icon.svg',
-    author: 'Alice',
-    runtime_version: 1,
-    min_runtime_version: 1,
-    required_capabilities: [],
-    optional_capabilities: [],
-    data_schema_version: 1,
-    permissions: { required: [], optional: [] },
-    connect_origins: [],
-    media_origins: [],
-    frame_origins: [],
-    navigation_origins: [],
-    bridge_origins: ['self'],
-    marketplace: { category: 'other', tags: [], license: 'MIT' },
-    configuration: []
+    capabilities: {
+      required: ['runtime.lifecycle@1']
+    }
   };
-  zip.addBuffer(Buffer.from(JSON.stringify(manifest)), 'repository/bjtu-service.json');
+  const marketplace = {
+    description: 'Demo plugin',
+    author: 'Alice',
+    category: 'other',
+    tags: [],
+    license: 'MIT',
+    screenshots: []
+  };
+  zip.addBuffer(Buffer.from(JSON.stringify(manifest)), 'repository/bjtu-plugin.json');
+  zip.addBuffer(Buffer.from(JSON.stringify(marketplace)), 'repository/bjtu-marketplace.json');
   zip.addBuffer(Buffer.from('<html></html>'), 'repository/dist/index.html');
   zip.addBuffer(Buffer.from('<svg></svg>'), 'repository/dist/icon.svg');
   const output = createWriteStream(sourceZip);
@@ -82,6 +79,10 @@ test('builds a canonical marketplace artifact containing only manifest and dist'
   });
   assert.match(result.archiveSha256, /^[a-f0-9]{64}$/);
   assert.equal(result.packageFileCount, 2);
+  assert.equal(result.contractProfile, 'contract_v1');
+  assert.equal(result.runtimeFloor, 2);
+  assert.deepEqual(result.capabilities.required, ['runtime.lifecycle@1']);
+  assert.equal(result.marketplace.author, 'Alice');
 
   const unpacked = path.join(root, 'unpacked');
   await extractZipSecure(artifact, unpacked);
@@ -89,7 +90,12 @@ test('builds a canonical marketplace artifact containing only manifest and dist'
     .filter((entry) => entry.isFile())
     .map((entry) => path.relative(unpacked, path.join(entry.parentPath, entry.name)).split(path.sep).join('/'))
     .sort();
-  assert.deepEqual(files, ['bjtu-service.json', 'dist/icon.svg', 'dist/index.html']);
+  assert.deepEqual(files, [
+    'bjtu-marketplace.json',
+    'bjtu-plugin.json',
+    'dist/icon.svg',
+    'dist/index.html'
+  ]);
 });
 
 test('rejects archives whose directory entries exceed the global entry limit', async (t) => {
@@ -118,28 +124,29 @@ test('lint rejects non-string values instead of publishing the original malforme
   await fs.mkdir(path.join(root, 'dist'));
   await fs.writeFile(path.join(root, 'dist', 'index.html'), '<html></html>');
   await fs.writeFile(path.join(root, 'dist', 'icon.svg'), '<svg></svg>');
-  await fs.writeFile(path.join(root, 'bjtu-service.json'), JSON.stringify({
+  await fs.writeFile(path.join(root, 'bjtu-plugin.json'), JSON.stringify({
     schema_version: 3,
     id: 'bjtu.demo',
     name: 'Demo',
-    description: 'Demo plugin',
     version: '1.0.0',
     entrypoint: 'index.html',
     icon: 'icon.svg',
-    author: 'Alice',
-    runtime_version: 1,
-    min_runtime_version: 1,
-    required_capabilities: [],
-    optional_capabilities: [],
-    data_schema_version: 1,
-    permissions: { required: [42], optional: [], credential_passthrough: true },
-    connect_origins: [false, 'https://[fd00::1]', 'http://localhost:4173'],
-    media_origins: [],
-    frame_origins: [],
-    navigation_origins: [],
+    capabilities: {
+      required: ['runtime.lifecycle@1', 42],
+      optional: []
+    },
+    origins: {
+      connect: [false, 'https://[fd00::1]', 'https://100.64.0.1', 'http://localhost:4173']
+    },
     bridge_origins: ['self'],
-    marketplace: { category: 'other', tags: [{}], owner_email: 'secret@example.com' },
-    configuration: []
+    permissions: { required: [42], optional: [], credential_passthrough: true },
+  }));
+  await fs.writeFile(path.join(root, 'bjtu-marketplace.json'), JSON.stringify({
+    description: 'Demo plugin',
+    author: 'Alice',
+    category: 'other',
+    tags: [{}],
+    owner_email: 'secret@example.com'
   }));
   const lintResult: LintResult = { errors: [], warnings: [] };
   const require = createRequire(import.meta.url);
@@ -148,11 +155,12 @@ test('lint rejects non-string values instead of publishing the original malforme
 
   lint.lintPlugin(root, lintResult, schema);
 
-  assert.ok(lintResult.errors.some((error) => error.includes('permissions.required[0] must be a string')));
-  assert.ok(lintResult.errors.some((error) => error.includes('connect_origins[0] must be a string')));
+  assert.ok(lintResult.errors.some((error) => error.includes('capabilities.required[1] must be a string')));
+  assert.ok(lintResult.errors.some((error) => error.includes('origins.connect[0] must be a string')));
   assert.ok(lintResult.errors.some((error) => error.includes('marketplace.tags[0] must be a string')));
-  assert.ok(lintResult.errors.some((error) => error.includes('permissions contains unknown field')));
-  assert.ok(lintResult.errors.some((error) => error.includes('marketplace contains unknown field')));
+  assert.ok(lintResult.errors.some((error) => error.includes('removed P0-A field: permissions')));
+  assert.ok(lintResult.errors.some((error) => error.includes('removed P0-A field: bridge_origins')));
+  assert.ok(lintResult.errors.some((error) => error.includes('bjtu-marketplace.json contains unknown field')));
   assert.ok(lintResult.errors.some((error) => error.includes('private, loopback, link-local')));
   assert.ok(lintResult.errors.some((error) => error.includes('must be an HTTPS origin')));
 });
@@ -166,27 +174,15 @@ test('lint rejects unsupported and oversized plugin icons', async (t) => {
     schema_version: 3,
     id: 'bjtu.demo',
     name: 'Demo',
-    description: 'Demo plugin',
     version: '1.0.0',
     entrypoint: 'index.html',
     icon: 'icon.txt',
-    author: 'Alice',
-    runtime_version: 1,
-    min_runtime_version: 1,
-    required_capabilities: [],
-    optional_capabilities: [],
-    data_schema_version: 1,
-    permissions: { required: [], optional: [] },
-    connect_origins: [],
-    media_origins: [],
-    frame_origins: [],
-    navigation_origins: [],
-    bridge_origins: ['self'],
-    marketplace: { category: 'other', tags: [] },
-    configuration: []
+    capabilities: {
+      required: ['runtime.lifecycle@1']
+    }
   };
   await fs.writeFile(path.join(root, 'dist', 'icon.txt'), 'not an image');
-  await fs.writeFile(path.join(root, 'bjtu-service.json'), JSON.stringify(manifest));
+  await fs.writeFile(path.join(root, 'bjtu-plugin.json'), JSON.stringify(manifest));
   const require = createRequire(import.meta.url);
   const lint = require(path.resolve('..', '..', 'tools', 'third-party-service-lint.cjs')) as LintModule;
   const schemaResult: LintResult = { errors: [], warnings: [] };
@@ -199,7 +195,7 @@ test('lint rejects unsupported and oversized plugin icons', async (t) => {
 
   manifest.icon = 'icon.png';
   await fs.writeFile(path.join(root, 'dist', 'icon.png'), Buffer.alloc((1024 * 1024) + 1));
-  await fs.writeFile(path.join(root, 'bjtu-service.json'), JSON.stringify(manifest));
+  await fs.writeFile(path.join(root, 'bjtu-plugin.json'), JSON.stringify(manifest));
   const oversized: LintResult = { errors: [], warnings: [] };
 
   lint.lintPlugin(root, oversized, schema);
@@ -216,28 +212,19 @@ test('lint requires a restricted sandbox for declared remote iframes', async (t)
     path.join(root, 'dist', 'index.html'),
     '<iframe src="https://example.com/embed" sandbox="allow-scripts allow-forms allow-same-origin allow-popups"></iframe>'
   );
-  await fs.writeFile(path.join(root, 'bjtu-service.json'), JSON.stringify({
+  await fs.writeFile(path.join(root, 'bjtu-plugin.json'), JSON.stringify({
     schema_version: 3,
     id: 'bjtu.frame.demo',
     name: 'Frame demo',
-    description: 'Remote frame policy test',
     version: '1.0.0',
     entrypoint: 'index.html',
     icon: 'icon.svg',
-    author: 'Alice',
-    runtime_version: 1,
-    min_runtime_version: 1,
-    required_capabilities: ['remote.frame.v1'],
-    optional_capabilities: [],
-    data_schema_version: 1,
-    permissions: { required: [], optional: [] },
-    connect_origins: [],
-    media_origins: [],
-    frame_origins: ['https://example.com'],
-    navigation_origins: [],
-    bridge_origins: ['self'],
-    marketplace: { category: 'other', tags: [] },
-    configuration: []
+    capabilities: {
+      required: ['runtime.lifecycle@1', 'remote.frame@1']
+    },
+    origins: {
+      frame: ['https://example.com']
+    }
   }));
   const require = createRequire(import.meta.url);
   const lint = require(path.resolve('..', '..', 'tools', 'third-party-service-lint.cjs')) as LintModule;
@@ -248,4 +235,39 @@ test('lint requires a restricted sandbox for declared remote iframes', async (t)
   lint.lintPlugin(root, result, schema);
 
   assert.ok(result.errors.some((error) => error.includes('allow-popups')));
+});
+
+test('lint binds navigation origins to navigation.external capability', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bjtu-plugin-navigation-policy-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, 'dist'));
+  await fs.writeFile(path.join(root, 'dist', 'icon.svg'), '<svg></svg>');
+  await fs.writeFile(path.join(root, 'dist', 'index.html'), '<a href="https://example.com">open</a>');
+  await fs.writeFile(path.join(root, 'bjtu-plugin.json'), JSON.stringify({
+    schema_version: 3,
+    id: 'bjtu.navigation.demo',
+    name: 'Navigation demo',
+    version: '1.0.0',
+    entrypoint: 'index.html',
+    icon: 'icon.svg',
+    capabilities: {
+      required: ['runtime.lifecycle@1']
+    },
+    origins: {
+      navigation: ['https://example.com']
+    }
+  }));
+  const require = createRequire(import.meta.url);
+  const lint = require(path.resolve('..', '..', 'tools', 'third-party-service-lint.cjs')) as LintModule;
+  const schemaResult: LintResult = { errors: [], warnings: [] };
+  const schema = lint.loadManifestSchema(path.resolve('..'), schemaResult);
+  const result: LintResult = { errors: [], warnings: [] };
+
+  lint.lintPlugin(root, result, schema);
+
+  assert.ok(
+    result.errors.some((error) =>
+      error.includes('origins.navigation requires navigation.external@1')
+    )
+  );
 });

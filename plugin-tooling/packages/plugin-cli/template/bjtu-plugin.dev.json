@@ -1,0 +1,15 @@
+{
+  "mock": {
+    "device": "phone",
+    "theme": "system",
+    "network": "online",
+    "quota": "normal",
+    "lifecycle": "active",
+    "binary_supported": true
+  },
+  "hmr": {
+    "host": "127.0.0.1",
+    "port": 5173,
+    "adb_reverse_port": 5173
+  }
+}

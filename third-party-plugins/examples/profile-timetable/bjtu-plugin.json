@@ -1,0 +1,12 @@
+{
+  "schema_version": 3,
+  "id": "bjtu.example.profile_timetable",
+  "name": "Profile Timetable Example",
+  "version": "1.0.0",
+  "entrypoint": "index.html",
+  "icon": "icon.svg",
+  "capabilities": {
+    "required": ["runtime.lifecycle@1", "identity.profile@1"],
+    "optional": ["academic.timetable@1"]
+  }
+}

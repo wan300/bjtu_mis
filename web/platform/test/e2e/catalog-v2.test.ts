@@ -49,7 +49,21 @@ function catalogRow() {
     min_runtime_version: 1,
     data_schema_version: 1,
     compatibility_state: 'compatible',
-    verification_level: 'automated'
+    verification_level: 'automated',
+    contract_profile: 'legacy_v3_p0a',
+    runtime_floor: 1,
+    capabilities_json: {
+      required: ['runtime.lifecycle.v1'],
+      optional: ['storage.kv.v1']
+    },
+    marketplace_json: {
+      description: 'Manifest v3 demo',
+      author: 'Alice',
+      category: 'other',
+      tags: ['demo'],
+      license: 'MIT'
+    },
+    manifest_file_name: 'bjtu-service.json'
   };
 }
 
@@ -96,7 +110,8 @@ test('v2 catalog exposes v3 security metadata and excludes legacy through SQL', 
   assert.match(payload.items[0].iconUrl, /\/api\/v2\//);
   assert.ok(queries.some((sql) =>
     sql.includes('v.manifest_schema_version=3') &&
-    sql.includes("v.compatibility_state='compatible'")
+    sql.includes("v.compatibility_state='compatible'") &&
+    sql.includes("v.contract_profile='legacy_v3_p0a'")
   ));
 });
 
@@ -134,4 +149,47 @@ test('legacy v1 mutation endpoints are read-only', async (t) => {
 
   assert.equal(response.statusCode, 410);
   assert.equal(response.json().error.code, 'legacy_api_read_only');
+});
+
+test('v2 mutation endpoints are frozen while resolve-updates remains readable', async (t) => {
+  const database = {
+    query: async () => ({ rows: [], rowCount: 0 }),
+    end: async () => undefined
+  } as unknown as Database;
+  const server = await buildServer({
+    db: database,
+    config: {
+      nodeEnv: 'test',
+      host: '127.0.0.1',
+      port: 15020,
+      publicBaseUrl: 'https://bjtu.cc',
+      databaseUrl: 'postgres://unused',
+      githubClientId: 'test',
+      githubClientSecret: 'test',
+      tokenEncryptionKey: randomBytes(32),
+      sessionCookieName: 'test_session',
+      adminGithubIds: new Set(),
+      reservedPluginIds: new Set(),
+      artifactRoot: path.resolve('.data-test'),
+      repositoryRoot: path.resolve('..', '..'),
+      pollIntervalMinutes: 30
+    }
+  });
+  t.after(() => server.close());
+
+  const frozen = await server.inject({
+    method: 'POST',
+    url: '/api/v2/submissions',
+    payload: { repositoryUrl: 'https://github.com/alice/demo' }
+  });
+  assert.equal(frozen.statusCode, 410);
+  assert.equal(frozen.json().error.code, 'legacy_catalog_read_only');
+
+  const resolve = await server.inject({
+    method: 'POST',
+    url: '/api/v2/plugins/resolve-updates',
+    payload: { installed: [] }
+  });
+  assert.equal(resolve.statusCode, 200);
+  assert.equal(resolve.json().apiVersion, 2);
 });

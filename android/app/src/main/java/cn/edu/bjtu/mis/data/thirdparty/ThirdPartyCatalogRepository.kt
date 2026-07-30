@@ -18,7 +18,7 @@ class ThirdPartyCatalogRepository(
     cacheRoot: File,
 ) {
     private val apiBaseUrl = baseUrl.trimEnd('/')
-    private val snapshotFile = File(cacheRoot, "catalog-v2-snapshot.json")
+    private val snapshotFile = File(cacheRoot, "catalog-v3-contract-v1-snapshot.json")
 
     suspend fun listPlugins(
         query: String = "",
@@ -28,14 +28,14 @@ class ThirdPartyCatalogRepository(
         val normalizedQuery = query.trim()
         val normalizedCategory = category.trim()
         val isBaseSnapshotRequest = cursor == null && normalizedQuery.isBlank() && normalizedCategory.isBlank()
-        val url = "$apiBaseUrl/api/v2/plugins".toHttpUrl().newBuilder().apply {
+        val url = "$apiBaseUrl/api/v3/plugins".toHttpUrl().newBuilder().apply {
             normalizedQuery.takeIf(String::isNotBlank)?.let { addQueryParameter("query", it) }
             normalizedCategory.takeIf(String::isNotBlank)?.let { addQueryParameter("category", it) }
             cursor?.takeIf(String::isNotBlank)?.let { addQueryParameter("cursor", it) }
         }.build().toString()
         return runCatching {
             val response = client.getText(url, timeoutMillis = 15_000)
-            val page = CatalogJson.decodeFromString<CatalogPluginPage>(response.body).compatibleV3Only()
+            val page = CatalogJson.decodeFromString<CatalogPluginPage>(response.body).contractV1Only()
             if (isBaseSnapshotRequest) writeSnapshot(page)
             page
         }.getOrElse { error ->
@@ -49,18 +49,22 @@ class ThirdPartyCatalogRepository(
         if (installed.isEmpty()) return emptyList()
         val request = CatalogUpdateRequest(
             installed = installed
-                .filter { it.compatibilityState == ThirdPartyCompatibilityState.Compatible.value }
+                .filter {
+                    it.runtimeProfile == ThirdPartyRuntimeProfile.ContractV1.value ||
+                        it.runtimeProfile == ThirdPartyRuntimeProfile.LegacyV3P0a.value
+                }
                 .take(100)
                 .map {
                     CatalogInstalledVersion(
                         id = it.serviceId,
                         commitSha = it.commitSha,
                         publisherSubjectId = it.publisherSubjectId,
+                        contractProfile = it.runtimeProfile,
                     )
                 },
         )
         val response = client.postJson(
-            url = "$apiBaseUrl/api/v2/plugins/resolve-updates",
+            url = "$apiBaseUrl/api/v3/plugins/resolve-updates",
             json = CatalogJson.encodeToString(request),
             timeoutMillis = 15_000,
         )
@@ -86,7 +90,7 @@ class ThirdPartyCatalogRepository(
         runCatching {
             CatalogJson.decodeFromString<CatalogPluginPage>(
                 snapshotFile.readText(Charsets.UTF_8),
-            ).compatibleV3Only()
+            ).contractV1Only()
         }.getOrNull()
     }
 
@@ -108,9 +112,11 @@ class ThirdPartyCatalogRepository(
         )
     }
 
-    private fun CatalogPluginPage.compatibleV3Only(): CatalogPluginPage = copy(
+    private fun CatalogPluginPage.contractV1Only(): CatalogPluginPage = copy(
         items = items.filter { plugin ->
             plugin.schemaVersion == THIRD_PARTY_SERVICE_SCHEMA_VERSION &&
+                plugin.contractProfile == THIRD_PARTY_CONTRACT_PROFILE &&
+                plugin.runtimeFloor <= THIRD_PARTY_RUNTIME_VERSION &&
                 plugin.compatibilityState == ThirdPartyCompatibilityState.Compatible.value &&
                 plugin.publisherSubjectId.matches(Regex("^github-owner:[1-9]\\d*$"))
         },

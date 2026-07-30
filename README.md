@@ -20,7 +20,7 @@ BJTU MIS Android 是面向北京交通大学学生的校园学习服务 App。�
 - 离线查看：已同步的常用信息可以在没有网络或校园服务不稳定时继续查看。
 - 内置智能助手：在应用内打开 Open WebUI Agent，围绕作业要求、附件资料和用户补充说明生成分析、步骤或答案草稿。
 - 附件处理：作业附件会导入助手工作区，支持按需读取、解压和整理常见文档、压缩包与输出文件。
-- 安全插件平台：从大厅安装 Manifest v3 静态 Web 插件，使用稳定发布者身份、分离 origin、最小权限、事务型本地数据和只读校园代理。
+- 安全插件平台：从大厅安装 SDK-first、Capability 驱动的 Manifest v3 / contract_v1 Web 插件，使用稳定发布者身份、宿主固定桥、分离 origin、事务型本地数据和只读校园代理。
 
 ## 使用前准备
 
@@ -61,10 +61,10 @@ BJTU MIS Android 是面向北京交通大学学生的校园学习服务 App。�
 - 应用只在需要访问校园服务、同步数据或执行用户操作时使用账号信息。
 - 内置 Agent 主要用于生成分析、步骤、草稿或输出文件，不会自动提交课程平台作业。
 - 邮件发送需要用户在应用内确认后才会执行。
-- 第三方插件只安装、更新和运行 Manifest v3；v1/v2 只能进入无桥、无网络的只读救援入口。
+- 第三方插件只安装、更新和运行 Manifest v3 / contract_v1；v1/v2 与 P0-A v3 只能进入无桥、无网络的只读救援入口。
 - 插件原生桥只对稳定本地 origin 的 main frame 开放，远程 frame 永远无桥；运行时不提供明文凭据读取或通用原生 HTTP。
 - 公网来源按 connect、media、frame、navigation 分离；校园会话只能通过 MIS/AA/VE 的只读 `campus.request` registry 使用。
-- 插件重要数据使用隔离、AES-GCM 加密、受配额约束且可迁移回滚的 `app.storage`。完整规则见 [第三方插件 Manifest v3 安全基线](docs/third-party-services.md)。
+- 插件通过自动生成的 TypeScript SDK 使用版本化 Capability；重要数据使用 publisher+plugin 隔离、AES-GCM 加密、受配额约束且可迁移回滚的 KV/Blob/Cache。完整规则见 [第三方插件 contract_v1 安全基线](docs/third-party-services.md)。
 
 ## 问题排查
 
@@ -97,6 +97,17 @@ Set-Location android\open-webui
 npm ci
 npm run check
 npm run test:frontend -- --run
+```
+
+插件契约、SDK 与 CLI：
+
+```powershell
+Set-Location plugin-tooling
+npm ci
+npm run generate:check
+npm run typecheck
+npm test
+npm run pack:check
 ```
 
 ## 开源许可

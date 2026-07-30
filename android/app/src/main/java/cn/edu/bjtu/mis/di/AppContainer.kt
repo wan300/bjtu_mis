@@ -25,6 +25,7 @@ import cn.edu.bjtu.mis.data.db.MIGRATION_7_8
 import cn.edu.bjtu.mis.data.db.MIGRATION_8_9
 import cn.edu.bjtu.mis.data.db.MIGRATION_9_10
 import cn.edu.bjtu.mis.data.db.MIGRATION_10_11
+import cn.edu.bjtu.mis.data.db.MIGRATION_11_12
 import cn.edu.bjtu.mis.data.employment.EmploymentCalendarSyncStore
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderCoordinator
 import cn.edu.bjtu.mis.data.homework.HomeworkReminderNotifier
@@ -56,6 +57,9 @@ import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceApiRegistry
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceInstaller
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceRepository
 import cn.edu.bjtu.mis.data.thirdparty.FileThirdPartyKvStore
+import cn.edu.bjtu.mis.data.thirdparty.FileThirdPartyResourceStore
+import cn.edu.bjtu.mis.data.thirdparty.FilePluginCommandReceiptStore
+import cn.edu.bjtu.mis.data.thirdparty.PluginNetworkProvider
 import cn.edu.bjtu.mis.data.thirdparty.AndroidThirdPartyWebStorageCleaner
 import cn.edu.bjtu.mis.data.thirdparty.WebViewThirdPartyDataMigrationRunner
 import cn.edu.bjtu.mis.data.update.AppUpdateChecker
@@ -83,6 +87,7 @@ class AppContainer(context: Context) {
             MIGRATION_8_9,
             MIGRATION_9_10,
             MIGRATION_10_11,
+            MIGRATION_11_12,
         ).build()
     }
 
@@ -216,6 +221,15 @@ class AppContainer(context: Context) {
     val thirdPartyKvStore: FileThirdPartyKvStore by lazy {
         FileThirdPartyKvStore(appContext)
     }
+    val thirdPartyResourceStore: FileThirdPartyResourceStore by lazy {
+        FileThirdPartyResourceStore(appContext)
+    }
+    val thirdPartyCommandReceiptStore: FilePluginCommandReceiptStore by lazy {
+        FilePluginCommandReceiptStore(appContext)
+    }
+    val thirdPartyNetworkProvider: PluginNetworkProvider by lazy {
+        PluginNetworkProvider(thirdPartyResourceStore)
+    }
     val thirdPartyCatalogRepository: ThirdPartyCatalogRepository by lazy {
         ThirdPartyCatalogRepository(
             client = httpClient,
@@ -235,6 +249,8 @@ class AppContainer(context: Context) {
                 ),
                 configurationStore = thirdPartyConfigurationStore,
                 kvStore = thirdPartyKvStore,
+                resourceStore = thirdPartyResourceStore,
+                commandReceiptStore = thirdPartyCommandReceiptStore,
                 migrationRunner = WebViewThirdPartyDataMigrationRunner(appContext),
                 webStorageCleaner = AndroidThirdPartyWebStorageCleaner(),
             )
@@ -248,6 +264,9 @@ class AppContainer(context: Context) {
                 kvStore = thirdPartyKvStore,
                 campusProxy = ThirdPartyCampusProxy(sessionManager),
                 configurationReader = thirdPartyServiceRepository::configurationValue,
+                resourceStore = thirdPartyResourceStore,
+                networkProvider = thirdPartyNetworkProvider,
+                commandReceiptStore = thirdPartyCommandReceiptStore,
             )
         }
     }

@@ -74,4 +74,24 @@ class AppDatabaseMigrationTest {
             )
         }
     }
+
+    @Test
+    fun migrationElevenToTwelveClassifiesP0aAndFailsAllLegacyClosed() {
+        val sql = MIGRATION_11_12_ADD_COLUMN_SQL.joinToString("\n")
+        listOf(
+            "`granted_capabilities_json`",
+            "`runtime_profile`",
+            "`runtime_floor`",
+            "`marketplace_json`",
+        ).forEach { fragment ->
+            assertTrue("Missing SQL fragment: $fragment", sql.contains(fragment))
+        }
+        assertTrue(MIGRATION_11_12_CLASSIFY_AND_DISABLE_SQL.contains("`enabled` = 0"))
+        assertTrue(MIGRATION_11_12_CLASSIFY_AND_DISABLE_SQL.contains("`needs_review` = 1"))
+        assertTrue(MIGRATION_11_12_CLASSIFY_AND_DISABLE_SQL.contains("'legacy_v3_p0a'"))
+        assertTrue(MIGRATION_11_12_CLASSIFY_AND_DISABLE_SQL.contains("'legacy_v1_v2'"))
+        assertTrue(MIGRATION_11_12_CLASSIFY_AND_DISABLE_SQL.contains("'contract_v1'"))
+        assertTrue(MIGRATION_11_12_CLASSIFY_AND_DISABLE_SQL.contains("`runtime_floor`"))
+        assertTrue(MIGRATION_11_12_CLASSIFY_AND_DISABLE_SQL.contains("`granted_capabilities_json` = '[]'"))
+    }
 }

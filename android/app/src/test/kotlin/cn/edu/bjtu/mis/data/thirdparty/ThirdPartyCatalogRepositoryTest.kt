@@ -56,7 +56,7 @@ class ThirdPartyCatalogRepositoryTest {
     }
 
     @Test
-    fun excludesLegacyOrUnboundPluginsFromTheV2Snapshot() = runBlocking {
+    fun excludesLegacyOrUnboundPluginsFromTheV3Snapshot() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(
                 MockResponse()
@@ -65,10 +65,11 @@ class ThirdPartyCatalogRepositoryTest {
                     .setBody(
                         """
                         {
-                          "apiVersion": 2,
+                          "apiVersion": 3,
+                          "contractProfile": "contract_v1",
                           "items": [
-                            {"id":"bjtu.legacy","schemaVersion":2,"compatibilityState":"legacy"},
-                            {"id":"bjtu.unbound","schemaVersion":3,"compatibilityState":"compatible"}
+                            {"id":"bjtu.legacy","schemaVersion":3,"contractProfile":"legacy_v3_p0a","runtimeFloor":1,"compatibilityState":"compatible","publisherSubjectId":"github-owner:12345"},
+                            {"id":"bjtu.unbound","schemaVersion":3,"contractProfile":"contract_v1","runtimeFloor":2,"compatibilityState":"compatible"}
                           ],
                           "nextCursor": null
                         }
@@ -78,7 +79,7 @@ class ThirdPartyCatalogRepositoryTest {
             val repository = ThirdPartyCatalogRepository(
                 client = BjtuHttpClient(AppCookieJar()),
                 baseUrl = server.url("/").toString().trimEnd('/'),
-                cacheRoot = temp.newFolder("catalog-v2-filter"),
+                cacheRoot = temp.newFolder("catalog-v3-filter"),
             )
 
             assertTrue(repository.listPlugins().items.isEmpty())
@@ -86,6 +87,6 @@ class ThirdPartyCatalogRepositoryTest {
     }
 
     private val catalogJson = """
-        {"apiVersion":2,"items":[{"id":"bjtu.demo","name":"Demo","description":"Demo plugin","version":"1.0.0","author":"Alice","category":"other","tags":[],"repositoryUrl":"https://github.com/alice/demo","repository":"alice/demo","commitSha":"abcdef1234567","archiveSha256":"${"a".repeat(64)}","packageDigestSha256":"${"b".repeat(64)}","packageBytes":12,"packageFileCount":1,"permissions":{"required":[],"optional":[]},"schemaVersion":3,"runtimeVersion":1,"minRuntimeVersion":1,"requiredCapabilities":[],"optionalCapabilities":[],"dataSchemaVersion":1,"connectOrigins":[],"mediaOrigins":[],"frameOrigins":[],"navigationOrigins":[],"bridgeOrigins":["self"],"publisherSubjectId":"github-owner:12345","publisherIdentity":{"subjectId":"github-owner:12345","ownerId":"12345","login":"alice","type":"User","transferStatus":"none"},"compatibilityState":"compatible","configuration":[],"validationWarnings":[],"verificationLevel":"automated","publishedAt":"2026-07-17T00:00:00Z","iconUrl":"https://bjtu.cc/icon","artifactUrl":"https://bjtu.cc/artifact"}],"nextCursor":null}
+        {"apiVersion":3,"contractProfile":"contract_v1","items":[{"id":"bjtu.demo","name":"Demo","description":"Demo plugin","version":"1.0.0","author":"Alice","category":"other","tags":[],"repositoryUrl":"https://github.com/alice/demo","repository":"alice/demo","commitSha":"abcdef1234567","archiveSha256":"${"a".repeat(64)}","packageDigestSha256":"${"b".repeat(64)}","packageBytes":12,"packageFileCount":1,"schemaVersion":3,"contractProfile":"contract_v1","runtimeFloor":2,"capabilities":{"required":["runtime.lifecycle@1"],"optional":[]},"origins":{},"dataSchemaVersion":null,"publisherSubjectId":"github-owner:12345","publisherIdentity":{"subjectId":"github-owner:12345","ownerId":"12345","login":"alice","type":"User","transferStatus":"none"},"compatibilityState":"compatible","configuration":[],"validationWarnings":[],"verificationLevel":"automated","publishedAt":"2026-07-17T00:00:00Z","iconUrl":"https://bjtu.cc/icon","artifactUrl":"https://bjtu.cc/artifact"}],"nextCursor":null}
     """.trimIndent()
 }

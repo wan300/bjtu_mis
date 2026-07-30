@@ -1,31 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://bjtu-mis.local/schemas/third-party-service-manifest.schema.json",
-  "title": "BJTU MIS Third Party Service Manifest v3",
+  "$id": "https://bjtu.cc/schemas/bjtu-plugin.schema.json",
+  "title": "BJTU MIS Plugin Manifest v3 contract_v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "id",
     "name",
-    "description",
     "version",
     "entrypoint",
     "icon",
-    "author",
-    "runtime_version",
-    "min_runtime_version",
-    "required_capabilities",
-    "optional_capabilities",
-    "data_schema_version",
-    "permissions",
-    "connect_origins",
-    "media_origins",
-    "frame_origins",
-    "navigation_origins",
-    "bridge_origins",
-    "marketplace",
-    "configuration"
+    "capabilities"
   ],
   "properties": {
     "schema_version": {
@@ -40,29 +26,114 @@
       "minLength": 1,
       "maxLength": 80
     },
-    "description": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 400
-    },
     "version": {
       "type": "string",
       "maxLength": 40,
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
     },
-    "runtime_version": {
-      "type": "integer",
-      "minimum": 1
+    "entrypoint": {
+      "$ref": "#/$defs/asset_path"
     },
-    "min_runtime_version": {
-      "type": "integer",
-      "minimum": 1
+    "icon": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/asset_path"
+        },
+        {
+          "pattern": "\\.(?:[sS][vV][gG]|[pP][nN][gG]|[wW][eE][bB][pP]|[jJ][pP][eE]?[gG])$"
+        }
+      ]
     },
-    "required_capabilities": {
-      "$ref": "#/$defs/capability_array"
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required"
+      ],
+      "properties": {
+        "required": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "contains": {
+            "const": "runtime.lifecycle@1"
+          },
+          "items": {
+            "enum": [
+              "runtime.lifecycle@1",
+              "configuration.read@1",
+              "remote.frame@1",
+              "navigation.external@1",
+              "identity.profile@1",
+              "academic.timetable@1",
+              "academic.scores@1",
+              "academic.exams@1",
+              "academic.calendar@1",
+              "academic.progress@1",
+              "academic.homework@1",
+              "academic.resources@1",
+              "mail.read@1",
+              "campus.request@1",
+              "network.request@1",
+              "storage.kv@2",
+              "storage.blob@1",
+              "cache.resource@1",
+              "academic.userCourses.command@1",
+              "academic.homework.submit@1",
+              "mail.send@1"
+            ]
+          }
+        },
+        "optional": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "runtime.lifecycle@1",
+              "configuration.read@1",
+              "remote.frame@1",
+              "navigation.external@1",
+              "identity.profile@1",
+              "academic.timetable@1",
+              "academic.scores@1",
+              "academic.exams@1",
+              "academic.calendar@1",
+              "academic.progress@1",
+              "academic.homework@1",
+              "academic.resources@1",
+              "mail.read@1",
+              "campus.request@1",
+              "network.request@1",
+              "storage.kv@2",
+              "storage.blob@1",
+              "cache.resource@1",
+              "academic.userCourses.command@1",
+              "academic.homework.submit@1",
+              "mail.send@1"
+            ]
+          }
+        }
+      }
     },
-    "optional_capabilities": {
-      "$ref": "#/$defs/capability_array"
+    "origins": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "connect": {
+          "$ref": "#/$defs/origin_array"
+        },
+        "media": {
+          "$ref": "#/$defs/origin_array"
+        },
+        "frame": {
+          "$ref": "#/$defs/origin_array"
+        },
+        "navigation": {
+          "$ref": "#/$defs/origin_array"
+        }
+      }
     },
     "data_schema_version": {
       "type": "integer",
@@ -71,149 +142,278 @@
     "migration_entrypoint": {
       "$ref": "#/$defs/asset_path"
     },
-    "entrypoint": {
-      "$ref": "#/$defs/asset_path"
-    },
-    "icon": {
-      "$ref": "#/$defs/asset_path",
-      "pattern": "\\.(?:[sS][vV][gG]|[pP][nN][gG]|[wW][eE][bB][pP]|[jJ][pP][eE]?[gG])$",
-      "description": "Path inside dist/ to an SVG, PNG, WebP, JPG, or JPEG icon no larger than 1 MiB."
-    },
-    "author": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 120
-    },
-    "permissions": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["required", "optional"],
-      "properties": {
-        "required": {
-          "$ref": "#/$defs/permission_array"
-        },
-        "optional": {
-          "$ref": "#/$defs/permission_array"
-        }
-      }
-    },
-    "connect_origins": {
-      "$ref": "#/$defs/origin_array",
-      "description": "Origins available to browser fetch/XHR. Campus and private-network origins are rejected by semantic validation."
-    },
-    "media_origins": {
-      "$ref": "#/$defs/origin_array"
-    },
-    "frame_origins": {
-      "$ref": "#/$defs/origin_array"
-    },
-    "navigation_origins": {
-      "$ref": "#/$defs/origin_array"
-    },
-    "bridge_origins": {
-      "type": "array",
-      "const": ["self"],
-      "description": "The native bridge is available only to the stable local sandbox main frame."
-    },
-    "marketplace": {
-      "$ref": "#/$defs/marketplace"
-    },
     "configuration": {
       "type": "array",
+      "minItems": 1,
       "maxItems": 32,
       "items": {
         "$ref": "#/$defs/configuration"
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "capabilities": {
+            "anyOf": [
+              {
+                "properties": {
+                  "required": {
+                    "contains": {
+                      "enum": [
+                        "storage.kv@2",
+                        "storage.blob@1"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "required"
+                ]
+              },
+              {
+                "properties": {
+                  "optional": {
+                    "contains": {
+                      "enum": [
+                        "storage.kv@2",
+                        "storage.blob@1"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "optional"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "data_schema_version"
+        ]
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "data_schema_version"
+              ]
+            },
+            {
+              "required": [
+                "migration_entrypoint"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "data_schema_version": {
+            "minimum": 2
+          }
+        },
+        "required": [
+          "data_schema_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "migration_entrypoint"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "origins": {
+            "required": [
+              "frame"
+            ]
+          }
+        },
+        "required": [
+          "origins"
+        ]
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "anyOf": [
+              {
+                "properties": {
+                  "required": {
+                    "contains": {
+                      "enum": [
+                        "remote.frame@1"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "required"
+                ]
+              },
+              {
+                "properties": {
+                  "optional": {
+                    "contains": {
+                      "enum": [
+                        "remote.frame@1"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "optional"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "origins": {
+            "required": [
+              "navigation"
+            ]
+          }
+        },
+        "required": [
+          "origins"
+        ]
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "anyOf": [
+              {
+                "properties": {
+                  "required": {
+                    "contains": {
+                      "enum": [
+                        "navigation.external@1"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "required"
+                ]
+              },
+              {
+                "properties": {
+                  "optional": {
+                    "contains": {
+                      "enum": [
+                        "navigation.external@1"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "optional"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "configuration"
+        ]
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "anyOf": [
+              {
+                "properties": {
+                  "required": {
+                    "contains": {
+                      "enum": [
+                        "configuration.read@1"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "required"
+                ]
+              },
+              {
+                "properties": {
+                  "optional": {
+                    "contains": {
+                      "enum": [
+                        "configuration.read@1"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "optional"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "asset_path": {
       "type": "string",
       "minLength": 1,
       "not": {
         "anyOf": [
-          { "pattern": "^/" },
-          { "pattern": "\\.\\." },
-          { "pattern": "\\\\" },
-          { "pattern": ":" }
-        ]
-      }
-    },
-    "permission_array": {
-      "type": "array",
-      "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "enum": [
-          "app.configuration.read",
-          "identity.profile.read",
-          "academic.timetable.read",
-          "academic.user_courses.write",
-          "academic.scores.read",
-          "academic.history_scores.read",
-          "academic.exams.read",
-          "academic.calendar.read",
-          "academic.progress.read",
-          "academic.homework.read",
-          "academic.homework.submit",
-          "academic.course_resources.read",
-          "mail.folders.read",
-          "mail.messages.read",
-          "mail.message_detail.read",
-          "mail.send"
-        ]
-      }
-    },
-    "capability_array": {
-      "type": "array",
-      "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "enum": [
-          "runtime.lifecycle.v1",
-          "storage.kv.v1",
-          "campus.request.v1",
-          "remote.frame.v1"
+          {
+            "pattern": "^/"
+          },
+          {
+            "pattern": "(^|/)\\.\\.(/|$)"
+          },
+          {
+            "pattern": "\\\\"
+          },
+          {
+            "pattern": ":"
+          }
         ]
       }
     },
     "origin_array": {
       "type": "array",
+      "minItems": 1,
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "pattern": "^(https://[A-Za-z0-9.-]+(:[0-9]+)?|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]+)?)/?$"
-      }
-    },
-    "marketplace": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["category", "tags"],
-      "properties": {
-        "category": {
-          "enum": ["academic", "campus", "information", "productivity", "assistant", "other"]
-        },
-        "tags": {
-          "type": "array",
-          "maxItems": 5,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 20
-          }
-        },
-        "license": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 80
-        }
+        "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]+)?$"
       }
     },
     "configuration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["key", "label", "description", "type", "required"],
+      "required": [
+        "key",
+        "label",
+        "description",
+        "type",
+        "required"
+      ],
       "properties": {
         "key": {
           "type": "string",
@@ -229,7 +429,14 @@
           "maxLength": 240
         },
         "type": {
-          "enum": ["text", "secret", "url", "number", "boolean", "select"]
+          "enum": [
+            "text",
+            "secret",
+            "url",
+            "number",
+            "boolean",
+            "select"
+          ]
         },
         "required": {
           "type": "boolean"
@@ -239,6 +446,7 @@
         },
         "options": {
           "type": "array",
+          "minItems": 1,
           "maxItems": 20,
           "uniqueItems": true,
           "items": {

@@ -1,14 +1,50 @@
 #!/usr/bin/env node
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 
-const TEXT_EXTENSIONS = new Set(['.html', '.js', '.mjs', '.css', '.json', '.txt']);
-const IGNORED_REFERENCE_ORIGINS = new Set(['http://www.w3.org']);
-const SUPPORTED_ICON_EXTENSIONS = new Set(['.svg', '.png', '.webp', '.jpg', '.jpeg']);
-const MAX_ICON_BYTES = 1024 * 1024;
-const RUNTIME_VERSION = 1;
+const MANIFEST_FILE = 'bjtu-plugin.json';
+const MARKETPLACE_FILE = 'bjtu-marketplace.json';
+const DEV_FILE = 'bjtu-plugin.dev.json';
+const MANIFEST_FIELDS = new Set([
+  'schema_version',
+  'id',
+  'name',
+  'version',
+  'entrypoint',
+  'icon',
+  'capabilities',
+  'origins',
+  'data_schema_version',
+  'migration_entrypoint',
+  'configuration'
+]);
+const REQUIRED_FIELDS = [
+  'schema_version',
+  'id',
+  'name',
+  'version',
+  'entrypoint',
+  'icon',
+  'capabilities'
+];
+const LEGACY_FIELDS = new Set([
+  'permissions',
+  'runtime_version',
+  'min_runtime_version',
+  'bridge_origins',
+  'marketplace',
+  'description',
+  'author',
+  'required_capabilities',
+  'optional_capabilities',
+  'connect_origins',
+  'media_origins',
+  'frame_origins',
+  'navigation_origins',
+  'allowed_origins'
+]);
 const CAMPUS_HOSTS = new Set([
   '123.121.147.7',
   'cas.bjtu.edu.cn',
@@ -19,325 +55,413 @@ const CAMPUS_HOSTS = new Set([
   'job.bjtu.edu.cn',
   'bksycenter.bjtu.edu.cn'
 ]);
-const MANIFEST_FIELDS = new Set([
-  'schema_version', 'id', 'name', 'description', 'version', 'runtime_version',
-  'min_runtime_version', 'required_capabilities', 'optional_capabilities',
-  'data_schema_version', 'migration_entrypoint', 'entrypoint', 'icon', 'author',
-  'permissions', 'connect_origins', 'media_origins', 'frame_origins',
-  'navigation_origins', 'bridge_origins', 'marketplace', 'configuration'
-]);
+const TEXT_EXTENSIONS = new Set(['.html', '.htm', '.js', '.mjs', '.cjs', '.css', '.json']);
 
 function main() {
-  const target = process.argv[2];
-  if (!target || target === '-h' || target === '--help') {
-    console.log('Usage: node tools/third-party-service-lint.cjs <plugin-root>');
-    process.exit(target ? 0 : 1);
+  const args = process.argv.slice(2);
+  const roots = args.filter((value) => !value.startsWith('-'));
+  if (!roots.length) {
+    process.stderr.write(
+      'Usage: node tools/third-party-service-lint.cjs <plugin-root> [...] [--source] [--marketplace] [--dev]\n'
+    );
+    process.exitCode = 2;
+    return;
   }
-
-  const root = path.resolve(process.cwd(), target);
-  const repoRoot = path.resolve(__dirname, '..');
-  const result = { errors: [], warnings: [] };
-  const manifestSchema = loadManifestSchema(repoRoot, result);
-  lintPlugin(root, result, manifestSchema);
-
-  result.warnings.forEach((warning) => console.warn(`WARN  ${warning}`));
-  result.errors.forEach((error) => console.error(`ERROR ${error}`));
-  if (result.errors.length > 0) {
-    console.error(`\nBJTU service lint failed: ${result.errors.length} error(s), ${result.warnings.length} warning(s).`);
-    process.exit(1);
+  const repositoryRoot = path.resolve(__dirname, '..');
+  const schemaResult = { errors: [], warnings: [] };
+  const schema = loadManifestSchema(repositoryRoot, schemaResult);
+  let failed = false;
+  for (const root of roots) {
+    const result = {
+      errors: [...schemaResult.errors],
+      warnings: [...schemaResult.warnings]
+    };
+    lintPlugin(path.resolve(root), result, schema, {
+      requireMarketplace: args.includes('--marketplace'),
+      allowDevelopmentOrigins: args.includes('--dev'),
+      requireDist: !args.includes('--source')
+    });
+    for (const warning of result.warnings) process.stderr.write(`warning ${root}: ${warning}\n`);
+    for (const error of result.errors) process.stderr.write(`error ${root}: ${error}\n`);
+    if (result.errors.length) failed = true;
+    else process.stdout.write(`ok ${root}\n`);
   }
-  console.log(`BJTU service lint passed: ${result.warnings.length} warning(s).`);
+  if (failed) process.exitCode = 1;
 }
 
-function lintPlugin(root, result, manifestSchema) {
-  const manifestPath = path.join(root, 'bjtu-service.json');
-  if (!fs.existsSync(manifestPath)) {
-    result.errors.push('Missing bjtu-service.json at plugin root.');
+function loadManifestSchema(repositoryRoot, result) {
+  const root = resolveRepositoryRoot(repositoryRoot);
+  try {
+    const manifestSchema = JSON.parse(
+      fs.readFileSync(path.join(root, 'docs', 'third-party-service-manifest.schema.json'), 'utf8')
+    );
+    const marketplaceSchema = JSON.parse(
+      fs.readFileSync(path.join(root, 'docs', 'bjtu-marketplace.schema.json'), 'utf8')
+    );
+    const registry = JSON.parse(
+      fs.readFileSync(path.join(root, 'plugin-tooling', 'contracts', 'capability-contracts.json'), 'utf8')
+    );
+    return {
+      permissions: registry.capabilities
+        .map((item) => item.permission && item.permission.id)
+        .filter(Boolean),
+      capabilities: manifestSchema.properties.capabilities.properties.required.items.enum,
+      categories: marketplaceSchema.properties.category.enum,
+      configurationTypes: manifestSchema.$defs.configuration.properties.type.enum,
+      contractProfile: registry.contractProfile,
+      protocolVersion: registry.protocolVersion,
+      runtimeFloor: registry.runtimeFloor,
+      packageLimits: registry.packageLimits,
+      contracts: registry.capabilities
+    };
+  } catch (error) {
+    result.errors.push(`Cannot load generated contract schemas: ${error.message}`);
+    return {
+      permissions: [],
+      capabilities: [],
+      categories: [],
+      configurationTypes: [],
+      contractProfile: 'unknown',
+      protocolVersion: 0,
+      runtimeFloor: 0,
+      packageLimits: {
+        archiveBytes: 0,
+        extractedBytes: 0,
+        files: 0,
+        iconBytes: 0
+      },
+      contracts: []
+    };
+  }
+}
+
+function lintPlugin(root, result, schema, options = {}) {
+  const manifestPath = path.join(root, MANIFEST_FILE);
+  if (!isFile(manifestPath)) {
+    if (isFile(path.join(root, 'bjtu-service.json'))) {
+      result.errors.push('P0-A bjtu-service.json is rescue-only; run `bjtu migrate` and publish bjtu-plugin.json.');
+    } else {
+      result.errors.push(`Plugin root is missing ${MANIFEST_FILE}.`);
+    }
     return result;
   }
   const manifest = readJson(manifestPath, result);
-  if (!manifest) return result;
-
-  Object.keys(manifest).filter((key) => !MANIFEST_FIELDS.has(key)).forEach((key) => {
-    result.errors.push(`Unknown manifest field: ${key}`);
-  });
-  validateObjectShape(
-    manifest.permissions,
-    'permissions',
-    new Set(['required', 'optional']),
-    new Set(['required', 'optional']),
-    result
-  );
-  validateObjectShape(
-    manifest.marketplace,
-    'marketplace',
-    new Set(['category', 'tags', 'license']),
-    new Set(['category', 'tags']),
-    result
-  );
-  if (Array.isArray(manifest.configuration)) {
-    manifest.configuration.forEach((definition, index) => {
-      validateObjectShape(
-        definition,
-        `configuration[${index}]`,
-        new Set(['key', 'label', 'description', 'type', 'required', 'default', 'options']),
-        new Set(['key', 'label', 'description', 'type', 'required']),
-        result
-      );
-    });
+  if (!isObject(manifest)) {
+    result.errors.push(`${MANIFEST_FILE} must be a JSON object.`);
+    return result;
   }
+  validateManifestShape(manifest, result);
   if (manifest.schema_version !== 3) result.errors.push('schema_version must be 3.');
-  if (!/^[a-z][a-z0-9_.-]{2,63}$/.test(stringField(manifest, 'id'))) {
-    result.errors.push('id must be 3-64 chars, start with a lowercase letter, and contain only lowercase letters, digits, dot, underscore, or hyphen.');
-  }
-  const textLimits = { name: 80, description: 400, version: 40, author: 120 };
-  Object.entries(textLimits).forEach(([field, maxLength]) => {
-    const value = stringField(manifest, field).trim();
-    if (!value) result.errors.push(`${field} must be a non-empty string.`);
-    if (value.length > maxLength) result.errors.push(`${field} cannot exceed ${maxLength} characters.`);
-  });
-  if (!Number.isInteger(manifest.runtime_version) || manifest.runtime_version < 1) {
-    result.errors.push('runtime_version must be a positive integer.');
-  }
-  if (!Number.isInteger(manifest.min_runtime_version) || manifest.min_runtime_version < 1) {
-    result.errors.push('min_runtime_version must be a positive integer.');
-  }
-  if (
-    Number.isInteger(manifest.runtime_version) &&
-    Number.isInteger(manifest.min_runtime_version) &&
-    manifest.min_runtime_version > manifest.runtime_version
-  ) {
-    result.errors.push('min_runtime_version cannot exceed runtime_version.');
-  }
-  if (manifest.min_runtime_version > RUNTIME_VERSION) {
-    result.errors.push(`Plugin requires runtime ${manifest.min_runtime_version}; platform provides ${RUNTIME_VERSION}.`);
-  }
-  if (!Number.isInteger(manifest.data_schema_version) || manifest.data_schema_version < 1) {
-    result.errors.push('data_schema_version must be a positive integer.');
-  }
-
-  const requiredCapabilities = normalizeStringArray(
-    manifest.required_capabilities,
-    'required_capabilities',
-    result
+  validateText(manifest.id, 'id', 64, result, /^[a-z][a-z0-9_.-]{2,63}$/);
+  validateText(manifest.name, 'name', 80, result);
+  validateText(
+    manifest.version,
+    'version',
+    40,
+    result,
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
   );
-  const optionalCapabilities = normalizeStringArray(
-    manifest.optional_capabilities,
-    'optional_capabilities',
-    result
-  );
-  const duplicateCapabilities = requiredCapabilities.filter((name) => optionalCapabilities.includes(name));
-  if (duplicateCapabilities.length) {
-    result.errors.push(`Capabilities cannot be both required and optional: ${[...new Set(duplicateCapabilities)].join(', ')}`);
-  }
-  requiredCapabilities.concat(optionalCapabilities).forEach((name) => {
-    if (!manifestSchema.capabilities.includes(name)) result.errors.push(`Unknown capability: ${name}`);
-  });
-
   const entrypoint = validateAssetPath(manifest.entrypoint, 'entrypoint', result);
   const icon = validateAssetPath(manifest.icon, 'icon', result);
-  const migrationEntrypoint = manifest.migration_entrypoint === undefined
-    ? ''
-    : validateAssetPath(manifest.migration_entrypoint, 'migration_entrypoint', result);
-  if (icon && !SUPPORTED_ICON_EXTENSIONS.has(path.extname(icon).toLowerCase())) {
-    result.errors.push('icon must use SVG, PNG, WebP, JPG, or JPEG format.');
+  if (icon && !/\.(svg|png|webp|jpe?g)$/i.test(icon)) {
+    result.errors.push('Plugin icon must be SVG, PNG, WebP, JPG, or JPEG.');
   }
-  const dist = path.join(root, 'dist');
-  if (!fs.existsSync(dist) || !fs.statSync(dist).isDirectory()) {
-    result.errors.push('Missing dist/ directory.');
-  } else {
-    if (entrypoint && !fs.existsSync(path.join(dist, entrypoint))) result.errors.push(`entrypoint does not exist in dist/: ${entrypoint}`);
-    if (migrationEntrypoint && !fs.existsSync(path.join(dist, migrationEntrypoint))) {
-      result.errors.push(`migration_entrypoint does not exist in dist/: ${migrationEntrypoint}`);
-    }
-    if (icon) {
-      const iconFile = path.join(dist, icon);
-      if (!fs.existsSync(iconFile) || !fs.statSync(iconFile).isFile()) {
-        result.errors.push(`icon does not exist in dist/: ${icon}`);
-      } else {
-        const iconBytes = fs.statSync(iconFile).size;
-        if (iconBytes < 1 || iconBytes > MAX_ICON_BYTES) {
-          result.errors.push('icon must be between 1 byte and 1 MiB.');
-        }
+
+  const capabilityDeclaration = isObject(manifest.capabilities) ? manifest.capabilities : null;
+  if (!capabilityDeclaration) {
+    result.errors.push('capabilities must be an object.');
+    return result;
+  }
+  validateObjectShape(
+    capabilityDeclaration,
+    'capabilities',
+    new Set(['required', 'optional']),
+    new Set(['required']),
+    result
+  );
+  const requiredCapabilities = normalizeStringArray(
+    capabilityDeclaration.required,
+    'capabilities.required',
+    result
+  );
+  const optionalCapabilities = capabilityDeclaration.optional === undefined
+    ? []
+    : normalizeStringArray(capabilityDeclaration.optional, 'capabilities.optional', result);
+  if (!requiredCapabilities.length) result.errors.push('capabilities.required must not be empty.');
+  if (capabilityDeclaration.optional !== undefined && !optionalCapabilities.length) {
+    result.errors.push('capabilities.optional must be omitted when empty.');
+  }
+  for (const capability of [...requiredCapabilities, ...optionalCapabilities]) {
+    if (!schema.capabilities.includes(capability)) result.errors.push(`Unknown capability: ${capability}`);
+  }
+  const duplicates = requiredCapabilities.filter((item) => optionalCapabilities.includes(item));
+  if (duplicates.length) {
+    result.errors.push(`Capabilities cannot be both required and optional: ${[...new Set(duplicates)].join(', ')}`);
+  }
+  if (!requiredCapabilities.includes('runtime.lifecycle@1')) {
+    result.errors.push('runtime.lifecycle@1 must be in capabilities.required.');
+  }
+  if (optionalCapabilities.length) {
+    result.warnings.push('Optional capabilities are disabled on first install until the user grants them.');
+  }
+  const allCapabilities = [...requiredCapabilities, ...optionalCapabilities];
+
+  const normalizedOrigins = { connect: [], media: [], frame: [], navigation: [] };
+  if (manifest.origins !== undefined) {
+    if (!isObject(manifest.origins) || !Object.keys(manifest.origins).length) {
+      result.errors.push('origins must be omitted when empty.');
+    } else {
+      validateObjectShape(
+        manifest.origins,
+        'origins',
+        new Set(['connect', 'media', 'frame', 'navigation']),
+        new Set(),
+        result
+      );
+      for (const kind of Object.keys(normalizedOrigins)) {
+        if (manifest.origins[kind] === undefined) continue;
+        const values = normalizeStringArray(manifest.origins[kind], `origins.${kind}`, result);
+        if (!values.length) result.errors.push(`origins.${kind} must be omitted when empty.`);
+        normalizedOrigins[kind] = values
+          .map((origin) =>
+            normalizeOrigin(
+              origin,
+              result,
+              `origins.${kind}`,
+              kind !== 'navigation',
+              options.allowDevelopmentOrigins === true
+            )
+          )
+          .filter(Boolean);
       }
     }
   }
-
-  const permissions = manifest.permissions || {};
-  const required = normalizeStringArray(permissions.required, 'permissions.required', result);
-  const optional = normalizeStringArray(permissions.optional, 'permissions.optional', result);
-  const duplicated = required.filter((id) => optional.includes(id));
-  if (duplicated.length) result.errors.push(`Permissions cannot be both required and optional: ${[...new Set(duplicated)].join(', ')}`);
-  if (manifestSchema.permissions.length) {
-    required.concat(optional).forEach((id) => {
-      if (!manifestSchema.permissions.includes(id)) result.errors.push(`Unknown permission: ${id}`);
-    });
+  if (normalizedOrigins.frame.length && !allCapabilities.includes('remote.frame@1')) {
+    result.errors.push('origins.frame requires remote.frame@1.');
+  }
+  if (
+    normalizedOrigins.navigation.length &&
+    !allCapabilities.includes('navigation.external@1')
+  ) {
+    result.errors.push('origins.navigation requires navigation.external@1.');
+  }
+  if (allCapabilities.includes('network.request@1') && !normalizedOrigins.connect.length) {
+    result.warnings.push('network.request@1 has no origins.connect entries and cannot reach public origins.');
   }
 
-  validateMarketplaceAndConfiguration(manifest, required, result, manifestSchema);
-
-  const originFields = ['connect_origins', 'media_origins', 'frame_origins', 'navigation_origins'];
-  const originsByField = Object.fromEntries(originFields.map((field) => {
-    const normalized = normalizeStringArray(manifest[field], field, result)
-      .map((origin) => normalizeOrigin(origin, result, field, field !== 'navigation_origins'))
-      .filter(Boolean);
-    if (normalized.length !== new Set(normalized).size) result.errors.push(`${field} contains duplicates.`);
-    return [field, normalized];
-  }));
-  if (!Array.isArray(manifest.bridge_origins) || manifest.bridge_origins.length !== 1 || manifest.bridge_origins[0] !== 'self') {
-    result.errors.push('bridge_origins must be exactly ["self"].');
+  const usesData = allCapabilities.some((item) =>
+    item === 'storage.kv@2' || item === 'storage.blob@1'
+  );
+  if (usesData) {
+    if (!Number.isSafeInteger(manifest.data_schema_version) || manifest.data_schema_version < 1) {
+      result.errors.push('KV/Blob capabilities require a positive data_schema_version.');
+    }
+    if (manifest.data_schema_version > 1 && manifest.migration_entrypoint === undefined) {
+      result.errors.push('data_schema_version > 1 requires migration_entrypoint.');
+    }
+  } else if (
+    manifest.data_schema_version !== undefined ||
+    manifest.migration_entrypoint !== undefined
+  ) {
+    result.errors.push('data_schema_version and migration_entrypoint are only valid with KV/Blob.');
   }
-  if (originsByField.frame_origins.length && !requiredCapabilities.includes('remote.frame.v1')) {
-    result.errors.push('frame_origins requires remote.frame.v1 in required_capabilities.');
+  const migrationEntrypoint = manifest.migration_entrypoint === undefined
+    ? null
+    : validateAssetPath(manifest.migration_entrypoint, 'migration_entrypoint', result);
+  validateConfiguration(manifest.configuration, allCapabilities, schema, result);
+
+  const marketplacePath = path.join(root, MARKETPLACE_FILE);
+  if (isFile(marketplacePath)) {
+    const marketplace = readJson(marketplacePath, result);
+    if (isObject(marketplace)) validateMarketplace(marketplace, schema, result);
+    else result.errors.push(`${MARKETPLACE_FILE} must be a JSON object.`);
+  } else if (options.requireMarketplace) {
+    result.errors.push(`${MARKETPLACE_FILE} is required for marketplace submission.`);
   }
 
-  if (fs.existsSync(dist) && fs.statSync(dist).isDirectory()) {
-    const allOrigins = new Set(originFields.flatMap((field) => originsByField[field]));
-    scanExternalOrigins(dist, allOrigins, result);
-    scanRemoteScripts(dist, result);
-    scanIframeSandboxes(dist, originsByField.frame_origins, result);
+  if (options.requireDist === false) return result;
+  const dist = path.join(root, 'dist');
+  if (!isDirectory(dist)) {
+    result.errors.push('Plugin package is missing dist/.');
+    return result;
   }
-
+  const packageFiles = [
+    manifestPath,
+    ...(isFile(path.join(root, MARKETPLACE_FILE)) ? [path.join(root, MARKETPLACE_FILE)] : []),
+    ...walk(dist)
+  ];
+  if (packageFiles.length > schema.packageLimits.files) {
+    result.errors.push(`Plugin package exceeds the ${schema.packageLimits.files} file limit.`);
+  }
+  const packageBytes = packageFiles.reduce((total, file) => total + fs.statSync(file).size, 0);
+  if (packageBytes > schema.packageLimits.extractedBytes) {
+    result.errors.push(
+      `Plugin package exceeds the ${schema.packageLimits.extractedBytes} byte extracted limit.`
+    );
+  }
+  for (const [field, relative] of [
+    ['entrypoint', entrypoint],
+    ['icon', icon],
+    ['migration_entrypoint', migrationEntrypoint]
+  ]) {
+    if (!relative) continue;
+    const target = resolveInside(dist, relative, field, result);
+    if (target && !isFile(target)) result.errors.push(`${field} does not exist inside dist/: ${relative}`);
+  }
+  const iconFile = icon && resolveInside(dist, icon, 'icon', result);
+  if (iconFile && isFile(iconFile)) {
+    const size = fs.statSync(iconFile).size;
+    if (size < 1 || size > schema.packageLimits.iconBytes) {
+      result.errors.push('Plugin icon must be between 1 byte and 1 MiB.');
+    }
+  }
+  if (isFile(path.join(dist, DEV_FILE))) {
+    result.errors.push(`${DEV_FILE} must never be included in dist/.`);
+  }
+  scanRemoteScripts(dist, result);
+  scanIframeSandboxes(dist, normalizedOrigins.frame, result);
+  scanExternalOrigins(
+    dist,
+    new Set(Object.values(normalizedOrigins).flat()),
+    result
+  );
   return result;
 }
 
-function loadManifestSchema(repoRoot, result) {
-  const docsSchema = path.join(repoRoot, 'docs', 'third-party-service-manifest.schema.json');
-  const webSchema = path.join(repoRoot, 'web', 'assets', 'schemas', 'third-party-service-manifest.schema.json');
-  if (!fs.existsSync(docsSchema) || !fs.existsSync(webSchema)) {
-    result.errors.push('Missing docs/ or web/assets/schemas/ manifest schema.');
-    return { permissions: [], capabilities: [], categories: [], configurationTypes: [] };
+function validateManifestShape(manifest, result) {
+  for (const field of Object.keys(manifest)) {
+    if (!MANIFEST_FIELDS.has(field)) {
+      result.errors.push(
+        LEGACY_FIELDS.has(field)
+          ? `${MANIFEST_FILE} contains removed P0-A field: ${field}`
+          : `${MANIFEST_FILE} contains unknown field: ${field}`
+      );
+    }
   }
-  const docsText = fs.readFileSync(docsSchema, 'utf8');
-  const webText = fs.readFileSync(webSchema, 'utf8');
-  if (docsText !== webText) result.errors.push('docs/ and web/assets/schemas/ manifest schemas are not identical.');
-  const schema = readJson(docsSchema, result);
-  const schemaPermissions = schema?.$defs?.permission_array?.items?.enum;
-  if (!Array.isArray(schemaPermissions)) {
-    result.errors.push('Manifest schema is missing permission enum.');
-    return { permissions: [], capabilities: [], categories: [], configurationTypes: [] };
+  for (const field of REQUIRED_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(manifest, field)) {
+      result.errors.push(`${MANIFEST_FILE} is missing required field: ${field}`);
+    }
   }
-
-  const permissions = schemaPermissions
-    .map((item) => (typeof item === 'string' ? item.trim() : ''))
-    .filter(Boolean);
-  if (permissions.length !== schemaPermissions.length) {
-    result.errors.push('Manifest schema permission enum must contain only non-empty strings.');
-  }
-  if (permissions.length !== new Set(permissions).size) {
-    result.errors.push('Manifest schema permission enum contains duplicates.');
-  }
-
-  const categories = schema?.$defs?.marketplace?.properties?.category?.enum;
-  const configurationTypes = schema?.$defs?.configuration?.properties?.type?.enum;
-  const capabilities = schema?.$defs?.capability_array?.items?.enum;
-  if (!Array.isArray(categories) || !Array.isArray(configurationTypes) || !Array.isArray(capabilities)) {
-    result.errors.push('Manifest schema is missing capability, marketplace category, or configuration type enums.');
-  }
-  return {
-    permissions,
-    capabilities: Array.isArray(capabilities) ? capabilities : [],
-    categories: Array.isArray(categories) ? categories : [],
-    configurationTypes: Array.isArray(configurationTypes) ? configurationTypes : []
-  };
 }
 
-function validateMarketplaceAndConfiguration(manifest, requiredPermissions, result, manifestSchema) {
-  const configuration = Array.isArray(manifest.configuration) ? manifest.configuration : [];
-  if (manifest.schema_version !== 3) return;
-  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(stringField(manifest, 'version').trim())) {
-    result.errors.push('schema_version 3 version must use semantic versioning.');
+function validateMarketplace(value, schema, result) {
+  validateObjectShape(
+    value,
+    MARKETPLACE_FILE,
+    new Set(['description', 'author', 'category', 'tags', 'license', 'screenshots']),
+    new Set(['description', 'author', 'category', 'tags']),
+    result
+  );
+  validateText(value.description, 'marketplace.description', 400, result);
+  validateText(value.author, 'marketplace.author', 120, result);
+  if (typeof value.category !== 'string' || !schema.categories.includes(value.category)) {
+    result.errors.push(`Unknown marketplace category: ${String(value.category ?? '')}`);
   }
-  const marketplace = manifest.marketplace;
-  if (!marketplace || typeof marketplace !== 'object' || Array.isArray(marketplace)) {
-    result.errors.push('schema_version 3 requires marketplace metadata.');
-  } else {
-    const category = stringField(marketplace, 'category').trim().toLowerCase();
-    if (!manifestSchema.categories.includes(category)) result.errors.push(`Unknown marketplace category: ${category || '(blank)'}`);
-    const tags = normalizeStringArray(marketplace.tags, 'marketplace.tags', result);
-    if (tags.length > 5) result.errors.push('marketplace.tags cannot contain more than 5 entries.');
-    if (tags.some((tag) => tag.length > 20)) result.errors.push('marketplace tags must be 1-20 characters.');
-    if (tags.map((tag) => tag.toLowerCase()).length !== new Set(tags.map((tag) => tag.toLowerCase())).size) {
-      result.errors.push('marketplace.tags contains duplicates.');
-    }
-    if (marketplace.license !== undefined) {
-      const license = stringField(marketplace, 'license').trim();
-      if (!license || license.length > 80) {
-        result.errors.push('marketplace.license must be 1-80 characters when provided.');
-      }
+  const tags = normalizeStringArray(value.tags, 'marketplace.tags', result);
+  if (tags.length > 5 || tags.some((tag) => tag.length > 20)) {
+    result.errors.push('marketplace.tags allows at most 5 unique values of 1-20 characters.');
+  }
+  if (value.license !== undefined) validateText(value.license, 'marketplace.license', 80, result);
+  if (value.screenshots !== undefined) {
+    if (!Array.isArray(value.screenshots) || value.screenshots.length > 8) {
+      result.errors.push('marketplace.screenshots must be an array with at most 8 entries.');
+    } else {
+      value.screenshots.forEach((screenshot, index) => {
+        if (!isObject(screenshot)) {
+          result.errors.push(`marketplace.screenshots[${index}] must be an object.`);
+          return;
+        }
+        validateObjectShape(
+          screenshot,
+          `marketplace.screenshots[${index}]`,
+          new Set(['src', 'alt']),
+          new Set(['src', 'alt']),
+          result
+        );
+        validateAssetPath(screenshot.src, `marketplace.screenshots[${index}].src`, result);
+        validateText(screenshot.alt, `marketplace.screenshots[${index}].alt`, 160, result);
+      });
     }
   }
-  if (!Array.isArray(manifest.configuration)) {
-    result.errors.push('schema_version 3 configuration must be an array.');
+}
+
+function validateConfiguration(value, capabilities, schema, result) {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || !value.length) {
+    result.errors.push('configuration must be omitted when empty.');
     return;
   }
-  if (configuration.length > 32) result.errors.push('configuration cannot contain more than 32 entries.');
-  if (configuration.length && !requiredPermissions.includes('app.configuration.read')) {
-    result.errors.push('configuration requires app.configuration.read in permissions.required.');
+  if (value.length > 32) result.errors.push('configuration cannot contain more than 32 entries.');
+  if (!capabilities.includes('configuration.read@1')) {
+    result.errors.push('configuration requires configuration.read@1.');
   }
   const keys = [];
-  configuration.forEach((definition, index) => {
-    const prefix = `configuration[${index}]`;
-    if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
-      result.errors.push(`${prefix} must be an object.`);
+  value.forEach((definition, index) => {
+    if (!isObject(definition)) {
+      result.errors.push(`configuration[${index}] must be an object.`);
       return;
     }
-    const key = stringField(definition, 'key').trim();
+    validateObjectShape(
+      definition,
+      `configuration[${index}]`,
+      new Set(['key', 'label', 'description', 'type', 'required', 'default', 'options']),
+      new Set(['key', 'label', 'description', 'type', 'required']),
+      result
+    );
+    const key = validateText(
+      definition.key,
+      `configuration[${index}].key`,
+      64,
+      result,
+      /^[A-Z][A-Z0-9_]{0,63}$/
+    );
     keys.push(key);
-    if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(key)) result.errors.push(`${prefix}.key is invalid.`);
-    const label = stringField(definition, 'label').trim();
-    if (!label || label.length > 80) result.errors.push(`${prefix}.label must be 1-80 characters.`);
-    const description = stringField(definition, 'description').trim();
-    if (description.length > 240) result.errors.push(`${prefix}.description cannot exceed 240 characters.`);
-    const type = stringField(definition, 'type').trim().toLowerCase();
-    if (!manifestSchema.configurationTypes.includes(type)) result.errors.push(`${prefix}.type is unknown.`);
-    const options = definition.options === undefined ? [] : normalizeStringArray(definition.options, `${prefix}.options`, result);
-    if (type === 'select') {
-      if (!options.length || options.length > 20 || options.length !== new Set(options).size) {
-        result.errors.push(`${prefix}.options must contain 1-20 unique values for select.`);
-      }
-    } else if (options.length) {
-      result.errors.push(`${prefix}.options is only valid for select.`);
+    validateText(definition.label, `configuration[${index}].label`, 80, result);
+    if (typeof definition.description !== 'string' || definition.description.length > 240) {
+      result.errors.push(`configuration[${index}].description is invalid.`);
     }
-    if (type === 'secret' && definition.default !== undefined) result.errors.push(`${prefix}.default is forbidden for secret.`);
-    validateConfigurationDefault(definition.default, type, options, prefix, result);
-    if (typeof definition.required !== 'boolean') result.errors.push(`${prefix}.required must be a boolean.`);
+    if (!schema.configurationTypes.includes(definition.type)) {
+      result.errors.push(`configuration[${index}].type is unknown.`);
+    }
+    if (typeof definition.required !== 'boolean') {
+      result.errors.push(`configuration[${index}].required must be a boolean.`);
+    }
+    if (definition.type === 'secret' && definition.default !== undefined) {
+      result.errors.push(`configuration[${index}].default is forbidden for secret values.`);
+    }
   });
   const duplicates = keys.filter((key, index) => key && keys.indexOf(key) !== index);
-  if (duplicates.length) result.errors.push(`configuration contains duplicate keys: ${[...new Set(duplicates)].join(', ')}`);
-}
-
-function validateConfigurationDefault(value, type, options, prefix, result) {
-  if (value === undefined) return;
-  if (typeof value !== 'string') {
-    result.errors.push(`${prefix}.default must be a string.`);
-    return;
-  }
-  const normalized = value.trim();
-  if (type === 'number' && !Number.isFinite(Number(normalized))) result.errors.push(`${prefix}.default must be a number.`);
-  if (type === 'boolean' && !['true', 'false'].includes(normalized)) result.errors.push(`${prefix}.default must be true or false.`);
-  if (type === 'select' && !options.includes(normalized)) result.errors.push(`${prefix}.default must be one of its options.`);
-  if (type === 'url') {
-    try {
-      const url = new URL(normalized);
-      if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) throw new Error('invalid');
-    } catch {
-      result.errors.push(`${prefix}.default must be an HTTP/HTTPS URL.`);
-    }
+  if (duplicates.length) {
+    result.errors.push(`configuration contains duplicate keys: ${[...new Set(duplicates)].join(', ')}`);
   }
 }
 
-function readJson(file, result) {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch (error) {
-    result.errors.push(`Invalid JSON in ${file}: ${error.message}`);
-    return null;
+function validateText(value, field, maxLength, result, pattern) {
+  if (
+    typeof value !== 'string' ||
+    !value.trim() ||
+    value.length > maxLength ||
+    (pattern && !pattern.test(value))
+  ) {
+    result.errors.push(`${field} is invalid or exceeds ${maxLength} characters.`);
+    return '';
   }
+  return value;
 }
 
-function stringField(object, field) {
-  return typeof object[field] === 'string' ? object[field] : '';
+function validateAssetPath(value, field, result) {
+  const text = validateText(value, field, 240, result);
+  if (
+    text.startsWith('/') ||
+    text.includes('\\') ||
+    text.includes(':') ||
+    text.split('/').includes('..')
+  ) {
+    result.errors.push(`${field} must be a relative path inside dist/.`);
+    return '';
+  }
+  return text;
 }
 
 function normalizeStringArray(value, field, result) {
@@ -347,75 +471,58 @@ function normalizeStringArray(value, field, result) {
   }
   const normalized = [];
   value.forEach((item, index) => {
-    if (typeof item !== 'string') {
+    if (typeof item !== 'string' || !item.trim()) {
       result.errors.push(`${field}[${index}] must be a string.`);
       return;
     }
-    const text = item.trim();
-    if (!text) {
-      result.errors.push(`${field}[${index}] must be a non-empty string.`);
-      return;
-    }
-    normalized.push(text);
+    normalized.push(item.trim());
   });
-  if (normalized.length !== new Set(normalized).size) {
+  if (new Set(normalized).size !== normalized.length) {
     result.errors.push(`${field} contains duplicates.`);
   }
   return normalized;
 }
 
 function validateObjectShape(value, field, allowed, required, result) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isObject(value)) {
     result.errors.push(`${field} must be an object.`);
     return;
   }
-  const keys = Object.keys(value);
-  keys.filter((key) => !allowed.has(key)).forEach((key) => {
-    result.errors.push(`${field} contains unknown field: ${key}`);
-  });
-  [...required].filter((key) => !Object.prototype.hasOwnProperty.call(value, key)).forEach((key) => {
-    result.errors.push(`${field} is missing required field: ${key}`);
-  });
-}
-
-function validateAssetPath(value, field, result) {
-  if (typeof value !== 'string' || !value.trim()) {
-    result.errors.push(`${field} must be a non-empty relative path.`);
-    return '';
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) result.errors.push(`${field} contains unknown field: ${key}`);
   }
-  const raw = value.trim();
-  const normalized = raw.replace(/\\/g, '/').split('/').filter(Boolean).join('/');
-  if (raw.startsWith('/') || raw.includes('\\') || raw.includes(':') || normalized.split('/').includes('..')) {
-    result.errors.push(`${field} must be a relative path inside dist/ and cannot contain "..", backslash, URL, drive prefix, or absolute path.`);
+  for (const key of required) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) {
+      result.errors.push(`${field} is missing required field: ${key}`);
+    }
   }
-  return normalized;
 }
 
 function normalizeOrigin(value, result, field = 'origin', blockCampusHosts = true, allowDevelopmentOrigins = false) {
   try {
     const url = new URL(value);
     const host = url.hostname.toLowerCase();
-    const localDevelopmentOrigin =
+    const development =
       allowDevelopmentOrigins &&
       url.protocol === 'http:' &&
       ['localhost', '127.0.0.1', '[::1]', '::1'].includes(host);
     if (
-      (url.protocol !== 'https:' && !localDevelopmentOrigin) ||
+      (!development && url.protocol !== 'https:') ||
       url.username ||
       url.password ||
       url.search ||
       url.hash ||
-      (url.pathname && url.pathname !== '/')
+      url.pathname !== '/'
     ) {
       result.errors.push(`${field} entry must be an HTTPS origin without path/query/userinfo: ${value}`);
       return null;
     }
-    if (!localDevelopmentOrigin && isPrivateOrLocalHost(host)) {
+    if (!development && isPrivateOrLocalHost(host)) {
       result.errors.push(`${field} cannot include private, loopback, link-local, or local hosts: ${host}`);
       return null;
     }
-    if (blockCampusHosts && isCampusHost(host)) {
-      result.errors.push(`${field} cannot include campus service hosts; use campus.request: ${host}`);
+    if (blockCampusHosts && (CAMPUS_HOSTS.has(host) || host.endsWith('.bjtu.edu.cn'))) {
+      result.errors.push(`${field} cannot include campus service hosts; use campus.request@1: ${host}`);
       return null;
     }
     return `${url.protocol}//${url.host.toLowerCase()}`;
@@ -423,10 +530,6 @@ function normalizeOrigin(value, result, field = 'origin', blockCampusHosts = tru
     result.errors.push(`Invalid ${field} entry: ${value}`);
     return null;
   }
-}
-
-function isCampusHost(host) {
-  return CAMPUS_HOSTS.has(host) || host.endsWith('.bjtu.edu.cn');
 }
 
 function isPrivateOrLocalHost(host) {
@@ -440,22 +543,20 @@ function isPrivateOrLocalHost(host) {
     normalized === '::1'
   ) return true;
   if (normalized.includes(':')) {
-    const firstHextet = normalized.startsWith('::')
-      ? null
+    const first = normalized.startsWith('::')
+      ? Number.NaN
       : Number.parseInt(normalized.split(':', 1)[0], 16);
-    if (
-      Number.isInteger(firstHextet) &&
-      (
-        (firstHextet & 0xfe00) === 0xfc00 ||
-        (firstHextet & 0xffc0) === 0xfe80 ||
-        (firstHextet & 0xff00) === 0xff00
-      )
-    ) return true;
+    return !Number.isNaN(first) &&
+      ((first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00);
   }
   const parts = normalized.split('.').map(Number);
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
-  return parts[0] === 10 ||
+  if (parts.length !== 4 || parts.some((item) => !Number.isInteger(item) || item < 0 || item > 255)) {
+    return false;
+  }
+  return parts[0] === 0 ||
+    parts[0] === 10 ||
     parts[0] === 127 ||
+    (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) ||
     (parts[0] === 169 && parts[1] === 254) ||
     (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
     (parts[0] === 192 && parts[1] === 168) ||
@@ -463,34 +564,33 @@ function isPrivateOrLocalHost(host) {
 }
 
 function scanRemoteScripts(dist, result) {
-  walk(dist).filter((file) => ['.html', '.htm'].includes(path.extname(file).toLowerCase())).forEach((file) => {
+  for (const file of walk(dist).filter((item) => /\.html?$/i.test(item))) {
     const content = fs.readFileSync(file, 'utf8');
     if (/<script\b[^>]*\bsrc\s*=\s*["']https?:\/\//i.test(content)) {
-      result.errors.push(`${path.relative(dist, file)} loads remote executable JavaScript; v3 public artifacts must bundle scripts locally.`);
+      result.errors.push(`${path.relative(dist, file)} loads remote executable JavaScript.`);
     }
-  });
+  }
 }
 
 function scanIframeSandboxes(dist, frameOrigins, result) {
-  const declaredFrameOrigins = new Set(frameOrigins);
-  walk(dist).filter((file) => ['.html', '.htm'].includes(path.extname(file).toLowerCase())).forEach((file) => {
+  const declared = new Set(frameOrigins);
+  for (const file of walk(dist).filter((item) => /\.html?$/i.test(item))) {
     const content = fs.readFileSync(file, 'utf8');
     for (const match of content.matchAll(/<iframe\b[^>]*>/gi)) {
       const tag = match[0];
-      const src = /\bsrc\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1] || '';
-      const remoteOrigin = /^https?:\/\//i.test(src) ? normalizeOriginFromUrl(src) : null;
-      if (remoteOrigin && !declaredFrameOrigins.has(remoteOrigin)) {
-        result.errors.push(`${path.relative(dist, file)} embeds undeclared iframe origin ${remoteOrigin}.`);
+      const source = /\bsrc\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1] || '';
+      const origin = /^https?:\/\//i.test(source) ? originFromUrl(source) : null;
+      if (origin && !declared.has(origin)) {
+        result.errors.push(`${path.relative(dist, file)} embeds undeclared iframe origin ${origin}.`);
       }
-      if (!remoteOrigin) continue;
-      const hasSandbox = /\bsandbox(?:\s|=|>)/i.test(tag);
-      const sandboxValue = /\bsandbox\s*=\s*["']([^"']*)["']/i.exec(tag)?.[1] || '';
-      if (!hasSandbox) {
+      if (!origin) continue;
+      const sandbox = /\bsandbox\s*=\s*["']([^"']*)["']/i.exec(tag)?.[1];
+      if (sandbox === undefined) {
         result.errors.push(`${path.relative(dist, file)} remote iframe must declare a sandbox attribute.`);
         continue;
       }
-      const tokens = new Set(sandboxValue.toLowerCase().split(/\s+/).filter(Boolean));
-      const unsafeTokens = [
+      const tokens = new Set(sandbox.toLowerCase().split(/\s+/).filter(Boolean));
+      const forbidden = [
         'allow-downloads',
         'allow-modals',
         'allow-popups',
@@ -499,37 +599,33 @@ function scanIframeSandboxes(dist, frameOrigins, result) {
         'allow-top-navigation',
         'allow-top-navigation-by-user-activation'
       ].filter((token) => tokens.has(token));
-      if (unsafeTokens.length) {
-        result.errors.push(
-          `${path.relative(dist, file)} remote iframe sandbox grants forbidden tokens: ${unsafeTokens.join(', ')}.`
-        );
+      if (forbidden.length) {
+        result.errors.push(`${path.relative(dist, file)} remote iframe sandbox grants forbidden tokens: ${forbidden.join(', ')}.`);
       }
-      const missingTokens = ['allow-scripts', 'allow-forms', 'allow-same-origin']
-        .filter((token) => !tokens.has(token));
-      if (missingTokens.length) {
-        result.errors.push(
-          `${path.relative(dist, file)} remote iframe sandbox must include ${missingTokens.join(', ')}.`
-        );
+      const missing = ['allow-scripts', 'allow-forms', 'allow-same-origin'].filter(
+        (token) => !tokens.has(token)
+      );
+      if (missing.length) {
+        result.errors.push(`${path.relative(dist, file)} remote iframe sandbox must include ${missing.join(', ')}.`);
       }
     }
-  });
+  }
 }
 
 function scanExternalOrigins(dist, allowedOrigins, result) {
-  walk(dist).forEach((file) => {
-    if (!TEXT_EXTENSIONS.has(path.extname(file).toLowerCase())) return;
+  for (const file of walk(dist)) {
+    if (!TEXT_EXTENSIONS.has(path.extname(file).toLowerCase())) continue;
     const content = fs.readFileSync(file, 'utf8');
-    const matches = content.matchAll(/https?:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/[^\s"'<>)]*)?/g);
-    for (const match of matches) {
-      const origin = normalizeOriginFromUrl(match[0]);
-      if (origin && !allowedOrigins.has(origin) && !IGNORED_REFERENCE_ORIGINS.has(origin)) {
+    for (const match of content.matchAll(/https?:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/[^\s"'<>)]*)?/g)) {
+      const origin = originFromUrl(match[0]);
+      if (origin && !allowedOrigins.has(origin)) {
         result.warnings.push(`${path.relative(dist, file)} references undeclared origin ${origin}.`);
       }
     }
-  });
+  }
 }
 
-function normalizeOriginFromUrl(value) {
+function originFromUrl(value) {
   try {
     const url = new URL(value);
     return `${url.protocol}//${url.host.toLowerCase()}`;
@@ -538,14 +634,64 @@ function normalizeOriginFromUrl(value) {
   }
 }
 
+function resolveInside(root, relative, field, result) {
+  const target = path.resolve(root, ...relative.split('/'));
+  const resolvedRoot = path.resolve(root);
+  if (target !== resolvedRoot && !target.startsWith(`${resolvedRoot}${path.sep}`)) {
+    result.errors.push(`${field} resolves outside dist/.`);
+    return null;
+  }
+  return target;
+}
+
+function resolveRepositoryRoot(value) {
+  const candidates = [
+    path.resolve(value),
+    path.resolve(value, '..'),
+    path.resolve(__dirname, '..')
+  ];
+  return candidates.find((candidate) =>
+    isFile(path.join(candidate, 'plugin-tooling', 'contracts', 'capability-contracts.json'))
+  ) || path.resolve(__dirname, '..');
+}
+
+function readJson(file, result) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    result.errors.push(`Invalid JSON in ${file}: ${error.message}`);
+    return null;
+  }
+}
+
+function isObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isFile(file) {
+  try {
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isDirectory(directory) {
+  try {
+    return fs.statSync(directory).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function walk(root) {
-  const out = [];
-  fs.readdirSync(root, { withFileTypes: true }).forEach((entry) => {
+  const output = [];
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     const fullPath = path.join(root, entry.name);
-    if (entry.isDirectory()) out.push(...walk(fullPath));
-    else if (entry.isFile()) out.push(fullPath);
-  });
-  return out;
+    if (entry.isDirectory()) output.push(...walk(fullPath));
+    else if (entry.isFile()) output.push(fullPath);
+  }
+  return output;
 }
 
 if (require.main === module) main();

@@ -38,16 +38,24 @@ data class ThirdPartyServiceEntity(
     val manifestJson: String,
     @ColumnInfo(name = "granted_permissions_json")
     val grantedPermissionsJson: String,
+    @ColumnInfo(name = "granted_capabilities_json")
+    val grantedCapabilitiesJson: String = "[]",
     @ColumnInfo(name = "allowed_origins_json")
     val allowedOriginsJson: String,
     @ColumnInfo(name = "publisher_subject_id")
     val publisherSubjectId: String = "",
     @ColumnInfo(name = "data_schema_version")
     val dataSchemaVersion: Int = 0,
+    @ColumnInfo(name = "runtime_profile")
+    val runtimeProfile: String = ThirdPartyRuntimeProfile.LegacyV1V2.value,
+    @ColumnInfo(name = "runtime_floor")
+    val runtimeFloor: Int = 0,
     @ColumnInfo(name = "compatibility_state")
     val compatibilityState: String = ThirdPartyCompatibilityState.LegacyDisabled.value,
     @ColumnInfo(name = "verification_level")
     val verificationLevel: String = "legacy",
+    @ColumnInfo(name = "marketplace_json")
+    val marketplaceJson: String? = null,
     @ColumnInfo(name = "previous_version_json")
     val previousVersionJson: String? = null,
     @ColumnInfo(name = "install_dir")
@@ -108,7 +116,7 @@ interface ThirdPartyServiceDao {
     @Query(
         """
         UPDATE third_party_services
-        SET granted_permissions_json = :grantedPermissionsJson,
+        SET granted_capabilities_json = :grantedCapabilitiesJson,
             enabled = :enabled,
             needs_review = :needsReview,
             updated_at = :updatedAt
@@ -117,7 +125,7 @@ interface ThirdPartyServiceDao {
     )
     suspend fun updateGrantState(
         serviceId: String,
-        grantedPermissionsJson: String,
+        grantedCapabilitiesJson: String,
         enabled: Boolean,
         needsReview: Boolean,
         updatedAt: String,

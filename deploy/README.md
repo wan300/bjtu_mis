@@ -7,9 +7,9 @@
 1. 将 `web/platform/.env.example` 复制到服务器 `/etc/bjtu-plugin-platform.env`，填写 GitHub OAuth、32 字节 AES-GCM 密钥、管理员 GitHub ID 和数据库密码；不要提交该文件。
 2. `/etc/bjtu-plugin-postgres-password` 只包含 PostgreSQL 密码，且必须与 `DATABASE_URL` 中的密码一致。
 3. 备份 PostgreSQL、插件 artifact 卷和当前 Nginx 配置，再运行 `docker compose -f deploy/docker-compose.plugins.yml up -d --build`。
-4. 安装 `deploy/nginx/bjtu.cc.conf` 后先执行 `nginx -t`，确认 `/api/v1/` 与 `/api/v2/` 只反代至 `127.0.0.1:15020`。
+4. 安装 `deploy/nginx/bjtu.cc.conf` 后先执行 `nginx -t`，确认 `/api/v1/`、`/api/v2/` 与 `/api/v3/` 只反代至 `127.0.0.1:15020`。
 
-Manifest v3 发布必须按顺序执行：先部署兼容的数据库 migration 与 `/api/v2`，再发布 Android v3 runtime，最后停止 v1/v2 投稿和更新解析。旧 `/api/v1` 目录与 artifact 只保留迁移期只读访问。
+contract_v1 发布必须按顺序执行：先部署 additive 数据库 migration、`/api/v3` 与对应 Nginx 路由，再发布 Android contract_v1 runtime。旧 `/api/v2` 只保留 P0-A 目录、详情与制品读取；旧 `/api/v1` 仅保留迁移期兼容。新 worker 只接受 `bjtu-plugin.json`，旧插件必须由作者迁移并通过 `/api/v3` 重新发布。
 
 回滚时恢复旧 Nginx 配置并停止插件 Compose 服务；Android 会自动退化到目录缓存与已安装插件。数据库和 artifact 卷应保留以便恢复。
 

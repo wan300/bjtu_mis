@@ -1,0 +1,29 @@
+:root {
+  color: #10233f;
+  background: #f4f7fb;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+main {
+  width: min(32rem, calc(100vw - 3rem));
+  padding: 2rem;
+  border: 1px solid #d7e0ec;
+  border-radius: 1rem;
+  background: white;
+  box-shadow: 0 1rem 3rem rgb(16 35 63 / 10%);
+}
+
+h1 {
+  margin-block: 1rem 0.5rem;
+}
+
+p {
+  color: #52647a;
+}

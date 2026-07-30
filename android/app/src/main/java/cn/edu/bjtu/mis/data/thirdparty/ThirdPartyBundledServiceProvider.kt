@@ -79,12 +79,22 @@ class AssetThirdPartyBundledServiceProvider(
     }
 
     private fun readManifest(packageRoot: File): ThirdPartyServiceManifest {
-        val manifestFile = File(packageRoot, "bjtu-service.json")
-        if (!manifestFile.isFile) throw ThirdPartyServiceException("内置第三方服务缺少 bjtu-service.json")
-        return ThirdPartyManifestValidator.decodeAndValidate(
+        val manifestFile = File(packageRoot, THIRD_PARTY_MANIFEST_FILE_NAME)
+        if (!manifestFile.isFile) {
+            throw ThirdPartyServiceException("内置插件缺少 $THIRD_PARTY_MANIFEST_FILE_NAME")
+        }
+        val manifest = ThirdPartyManifestValidator.decodeAndValidate(
             manifestFile.readText(Charsets.UTF_8),
             packageRoot,
         )
+        val marketplace = File(packageRoot, THIRD_PARTY_MARKETPLACE_FILE_NAME)
+            .takeIf(File::isFile)
+            ?.let {
+                ThirdPartyManifestValidator.decodeAndValidateMarketplace(
+                    it.readText(Charsets.UTF_8),
+                )
+            }
+        return ThirdPartyManifestValidator.attachMarketplace(manifest, marketplace)
     }
 
     private fun copyAssetTree(assetPath: String, target: File, root: File) {

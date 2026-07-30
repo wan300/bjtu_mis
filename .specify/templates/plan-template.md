@@ -2,7 +2,7 @@
 
 **Branch**: `[###-feature-name]`  
 **Spec**: [link-to-spec]  
-**Constitution Version**: 1.1.0
+**Constitution Version**: 1.2.0
 
 **Created**: [DATE]
 
@@ -32,7 +32,7 @@ Complete this check before implementation starts. Any FAIL must be resolved or d
 - Testing strategy: PASS/FAIL - parser fixtures, MockWebServer/fakes, Android JVM tests, Vitest, or Agent tool boundary tests match the change risk.
 - Dependencies and artifacts: PASS/FAIL - no unnecessary dependency or generated/local/secret artifact will be committed.
 - Rollback and ExecPlan: PASS/FAIL - high-risk changes have rollback steps and a maintained ExecPlan.
-- Plugin zero-trust baseline: PASS/FAIL/N/A - plugin work uses Manifest v3 only, stable publisher identity, self/main-frame bridge, split origins, transactional storage and the read-only campus registry; legacy documents are not treated as authority.
+- Plugin zero-trust baseline: PASS/FAIL/N/A - plugin work uses Manifest v3 / contract_v1, registry-generated versioned capabilities, stable publisher identity, host-fixed self/main-frame bridge, split origins, transactional storage and the read-only campus registry; legacy documents are not treated as authority.
 
 ## Design
 

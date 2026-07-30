@@ -1,10 +1,8 @@
 package cn.edu.bjtu.mis.data.thirdparty
 
-import cn.edu.bjtu.mis.data.AppJson
 import cn.edu.bjtu.mis.data.network.AppCookieJar
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.encodeToString
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
@@ -48,7 +46,7 @@ class ThirdPartyServiceInstallerTest {
     fun installsValidGithubZipPackage() = runBlocking {
         val root = temp.newFolder("services")
         val zip = serviceZip(
-            "repo-main/bjtu-service.json" to validManifest(),
+            "repo-main/$THIRD_PARTY_MANIFEST_FILE_NAME" to validManifest(),
             "repo-main/dist/index.html" to "<html></html>",
             "repo-main/dist/icon.svg" to "<svg></svg>",
         )
@@ -71,7 +69,7 @@ class ThirdPartyServiceInstallerTest {
     fun installsValidDirectoryPackage() = runBlocking {
         val root = temp.newFolder("services")
         val packageRoot = temp.newFolder("package-root")
-        File(packageRoot, "bjtu-service.json").writeText(validManifest())
+        File(packageRoot, THIRD_PARTY_MANIFEST_FILE_NAME).writeText(validManifest())
         File(packageRoot, "dist").mkdirs()
         File(packageRoot, "dist/index.html").writeText("<html></html>")
         File(packageRoot, "dist/icon.svg").writeText("<svg></svg>")
@@ -94,7 +92,7 @@ class ThirdPartyServiceInstallerTest {
     fun preparesStagingPackageBeforeCommit() = runBlocking {
         val root = temp.newFolder("services")
         val zip = serviceZip(
-            "repo-main/bjtu-service.json" to validManifest(),
+            "repo-main/$THIRD_PARTY_MANIFEST_FILE_NAME" to validManifest(),
             "repo-main/dist/index.html" to "<html></html>",
             "repo-main/dist/icon.svg" to "<svg></svg>",
         )
@@ -121,7 +119,7 @@ class ThirdPartyServiceInstallerTest {
     fun rejectsZipPathTraversal() {
         val root = temp.newFolder("services")
         val zip = serviceZip(
-            "repo-main/bjtu-service.json" to validManifest(),
+            "repo-main/$THIRD_PARTY_MANIFEST_FILE_NAME" to validManifest(),
             "repo-main/dist/index.html" to "<html></html>",
             "repo-main/dist/icon.svg" to "<svg></svg>",
             "../escape.txt" to "nope",
@@ -160,7 +158,7 @@ class ThirdPartyServiceInstallerTest {
     fun rejectsMissingDistEntrypoint() {
         val root = temp.newFolder("services")
         val zip = serviceZip(
-            "repo-main/bjtu-service.json" to validManifest(),
+            "repo-main/$THIRD_PARTY_MANIFEST_FILE_NAME" to validManifest(),
             "repo-main/dist/icon.svg" to "<svg></svg>",
         )
 
@@ -180,7 +178,7 @@ class ThirdPartyServiceInstallerTest {
     fun importsFromMockGithubApiAndPinsCommitSha() = runBlocking {
         MockWebServer().use { server ->
             val zip = serviceZip(
-                "repo-main/bjtu-service.json" to validManifest(),
+                "repo-main/$THIRD_PARTY_MANIFEST_FILE_NAME" to validManifest(),
                 "repo-main/dist/index.html" to "<html></html>",
                 "repo-main/dist/icon.svg" to "<svg></svg>",
             )
@@ -209,7 +207,7 @@ class ThirdPartyServiceInstallerTest {
         runBlocking {
             val root = temp.newFolder("services")
             val zip = serviceZip(
-                "repo-main/bjtu-service.json" to validManifest(),
+                "repo-main/$THIRD_PARTY_MANIFEST_FILE_NAME" to validManifest(),
                 "repo-main/dist/index.html" to "<html></html>",
                 "repo-main/dist/icon.svg" to "<svg></svg>",
             )
@@ -239,29 +237,23 @@ class ThirdPartyServiceInstallerTest {
         ThirdPartyServiceInstaller(BjtuHttpClient(AppCookieJar()), root)
 
     private fun validManifest(): String =
-        AppJson.encodeToString(
-            ThirdPartyServiceManifest(
-                schemaVersion = 3,
-                id = "bjtu.demo",
-                name = "Demo",
-                description = "Demo service",
-                version = "1.0.0",
-                runtimeVersion = 1,
-                minRuntimeVersion = 1,
-                requiredCapabilities = listOf("runtime.lifecycle.v1"),
-                dataSchemaVersion = 1,
-                entrypoint = "index.html",
-                icon = "icon.svg",
-                author = "Alice",
-                permissions = ThirdPartyServicePermissionDeclaration(
-                    required = listOf("identity.profile.read"),
-                    optional = listOf("academic.timetable.read"),
-                ),
-                connectOrigins = listOf("https://api.example.com"),
-                bridgeOrigins = listOf("self"),
-                marketplace = ThirdPartyMarketplaceMetadata(category = "other"),
-            )
-        )
+        """
+        {
+          "schema_version": 3,
+          "id": "bjtu.demo",
+          "name": "Demo",
+          "version": "1.0.0",
+          "entrypoint": "index.html",
+          "icon": "icon.svg",
+          "capabilities": {
+            "required": ["runtime.lifecycle@1", "network.request@1"],
+            "optional": ["identity.profile@1"]
+          },
+          "origins": {
+            "connect": ["https://api.example.com"]
+          }
+        }
+        """.trimIndent()
 
     private fun serviceZip(vararg entries: Pair<String, String>): File {
         val file = temp.newFile("service-${System.nanoTime()}.zip")

@@ -16,6 +16,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -339,6 +340,129 @@ class ThirdPartyServiceRepositoryTest {
         }
     }
 
+    @Test
+    fun legacyP0aUpgradePreservesStableOriginConfigurationKvAndBlobThenRollsBackToRescue() =
+        runBlocking {
+            MockWebServer().use { server ->
+                val configuration = listOf(
+                    ThirdPartyConfigurationDefinition(
+                        key = "TOKEN",
+                        label = "Token",
+                        type = "secret",
+                    ),
+                )
+                val oldManifest = validManifest(
+                    version = "1.0.0",
+                    configuration = configuration,
+                    extraOptionalCapabilities = listOf("storage.blob@1"),
+                )
+                val oldEntity = existingAuthorizedEntity().copy(
+                    manifestJson = oldManifest,
+                    runtimeProfile = ThirdPartyRuntimeProfile.LegacyV3P0a.value,
+                    compatibilityState = ThirdPartyCompatibilityState.LegacyDisabled.value,
+                    enabled = true,
+                    needsReview = false,
+                )
+                val dao = FakeThirdPartyServiceDao().apply {
+                    saved["bjtu.demo"] = oldEntity
+                }
+                val configurationStore = InMemoryThirdPartyConfigurationStore().apply {
+                    save("bjtu.demo", mapOf("TOKEN" to "preserved-secret"))
+                }
+                val kvStore = FileThirdPartyKvStore(
+                    temp.newFolder("legacy-p0a-kv"),
+                    PassthroughKvCipher,
+                )
+                val resourceStore = FileThirdPartyResourceStore(
+                    temp.newFolder("legacy-p0a-resources"),
+                    PassthroughKvCipher,
+                    limits = ThirdPartyResourceLimits(safetyBytes = 0),
+                )
+                val namespace = ThirdPartyKvNamespace("github-owner:12345", "bjtu.demo")
+                kvStore.set(namespace, "preserved", JsonPrimitive("yes"))
+                val blob = resourceStore.putBlob(
+                    namespace,
+                    ByteArrayInputStream("preserved-blob".toByteArray()),
+                    "text/plain",
+                )
+                val repository = repository(
+                    server = server,
+                    dao = dao,
+                    configurationStore = configurationStore,
+                    kvStore = kvStore,
+                    resourceStore = resourceStore,
+                )
+                val originBefore = ThirdPartyServiceSandbox.originFor(
+                    oldEntity.serviceId,
+                    oldEntity.publisherSubjectId,
+                )
+
+                val rescueOnly = repository.getService("bjtu.demo")!!
+                assertFalse(rescueOnly.canRun)
+
+                enqueueGithubPackage(
+                    server,
+                    manifest = validManifest(
+                        version = "2.0.0",
+                        configuration = configuration,
+                        extraOptionalCapabilities = listOf("storage.blob@1"),
+                    ),
+                )
+                val preview = repository.prepareImportFromGitHub("https://github.com/alice/demo")
+                val upgraded = repository.commitPreparedImport(preview.token).service
+
+                assertEquals(ThirdPartyRuntimeProfile.ContractV1.value, upgraded.runtimeProfile)
+                assertFalse(upgraded.enabled)
+                assertTrue(upgraded.needsReview)
+                assertEquals(originBefore, ThirdPartyServiceSandbox.originFor(
+                    upgraded.serviceId,
+                    upgraded.publisherSubjectId,
+                ))
+                assertEquals(
+                    mapOf("TOKEN" to "preserved-secret"),
+                    configurationStore.load("bjtu.demo"),
+                )
+                assertEquals(
+                    "yes",
+                    (kvStore.get(namespace, "preserved") as JsonPrimitive).content,
+                )
+                assertEquals(blob.handle, resourceStore.describe(namespace, blob.handle)?.handle)
+
+                val rolledBack = repository.rollbackService("bjtu.demo")
+
+                assertEquals(ThirdPartyRuntimeProfile.LegacyV3P0a.value, rolledBack.runtimeProfile)
+                assertFalse(rolledBack.canRun)
+                assertFalse(rolledBack.enabled)
+                assertTrue(rolledBack.needsReview)
+                assertEquals(
+                    "yes",
+                    (kvStore.get(namespace, "preserved") as JsonPrimitive).content,
+                )
+                assertEquals(blob.handle, resourceStore.describe(namespace, blob.handle)?.handle)
+            }
+        }
+
+    @Test
+    fun legacyV1V2CannotUpgradeInPlace() = runBlocking {
+        MockWebServer().use { server ->
+            val dao = FakeThirdPartyServiceDao().apply {
+                saved["bjtu.demo"] = existingAuthorizedEntity().copy(
+                    runtimeProfile = ThirdPartyRuntimeProfile.LegacyV1V2.value,
+                    compatibilityState = ThirdPartyCompatibilityState.LegacyDisabled.value,
+                    enabled = false,
+                )
+            }
+            val repository = repository(server, dao)
+            enqueueGithubPackage(server)
+
+            val result = runCatching {
+                repository.prepareImportFromGitHub("https://github.com/alice/demo")
+            }
+
+            assertTrue(result.isFailure)
+        }
+    }
+
     private fun repository(
         server: MockWebServer,
         dao: FakeThirdPartyServiceDao,
@@ -347,6 +471,7 @@ class ThirdPartyServiceRepositoryTest {
         configurationStore: ThirdPartyConfigurationStore = InMemoryThirdPartyConfigurationStore(),
         webStorageCleaner: ThirdPartyWebStorageCleaner = NoOpThirdPartyWebStorageCleaner,
         kvStore: ThirdPartyKvStore? = null,
+        resourceStore: ThirdPartyResourceStore? = null,
         migrationRunner: ThirdPartyDataMigrationRunner? = null,
     ): ThirdPartyServiceRepository =
         ThirdPartyServiceRepository(
@@ -360,6 +485,7 @@ class ThirdPartyServiceRepositoryTest {
             configurationStore = configurationStore,
             webStorageCleaner = webStorageCleaner,
             kvStore = kvStore,
+            resourceStore = resourceStore,
             migrationRunner = migrationRunner,
         )
 
@@ -370,7 +496,7 @@ class ThirdPartyServiceRepositoryTest {
         includeMigration: Boolean = false,
     ) {
         val entries = mutableListOf(
-            "repo-main/bjtu-service.json" to manifest,
+            "repo-main/$THIRD_PARTY_MANIFEST_FILE_NAME" to manifest,
             "repo-main/dist/index.html" to "<html></html>",
             "repo-main/dist/icon.svg" to "<svg></svg>",
         )
@@ -398,10 +524,15 @@ class ThirdPartyServiceRepositoryTest {
             packageDigestSha256 = "old-digest",
             manifestJson = validManifest(),
             grantedPermissionsJson = AppJson.encodeToString(listOf("identity.profile.read")),
+            grantedCapabilitiesJson = AppJson.encodeToString(
+                listOf("runtime.lifecycle@1", "identity.profile@1"),
+            ),
             allowedOriginsJson = AppJson.encodeToString(listOf("https://api.example.com")),
             publisherSubjectId = "github-owner:12345",
             dataSchemaVersion = 1,
-            compatibilityState = ThirdPartyCompatibilityState.Compatible.value,
+            runtimeProfile = ThirdPartyRuntimeProfile.ContractV1.value,
+            runtimeFloor = THIRD_PARTY_RUNTIME_VERSION,
+            compatibilityState = ThirdPartyRuntimeProfile.ContractV1.value,
             verificationLevel = "unverified",
             installDir = temp.newFolder("old-install-${System.nanoTime()}").absolutePath,
             entrypoint = "index.html",
@@ -416,29 +547,41 @@ class ThirdPartyServiceRepositoryTest {
         version: String = "1.0.0",
         dataSchemaVersion: Int = 1,
         migrationEntrypoint: String? = null,
+        configuration: List<ThirdPartyConfigurationDefinition> = emptyList(),
+        extraOptionalCapabilities: List<String> = emptyList(),
     ): String =
         AppJson.encodeToString(
             ThirdPartyServiceManifest(
                 schemaVersion = 3,
                 id = "bjtu.demo",
                 name = "Demo",
-                description = "Demo service",
                 version = version,
-                runtimeVersion = 1,
-                minRuntimeVersion = 1,
-                requiredCapabilities = listOf("runtime.lifecycle.v1"),
+                capabilities = ThirdPartyCapabilityDeclaration(
+                    required = buildList {
+                        add("runtime.lifecycle@1")
+                        add("identity.profile@1")
+                        if (configuration.isNotEmpty()) add("configuration.read@1")
+                    },
+                    optional = (
+                        listOf("academic.timetable@1", "storage.kv@2") +
+                            extraOptionalCapabilities
+                        ).distinct(),
+                ),
+                origins = ThirdPartyOriginDeclaration(
+                    connect = listOf("https://api.example.com"),
+                ),
                 dataSchemaVersion = dataSchemaVersion,
                 migrationEntrypoint = migrationEntrypoint,
+                configuration = configuration,
                 entrypoint = "index.html",
                 icon = "icon.svg",
+                description = "Demo service",
                 author = "Alice",
-                permissions = ThirdPartyServicePermissionDeclaration(
-                    required = listOf("identity.profile.read"),
-                    optional = listOf("academic.timetable.read"),
+                marketplace = ThirdPartyMarketplaceMetadata(
+                    description = "Demo service",
+                    author = "Alice",
+                    category = "other",
                 ),
-                connectOrigins = listOf("https://api.example.com"),
-                bridgeOrigins = listOf("self"),
-                marketplace = ThirdPartyMarketplaceMetadata(category = "other"),
             )
         )
 
@@ -478,21 +621,23 @@ private class FakeBundledProvider(
                         schemaVersion = 3,
                         id = "bjtu.bundled.demo",
                         name = "Bundled Demo",
-                        description = "Bundled demo service",
                         version = "1.0.0",
-                        runtimeVersion = 1,
-                        minRuntimeVersion = 1,
-                        requiredCapabilities = listOf("runtime.lifecycle.v1"),
+                        capabilities = ThirdPartyCapabilityDeclaration(
+                            required = listOf("runtime.lifecycle@1", "identity.profile@1"),
+                        ),
+                        origins = ThirdPartyOriginDeclaration(
+                            connect = listOf("https://api.example.com"),
+                        ),
                         dataSchemaVersion = 1,
                         entrypoint = "index.html",
                         icon = "icon.svg",
+                        description = "Bundled demo service",
                         author = "bundled-demo",
-                        permissions = ThirdPartyServicePermissionDeclaration(
-                            required = listOf("identity.profile.read"),
+                        marketplace = ThirdPartyMarketplaceMetadata(
+                            description = "Bundled demo service",
+                            author = "bundled-demo",
+                            category = "other",
                         ),
-                        connectOrigins = listOf("https://api.example.com"),
-                        bridgeOrigins = listOf("self"),
-                        marketplace = ThirdPartyMarketplaceMetadata(category = "other"),
                     ),
                     source = GitHubRepositoryRef(
                         owner = "bundled",
@@ -573,13 +718,13 @@ private class FakeThirdPartyServiceDao : ThirdPartyServiceDao {
 
     override suspend fun updateGrantState(
         serviceId: String,
-        grantedPermissionsJson: String,
+        grantedCapabilitiesJson: String,
         enabled: Boolean,
         needsReview: Boolean,
         updatedAt: String,
     ) {
         saved[serviceId] = saved.getValue(serviceId).copy(
-            grantedPermissionsJson = grantedPermissionsJson,
+            grantedCapabilitiesJson = grantedCapabilitiesJson,
             enabled = enabled,
             needsReview = needsReview,
             updatedAt = updatedAt,
