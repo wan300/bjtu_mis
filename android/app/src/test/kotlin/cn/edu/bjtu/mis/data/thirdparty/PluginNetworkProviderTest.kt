@@ -11,6 +11,7 @@ import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -210,6 +211,46 @@ class PluginNetworkProviderTest {
     }
 
     @Test
+    fun imageResponsesStayNativeResourceHandlesAndPromoteWithoutBase64() = runBlocking {
+        MockWebServer().use { server ->
+            val origin = testOrigin(server, "images.public.test")
+            val imageBytes = byteArrayOf(
+                0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+                1, 2, 3, 4,
+            )
+            server.enqueue(
+                MockResponse()
+                    .setHeader("Content-Type", "image/png")
+                    .setBody(okio.Buffer().write(imageBytes)),
+            )
+            val resources = resourceStore()
+            val service = service(origin)
+            val response = testProvider(resources = resources).execute(
+                service,
+                request("$origin/avatar.png", requestId = "image-1"),
+            )
+
+            assertNull(response.text)
+            assertNull(response.json)
+            val handle = requireNotNull(response.resource)
+            assertEquals("image/png", handle.mediaType)
+            val promoted = resources.promoteCache(
+                ThirdPartyKvNamespace(service.publisherSubjectId, service.serviceId),
+                handle.handle,
+                "avatars/current",
+            )
+            assertEquals(handle.handle, promoted.handle)
+            assertArrayEquals(
+                imageBytes,
+                resources.open(
+                    ThirdPartyKvNamespace(service.publisherSubjectId, service.serviceId),
+                    promoted.handle,
+                ).input.use { it.readBytes() },
+            )
+        }
+    }
+
+    @Test
     fun requestBodiesAcceptBlobHandlesButRejectCacheHandles() = runBlocking {
         val resources = resourceStore()
         val service = service("https://api.example.com")
@@ -269,9 +310,12 @@ class PluginNetworkProviderTest {
             limits = ThirdPartyResourceLimits(safetyBytes = 0),
         )
 
-    private fun testProvider(baseClient: OkHttpClient = OkHttpClient()): PluginNetworkProvider =
+    private fun testProvider(
+        baseClient: OkHttpClient = OkHttpClient(),
+        resources: ThirdPartyResourceStore = resourceStore(),
+    ): PluginNetworkProvider =
         PluginNetworkProvider.forTests(
-            resourceStore = resourceStore(),
+            resourceStore = resources,
             baseClient = baseClient,
             resolver = object : Dns {
                 override fun lookup(hostname: String): List<InetAddress> =

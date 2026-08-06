@@ -88,6 +88,7 @@ import cn.edu.bjtu.mis.R
 import cn.edu.bjtu.mis.data.provider.SessionValidationPolicy
 import cn.edu.bjtu.mis.data.repository.ModuleLoadStrategy
 import cn.edu.bjtu.mis.data.sync.SessionKeepAliveForegroundService
+import cn.edu.bjtu.mis.data.thirdparty.THIRD_PARTY_DIAGNOSTICS_ROUTE
 import cn.edu.bjtu.mis.data.thirdparty.THIRD_PARTY_SERVICES_ROUTE
 import cn.edu.bjtu.mis.data.thirdparty.thirdPartyServiceIdFromRoute
 import cn.edu.bjtu.mis.data.update.AppUpdateInfo
@@ -119,6 +120,7 @@ import cn.edu.bjtu.mis.ui.screens.ScoresScreen
 import cn.edu.bjtu.mis.ui.screens.ServicesScreen
 import cn.edu.bjtu.mis.ui.screens.TeachingAssessmentScreen
 import cn.edu.bjtu.mis.ui.screens.ThirdPartyServiceRoute
+import cn.edu.bjtu.mis.ui.screens.ThirdPartyRuntimeDiagnosticsScreen
 import cn.edu.bjtu.mis.ui.screens.ThirdPartyServicesScreen
 import cn.edu.bjtu.mis.ui.screens.TimetableScreen
 import cn.edu.bjtu.mis.ui.screens.ZhixingScreen
@@ -591,7 +593,9 @@ fun BjtuMisApp(
                         repository = container.thirdPartyServiceRepository,
                         catalogRepository = container.thirdPartyCatalogRepository,
                         onOpenService = ::navigateModule,
+                        onOpenDiagnostics = { navigateModule(THIRD_PARTY_DIAGNOSTICS_ROUTE) },
                     )
+                    THIRD_PARTY_DIAGNOSTICS_ROUTE -> ThirdPartyRuntimeDiagnosticsScreen()
                     ModuleKeys.OpenWebUiAgent -> Unit
                     ModuleKeys.Profile -> MainScreenPadding {
                         ProfileScreen(
@@ -676,6 +680,7 @@ fun BjtuMisApp(
                     thirdPartyServiceIdFromRoute(current) != null &&
                         thirdPartyServiceBackHandler?.invoke() == true -> Unit
                     thirdPartyServiceIdFromRoute(current) != null -> current = THIRD_PARTY_SERVICES_ROUTE
+                    current == THIRD_PARTY_DIAGNOSTICS_ROUTE -> current = THIRD_PARTY_SERVICES_ROUTE
                     current == RouteHomeworkDetail -> closeHomeworkDetail()
                     current !in MainRoutes -> current = mainTab
                     current != RouteHome -> navigateMain(RouteHome)
@@ -775,6 +780,10 @@ fun BjtuMisApp(
                         current == THIRD_PARTY_SERVICES_ROUTE -> DetailTitleBar(
                             title = "第三方服务",
                             onBack = { current = RouteServices },
+                        )
+                        current == THIRD_PARTY_DIAGNOSTICS_ROUTE -> DetailTitleBar(
+                            title = "插件运行环境诊断",
+                            onBack = { current = THIRD_PARTY_SERVICES_ROUTE },
                         )
                         thirdPartyServiceIdFromRoute(current) != null -> {
                             if (
@@ -1089,7 +1098,7 @@ internal fun AppBottomBar(
                     unselectedTextColor = colorScheme.onSurfaceVariant,
                 ),
                 icon = {
-                    if (isClassic && tab.imageRes != null) {
+                    if (tab.imageRes != null) {
                         Image(
                             painter = painterResource(tab.imageRes),
                             contentDescription = null,
@@ -1145,11 +1154,21 @@ internal fun AppNavigationRail(
                 selected = selected,
                 onClick = { onSelect(tab.route) },
                 icon = {
-                    Icon(
-                        imageVector = tab.icon.materialIcon(),
-                        contentDescription = null,
-                        modifier = Modifier.size(25.dp),
-                    )
+                    if (tab.imageRes != null) {
+                        Image(
+                            painter = painterResource(tab.imageRes),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .alpha(if (selected) 1f else 0.48f),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = tab.icon.materialIcon(),
+                            contentDescription = null,
+                            modifier = Modifier.size(25.dp),
+                        )
+                    }
                 },
                 label = {
                     Text(

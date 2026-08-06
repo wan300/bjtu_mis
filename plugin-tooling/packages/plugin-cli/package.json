@@ -1,6 +1,6 @@
 {
   "name": "@bjtu-mis/plugin-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CLI for creating, validating, testing and packing BJTU MIS plugins",
   "license": "MIT",
   "type": "module",
@@ -24,7 +24,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@bjtu-mis/plugin-sdk": "0.1.0"
+    "@bjtu-mis/plugin-sdk": "0.2.0"
   },
   "engines": {
     "node": ">=20 <=22"

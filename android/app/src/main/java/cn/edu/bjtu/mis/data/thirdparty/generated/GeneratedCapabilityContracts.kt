@@ -315,7 +315,7 @@ object GeneratedCapabilityContracts {
             timeoutMs = 60000L,
             maxTimeoutMs = 60000L,
             androidMinApi = 26,
-            webViewFeatures = setOf("WEB_MESSAGE_ARRAY_BUFFER"),
+            webViewFeatures = setOf(),
         ),
         GeneratedCapabilityDescriptor(
             id = "cache.resource@1",
@@ -330,7 +330,7 @@ object GeneratedCapabilityContracts {
             timeoutMs = 60000L,
             maxTimeoutMs = 60000L,
             androidMinApi = 26,
-            webViewFeatures = setOf("WEB_MESSAGE_ARRAY_BUFFER"),
+            webViewFeatures = setOf(),
         ),
         GeneratedCapabilityDescriptor(
             id = "academic.userCourses.command@1",
@@ -389,11 +389,11 @@ object GeneratedCapabilityContracts {
             propertyTypes = mapOf("sdkVersion" to "string"),
             additionalProperties = false,
             responseType = "object",
-            responseRequiredFields = setOf("protocolVersion", "contractProfile", "runtimeFloor", "availableCapabilities"),
-            responsePropertyTypes = mapOf("protocolVersion" to "integer", "contractProfile" to "string", "runtimeFloor" to "integer", "availableCapabilities" to "array", "binaryTransport" to "boolean"),
+            responseRequiredFields = setOf("protocolVersion", "contractProfile", "runtimeFloor", "availableCapabilities", "binaryTransports"),
+            responsePropertyTypes = mapOf("protocolVersion" to "integer", "contractProfile" to "string", "runtimeFloor" to "integer", "availableCapabilities" to "array", "binaryTransports" to "array", "preferredBinaryTransport" to "string"),
             responseAdditionalProperties = false,
             requestSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"sdkVersion\"],\"properties\":{\"sdkVersion\":{\"type\":\"string\"}}}").jsonObject,
-            responseSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"protocolVersion\",\"contractProfile\",\"runtimeFloor\",\"availableCapabilities\"],\"properties\":{\"protocolVersion\":{\"type\":\"integer\"},\"contractProfile\":{\"type\":\"string\"},\"runtimeFloor\":{\"type\":\"integer\"},\"availableCapabilities\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"binaryTransport\":{\"type\":\"boolean\"}}}").jsonObject,
+            responseSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"protocolVersion\",\"contractProfile\",\"runtimeFloor\",\"availableCapabilities\",\"binaryTransports\"],\"properties\":{\"protocolVersion\":{\"type\":\"integer\"},\"contractProfile\":{\"type\":\"string\"},\"runtimeFloor\":{\"type\":\"integer\"},\"availableCapabilities\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"binaryTransports\":{\"type\":\"array\",\"uniqueItems\":true,\"items\":{\"type\":\"string\",\"enum\":[\"arraybuffer\",\"base64url-chunks-v1\"]}},\"preferredBinaryTransport\":{\"type\":\"string\",\"enum\":[\"arraybuffer\",\"base64url-chunks-v1\"]}}}").jsonObject,
             errors = setOf("request_timeout", "capability_unavailable"),
         ),
         "runtime.lifecycle@1#ready" to GeneratedCapabilityRoute(

@@ -52,7 +52,7 @@ export const CAPABILITY_IDS = [
 export type CapabilityId = (typeof CAPABILITY_IDS)[number];
 
 export interface CapabilityMethodMap {
-  "runtime.lifecycle@1#handshake": { request: { "sdkVersion": string }; response: { "protocolVersion": number; "contractProfile": string; "runtimeFloor": number; "availableCapabilities": Array<string>; "binaryTransport"?: boolean } };
+  "runtime.lifecycle@1#handshake": { request: { "sdkVersion": string }; response: { "protocolVersion": number; "contractProfile": string; "runtimeFloor": number; "availableCapabilities": Array<string>; "binaryTransports": Array<"arraybuffer" | "base64url-chunks-v1">; "preferredBinaryTransport"?: "arraybuffer" | "base64url-chunks-v1" } };
   "runtime.lifecycle@1#ready": { request: Record<string, never>; response: { "ready": boolean } };
   "runtime.lifecycle@1#close": { request: Record<string, never>; response: { "closed": boolean } };
   "configuration.read@1#get": { request: { "key": string }; response: { "value": string | null } };
@@ -119,7 +119,8 @@ export const CAPABILITY_MOCK_RESPONSES = {
     "protocolVersion": 0,
     "contractProfile": "example",
     "runtimeFloor": 0,
-    "availableCapabilities": []
+    "availableCapabilities": [],
+    "binaryTransports": []
   },
   "runtime.lifecycle@1#ready": {
     "ready": false
@@ -1451,7 +1452,8 @@ export const CAPABILITY_REGISTRY = {
               "protocolVersion",
               "contractProfile",
               "runtimeFloor",
-              "availableCapabilities"
+              "availableCapabilities",
+              "binaryTransports"
             ],
             "properties": {
               "protocolVersion": {
@@ -1469,8 +1471,23 @@ export const CAPABILITY_REGISTRY = {
                   "type": "string"
                 }
               },
-              "binaryTransport": {
-                "type": "boolean"
+              "binaryTransports": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "arraybuffer",
+                    "base64url-chunks-v1"
+                  ]
+                }
+              },
+              "preferredBinaryTransport": {
+                "type": "string",
+                "enum": [
+                  "arraybuffer",
+                  "base64url-chunks-v1"
+                ]
               }
             }
           },
@@ -2726,9 +2743,7 @@ export const CAPABILITY_REGISTRY = {
       "timeoutMs": 60000,
       "support": {
         "androidMinApi": 26,
-        "webViewFeatures": [
-          "WEB_MESSAGE_ARRAY_BUFFER"
-        ]
+        "webViewFeatures": []
       },
       "methods": [
         {
@@ -2824,9 +2839,7 @@ export const CAPABILITY_REGISTRY = {
       "timeoutMs": 60000,
       "support": {
         "androidMinApi": 26,
-        "webViewFeatures": [
-          "WEB_MESSAGE_ARRAY_BUFFER"
-        ]
+        "webViewFeatures": []
       },
       "methods": [
         {

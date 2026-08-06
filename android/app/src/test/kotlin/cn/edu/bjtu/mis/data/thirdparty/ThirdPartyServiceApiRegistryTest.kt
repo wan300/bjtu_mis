@@ -46,9 +46,10 @@ class ThirdPartyServiceApiRegistryTest {
             service = service,
             capability = "runtime.lifecycle@1",
             method = "handshake",
-            params = buildJsonObject { put("sdkVersion", "0.1.0") },
+            params = buildJsonObject { put("sdkVersion", "0.2.0") },
             confirmer = allowAll,
             currentPageUrl = ThirdPartyServiceSandbox.entrypointUrlFor(service),
+            runtimeEnvironment = modernWebViewEnvironment(),
         )
 
         assertTrue(response["ok"]!!.jsonPrimitive.content.toBoolean())
@@ -62,9 +63,18 @@ class ThirdPartyServiceApiRegistryTest {
                 "contractProfile",
                 "runtimeFloor",
                 "availableCapabilities",
-                "binaryTransport",
+                "binaryTransports",
+                "preferredBinaryTransport",
             ),
             result.keys,
+        )
+        assertEquals(
+            "[\"arraybuffer\",\"base64url-chunks-v1\"]",
+            result["binaryTransports"].toString(),
+        )
+        assertEquals(
+            "arraybuffer",
+            result["preferredBinaryTransport"]!!.jsonPrimitive.content,
         )
         assertTrue(
             ThirdPartyCapabilityRegistry.validateResponse(
@@ -72,6 +82,45 @@ class ThirdPartyServiceApiRegistryTest {
                 "handshake",
                 result,
             ).isEmpty(),
+        )
+    }
+
+    private fun modernWebViewEnvironment() = PluginWebViewRuntimeEnvironment(
+        providerPackageName = "com.android.webview",
+        providerVersionName = "130.0.0.0",
+        documentStartScriptSupported = true,
+        webMessageListenerSupported = true,
+        webMessageArrayBufferSupported = true,
+    )
+
+    @Test
+    fun handshakeOffersCompatibilityModeWithoutArrayBuffer() = runBlocking {
+        val service = service(
+            required = setOf("runtime.lifecycle@1"),
+            granted = setOf("runtime.lifecycle@1"),
+        )
+        val response = registry().invoke(
+            service = service,
+            capability = "runtime.lifecycle@1",
+            method = "handshake",
+            params = buildJsonObject { put("sdkVersion", "0.2.0") },
+            confirmer = allowAll,
+            currentPageUrl = ThirdPartyServiceSandbox.entrypointUrlFor(service),
+            runtimeEnvironment = modernWebViewEnvironment().copy(
+                providerPackageName = "com.huawei.webview",
+                providerVersionName = "114.0.5.302",
+                webMessageArrayBufferSupported = false,
+            ),
+        )
+
+        val result = response["result"]!!.jsonObject
+        assertEquals(
+            "[\"base64url-chunks-v1\"]",
+            result["binaryTransports"].toString(),
+        )
+        assertEquals(
+            "base64url-chunks-v1",
+            result["preferredBinaryTransport"]!!.jsonPrimitive.content,
         )
     }
 

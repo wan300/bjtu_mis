@@ -37,6 +37,7 @@ data class PluginCapabilityCall(
     val closePlugin: () -> Unit,
     val eventSink: (PluginRuntimeEvent) -> Unit,
     val requestId: String,
+    val runtimeEnvironment: PluginWebViewRuntimeEnvironment,
 )
 
 interface PluginCapabilityProvider {

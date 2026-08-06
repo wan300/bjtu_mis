@@ -202,9 +202,25 @@ SDK 内部 protocol v2 请求为：
 且仅接受该 origin 的 main-frame 消息。`bridge_origins` 是宿主固定为 self 的不变量，
 不是作者声明。远程 frame、popup 和导航目标永远无法获得桥。
 
-二进制使用分块 ArrayBuffer，不使用 Base64。缺少
-`WEB_MESSAGE_ARRAY_BUFFER` 时，依赖它的 required Capability fail closed；optional
-Capability 报 `capability_unavailable`。
+二进制写入必须先完成 `runtime.lifecycle@1#handshake`。宿主返回
+`binaryTransports` 与可选 `preferredBinaryTransport`：支持
+`WEB_MESSAGE_ARRAY_BUFFER` 的 WebView 同时提供 `arraybuffer` 和
+`base64url-chunks-v1` 并首选前者；缺少 ArrayBuffer feature 但仍具备核心安全桥能力时，
+只提供 Base64URL 兼容模式。只有缺少 `DOCUMENT_START_SCRIPT` 或
+`WEB_MESSAGE_LISTENER` 才彻底拒绝运行。
+
+私有二进制声明固定为 `{ transport, size, chunks, sha256 }`。ArrayBuffer 使用
+256 KiB 原始分片；兼容模式使用 RFC 4648 URL-safe、无 `=` 填充的 48 KiB 原始
+分片，并等待逐片 ACK 后再发送下一片。宿主逐片严格解码、更新 SHA-256 并写入
+app-private 临时文件，不在内存聚合完整编码或完整二进制。Blob/Cache 上传继续受
+item/plugin/global 配额、60 秒 deadline、最多四并发、64 MiB 磁盘安全余量和取消/
+异常/关闭/下次启动清理约束。旧 SDK 的非二进制调用仍可使用；缺少 transport 或
+SHA-256 的旧 Blob/Cache 写入会被拒绝并提示升级到 SDK 0.2.0。
+
+网络图片及其他下载响应继续走
+`network.request resource → native resource handle → cache.promote`，不得绕经
+JavaScript/Base64。兼容分片仅用于插件生成的 Blob、元数据备份和少量必须由 JS
+上传的数据。
 
 每个生成的 capability deadline 同时由 SDK 与 Android 宿主执行。插件可在
 `InvokeOptions.timeoutMs` 中缩短 deadline，但不能超过契约上限；超出 deadline

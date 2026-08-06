@@ -394,4 +394,5 @@ fun thirdPartyServiceIdFromRoute(route: String): String? =
         ?.takeIf { it.isNotBlank() }
 
 const val THIRD_PARTY_SERVICES_ROUTE = "third_party_services"
+const val THIRD_PARTY_DIAGNOSTICS_ROUTE = "third_party_diagnostics"
 const val THIRD_PARTY_SERVICE_ROUTE_PREFIX = "third_party_service/"

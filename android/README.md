@@ -66,6 +66,12 @@ API 与兼容说明。
   bridge 只注入稳定本地 origin 的 main frame，并要求精确 source-origin 匹配。
 - WebView 同时支持 `DOCUMENT_START_SCRIPT` 与 `WEB_MESSAGE_LISTENER` 才允许运行 contract_v1；
   不使用 `onPageFinished` 降级注入。
+- `WEB_MESSAGE_ARRAY_BUFFER` 可用时握手提供 ArrayBuffer 与 Base64URL 两种二进制模式并
+  首选 ArrayBuffer；缺失时使用 48 KiB、无填充、逐片 ACK 的 Base64URL 兼容模式，不因此
+  关闭插件。插件管理中的导入预检和“插件运行环境诊断”页实时显示 WebView provider、版本、
+  三项 feature 与协商模式。
+- 插件生成的 Blob/Cache 数据逐片校验 SHA-256 并写 app-private 临时文件；网络图片继续由
+  原生 `network.request` 资源 handle 直接 `cache.promote`，不进入 JavaScript/Base64。
 - connect/media/frame/navigation origin 独立声明；bridge origin 由宿主固定为 self，
   禁止出现在 Manifest；
   远程 frame 无桥、第三方 Cookie、顶层导航、下载、弹窗或多窗口。

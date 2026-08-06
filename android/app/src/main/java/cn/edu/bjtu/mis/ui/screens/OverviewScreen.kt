@@ -906,7 +906,7 @@ private fun QuickActionItem(
                     fallbackTint = tint,
                     contentPadding = 2.dp,
                 )
-            } else if (!isApple && action.imageRes != null) {
+            } else if (action.imageRes != null) {
                 Image(
                     painter = painterResource(action.imageRes),
                     contentDescription = null,
@@ -1014,6 +1014,12 @@ internal fun QuickActionsEditorDialog(
                                     containerColor = Color.Transparent,
                                     fallbackTint = themedTint(action.tint),
                                     contentPadding = 2.dp,
+                                )
+                            } else if (action.imageRes != null) {
+                                Image(
+                                    painter = painterResource(action.imageRes),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(26.dp),
                                 )
                             } else {
                                 Icon(
@@ -1136,6 +1142,12 @@ private fun QuickActionEditorRow(
                     containerColor = Color.Transparent,
                     fallbackTint = themedTint(action.tint),
                     contentPadding = 2.dp,
+                )
+            } else if (action.imageRes != null) {
+                Image(
+                    painter = painterResource(action.imageRes),
+                    contentDescription = null,
+                    modifier = Modifier.size(26.dp),
                 )
             } else {
                 Icon(
@@ -1425,7 +1437,7 @@ private fun ServiceTile(entry: ServiceEntry, modifier: Modifier = Modifier, onCl
                     fallbackTint = tint,
                     contentPadding = 2.dp,
                 )
-            } else if (!isApple && entry.imageRes != null) {
+            } else if (entry.imageRes != null) {
                 Image(
                     painter = painterResource(entry.imageRes),
                     contentDescription = null,

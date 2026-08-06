@@ -5,7 +5,8 @@
     "network": "online",
     "quota": "normal",
     "lifecycle": "active",
-    "binary_supported": true
+    "binary_transports": ["arraybuffer", "base64url-chunks-v1"],
+    "preferred_binary_transport": "arraybuffer"
   },
   "hmr": {
     "host": "127.0.0.1",

@@ -60,6 +60,7 @@ import cn.edu.bjtu.mis.data.thirdparty.FileThirdPartyKvStore
 import cn.edu.bjtu.mis.data.thirdparty.FileThirdPartyResourceStore
 import cn.edu.bjtu.mis.data.thirdparty.FilePluginCommandReceiptStore
 import cn.edu.bjtu.mis.data.thirdparty.PluginNetworkProvider
+import cn.edu.bjtu.mis.data.thirdparty.PluginBinaryStagingManager
 import cn.edu.bjtu.mis.data.thirdparty.AndroidThirdPartyWebStorageCleaner
 import cn.edu.bjtu.mis.data.thirdparty.WebViewThirdPartyDataMigrationRunner
 import cn.edu.bjtu.mis.data.update.AppUpdateChecker
@@ -71,6 +72,13 @@ import cn.edu.bjtu.mis.ui.theme.AppThemeStore
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
     private val thirdPartyServicesRoot = java.io.File(appContext.filesDir, "third-party-services")
+
+    init {
+        PluginBinaryStagingManager.cleanupOrphans(
+            java.io.File(appContext.cacheDir, "plugin-bridge"),
+        )
+    }
+
     val database: AppDatabase = PerfTrace.measure("AppContainer.database") {
         Room.databaseBuilder(
             appContext,

@@ -28,11 +28,12 @@ class PluginRuntimeHost(
     fun attach(webView: WebView): Boolean {
         attachedWebView = webView
         PluginWebViewPolicy.configure(webView)
+        val runtimeEnvironment = PluginWebViewPolicy.runtimeEnvironment()
         if (!service.canRun) {
             renderError(webView, "插件未完成 contract_v1 授权，只能进入数据救援。")
             return false
         }
-        if (!PluginWebViewPolicy.supportsSecureTransport()) {
+        if (!runtimeEnvironment.secureRuntimeAvailable) {
             renderError(
                 webView,
                 "系统 WebView 缺少 DOCUMENT_START_SCRIPT 或 WEB_MESSAGE_LISTENER；运行时已安全关闭。",
@@ -40,7 +41,7 @@ class PluginRuntimeHost(
             return false
         }
         val unavailableRequired =
-            PluginWebViewPolicy.unavailableRequiredCapabilities(service)
+            PluginWebViewPolicy.unavailableRequiredCapabilities(service, runtimeEnvironment)
         if (unavailableRequired.isNotEmpty()) {
             renderError(
                 webView,
@@ -72,6 +73,7 @@ class PluginRuntimeHost(
                 webView.context.cacheDir,
                 "plugin-bridge/${ThirdPartyServiceSandbox.hostFor(service.serviceId, service.publisherSubjectId)}",
             ),
+            runtimeEnvironment = runtimeEnvironment,
         )
         transport = bridge
         lifecycle = PluginLifecycleDispatcher(service, bridge, kvStore, scope).also { it.start() }
@@ -85,7 +87,9 @@ class PluginRuntimeHost(
             webView,
             PluginWebViewPolicy.managedStorageGuardScript() +
                 "\n" +
-                BridgeTransport.documentStartScript(PluginWebViewPolicy.supportsArrayBuffer()),
+                BridgeTransport.documentStartScript(
+                    runtimeEnvironment.webMessageArrayBufferSupported,
+                ),
             setOf(localOrigin),
         )
         WebViewCompat.addWebMessageListener(

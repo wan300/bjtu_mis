@@ -589,7 +589,8 @@
               "protocolVersion",
               "contractProfile",
               "runtimeFloor",
-              "availableCapabilities"
+              "availableCapabilities",
+              "binaryTransports"
             ],
             "properties": {
               "protocolVersion": {
@@ -607,8 +608,23 @@
                   "type": "string"
                 }
               },
-              "binaryTransport": {
-                "type": "boolean"
+              "binaryTransports": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "arraybuffer",
+                    "base64url-chunks-v1"
+                  ]
+                }
+              },
+              "preferredBinaryTransport": {
+                "type": "string",
+                "enum": [
+                  "arraybuffer",
+                  "base64url-chunks-v1"
+                ]
               }
             }
           },
@@ -1781,9 +1797,7 @@
       "timeoutMs": 60000,
       "support": {
         "androidMinApi": 26,
-        "webViewFeatures": [
-          "WEB_MESSAGE_ARRAY_BUFFER"
-        ]
+        "webViewFeatures": []
       },
       "methods": [
         {
@@ -1879,9 +1893,7 @@
       "timeoutMs": 60000,
       "support": {
         "androidMinApi": 26,
-        "webViewFeatures": [
-          "WEB_MESSAGE_ARRAY_BUFFER"
-        ]
+        "webViewFeatures": []
       },
       "methods": [
         {

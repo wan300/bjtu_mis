@@ -65,7 +65,8 @@ Response schema:
     "protocolVersion",
     "contractProfile",
     "runtimeFloor",
-    "availableCapabilities"
+    "availableCapabilities",
+    "binaryTransports"
   ],
   "properties": {
     "protocolVersion": {
@@ -83,8 +84,23 @@ Response schema:
         "type": "string"
       }
     },
-    "binaryTransport": {
-      "type": "boolean"
+    "binaryTransports": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "arraybuffer",
+          "base64url-chunks-v1"
+        ]
+      }
+    },
+    "preferredBinaryTransport": {
+      "type": "string",
+      "enum": [
+        "arraybuffer",
+        "base64url-chunks-v1"
+      ]
     }
   }
 }

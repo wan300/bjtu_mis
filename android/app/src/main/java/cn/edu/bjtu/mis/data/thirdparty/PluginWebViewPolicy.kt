@@ -7,6 +7,57 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.webkit.WebViewFeature
 
+enum class PluginBinaryTransport(
+    val wireName: String,
+    val chunkBytes: Int,
+) {
+    ArrayBuffer("arraybuffer", 256 * 1024),
+    Base64UrlChunksV1("base64url-chunks-v1", 48 * 1024),
+    ;
+
+    companion object {
+        fun fromWireName(value: String?): PluginBinaryTransport? =
+            entries.firstOrNull { it.wireName == value }
+    }
+}
+
+data class PluginWebViewRuntimeEnvironment(
+    val providerPackageName: String,
+    val providerVersionName: String,
+    val documentStartScriptSupported: Boolean,
+    val webMessageListenerSupported: Boolean,
+    val webMessageArrayBufferSupported: Boolean,
+) {
+    val secureRuntimeAvailable: Boolean
+        get() = documentStartScriptSupported && webMessageListenerSupported
+
+    val binaryTransports: List<PluginBinaryTransport>
+        get() = when {
+            !secureRuntimeAvailable -> emptyList()
+            webMessageArrayBufferSupported -> listOf(
+                PluginBinaryTransport.ArrayBuffer,
+                PluginBinaryTransport.Base64UrlChunksV1,
+            )
+            else -> listOf(PluginBinaryTransport.Base64UrlChunksV1)
+        }
+
+    val preferredBinaryTransport: PluginBinaryTransport?
+        get() = binaryTransports.firstOrNull()
+
+    val providerDisplay: String
+        get() = listOf(providerPackageName, providerVersionName)
+            .filter(String::isNotBlank)
+            .joinToString(" ")
+            .ifBlank { "unknown" }
+
+    val binaryTransportDisplay: String
+        get() = when (preferredBinaryTransport) {
+            PluginBinaryTransport.ArrayBuffer -> "ArrayBuffer"
+            PluginBinaryTransport.Base64UrlChunksV1 -> "Base64URL compatibility mode"
+            null -> "Unavailable"
+        }
+}
+
 object PluginWebViewPolicy {
     @SuppressLint("SetJavaScriptEnabled")
     fun configure(webView: WebView) {
@@ -39,26 +90,39 @@ object PluginWebViewPolicy {
         }
     }
 
-    fun supportsSecureTransport(): Boolean =
-        runCatching {
-            WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) &&
-                WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
-        }.getOrDefault(false)
+    fun runtimeEnvironment(): PluginWebViewRuntimeEnvironment {
+        val provider = runCatching { WebView.getCurrentWebViewPackage() }.getOrNull()
+        return PluginWebViewRuntimeEnvironment(
+            providerPackageName = provider?.packageName.orEmpty(),
+            providerVersionName = provider?.versionName.orEmpty(),
+            documentStartScriptSupported = supportsFeature(WebViewFeature.DOCUMENT_START_SCRIPT),
+            webMessageListenerSupported = supportsFeature(WebViewFeature.WEB_MESSAGE_LISTENER),
+            webMessageArrayBufferSupported = supportsFeature(
+                WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER,
+            ),
+        )
+    }
 
-    fun supportsArrayBuffer(): Boolean =
-        runCatching {
-            WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER)
-        }.getOrDefault(false)
+    fun supportsSecureTransport(): Boolean = runtimeEnvironment().secureRuntimeAvailable
 
-    fun unavailableRequiredCapabilities(service: ThirdPartyService): Set<String> =
+    fun supportsArrayBuffer(): Boolean = runtimeEnvironment().webMessageArrayBufferSupported
+
+    fun unavailableRequiredCapabilities(
+        service: ThirdPartyService,
+        environment: PluginWebViewRuntimeEnvironment = runtimeEnvironment(),
+    ): Set<String> =
         service.manifest.requiredCapabilities.filterTo(linkedSetOf()) { capability ->
             ThirdPartyCapabilityRegistry.requiredWebViewFeatures(capability).any { feature ->
-                !supportsFeature(feature)
+                !supportsFeature(feature, environment)
             }
         }
 
-    fun isCapabilityAvailable(capability: String): Boolean =
-        ThirdPartyCapabilityRegistry.requiredWebViewFeatures(capability).all(::supportsFeature)
+    fun isCapabilityAvailable(
+        capability: String,
+        environment: PluginWebViewRuntimeEnvironment = runtimeEnvironment(),
+    ): Boolean = ThirdPartyCapabilityRegistry.requiredWebViewFeatures(capability).all { feature ->
+        supportsFeature(feature, environment)
+    }
 
     fun securityHeaders(
         manifest: ThirdPartyServiceManifest,
@@ -157,16 +221,16 @@ object PluginWebViewPolicy {
         })();
     """.trimIndent()
 
-    private fun supportsFeature(feature: String): Boolean = when (feature) {
-        "DOCUMENT_START_SCRIPT" ->
-            runCatching {
-                WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
-            }.getOrDefault(false)
-        "WEB_MESSAGE_LISTENER" ->
-            runCatching {
-                WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
-            }.getOrDefault(false)
-        "WEB_MESSAGE_ARRAY_BUFFER" -> supportsArrayBuffer()
+    private fun supportsFeature(
+        feature: String,
+        environment: PluginWebViewRuntimeEnvironment,
+    ): Boolean = when (feature) {
+        "DOCUMENT_START_SCRIPT" -> environment.documentStartScriptSupported
+        "WEB_MESSAGE_LISTENER" -> environment.webMessageListenerSupported
+        "WEB_MESSAGE_ARRAY_BUFFER" -> environment.webMessageArrayBufferSupported
         else -> false
     }
+
+    private fun supportsFeature(feature: String): Boolean =
+        runCatching { WebViewFeature.isFeatureSupported(feature) }.getOrDefault(false)
 }

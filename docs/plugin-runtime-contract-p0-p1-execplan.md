@@ -9,6 +9,11 @@
 > `docs/plugin-platform-manifest-v3-p0a-execplan.md`。旧 P0-A 计划仅用于历史追踪与
 > 无桥数据救援；冲突时以 constitution 1.2.0、本计划、Capability Contract Registry
 > 和生成的 schema 为准。
+>
+> **后续修订（2026-08-05）：** 本计划中“仅 ArrayBuffer、缺少
+> `WEB_MESSAGE_ARRAY_BUFFER` 即关闭二进制 capability、禁止 Base64 fallback”的条款
+> 已由 `docs/plugin-binary-transport-compat-execplan.md` 取代。稳定 self origin、main
+> frame/source-origin、配额、超时、摘要和临时文件安全边界继续有效。
 
 ## 1. Purpose and user-visible outcome
 
@@ -66,7 +71,7 @@
 
 - 宿主拆分为 `PluginRuntimeHost`、`BridgeTransport`、`CapabilityRegistry/Provider`、`PluginWebViewPolicy`、`PluginLifecycleDispatcher`、`PluginResourceServer`、`PluginNavigationController` 和脱敏 `PluginDiagnostics`。
 - protocol v2 使用 camelCase、独立 `capability`/`method`、统一错误、取消与订阅。SDK 不公开 `window.BjtuService` 或底层 transport。
-- 只有稳定本地 origin 的 main frame 获得桥；远程 frame 无桥。缺少 `WEB_MESSAGE_ARRAY_BUFFER` 时 required 二进制 Capability fail closed，optional 标记 unavailable。
+- 只有稳定本地 origin 的 main frame 获得桥；远程 frame 无桥。~~缺少 `WEB_MESSAGE_ARRAY_BUFFER` 时 required 二进制 Capability fail closed，optional 标记 unavailable。~~ 此 ArrayBuffer-only 条款已由 `docs/plugin-binary-transport-compat-execplan.md` 取代。
 - debug source set 可在用户显式开启后把稳定 origin 的 HTTP/HMR WebSocket 转发到 adb reverse loopback；release source set 不含入口。
 
 ### 4.5 Capability providers
@@ -179,7 +184,7 @@
 - P0-A v3 只能救援；同 subject + ID 的 contract_v1 原位升级保留配置、KV、Blob 与 stable origin。
 - 远程 frame 永无桥；公网请求不携带宿主会话并阻止 SSRF。
 - `AbortSignal` 能取消请求，进度事件可订阅；大响应返回 handle。
-- 资源在离线状态支持 GET/HEAD/Range；缺少 ArrayBuffer 支持时按 required/optional fail closed。
+- 资源在离线状态支持 GET/HEAD/Range；原 ArrayBuffer required/optional fail-closed 验收已由兼容传输计划取代。
 - KV 竞争通过 revision/CAS/transaction 不丢更新。
 - 相同 idempotency key 与相同摘要返回原回执；不同摘要返回 `idempotency_conflict`。
 - 任何生成物手改漂移阻塞 CI。
@@ -245,7 +250,7 @@
 - 平台先部署 additive migration 与 `/api/v3`，再发布新客户端；旧客户端继续读取冻结 `/api/v2`，不会看到新插件。
 - Android 更新失败恢复上一 contract_v1 包、授权、KV 与 Blob 索引；若上一包是 P0-A，则只恢复救援状态。
 - 资源索引或删除失败保留加密数据与 tombstone，后续重试；不得报告虚假成功。
-- WebView/ArrayBuffer 能力缺失时 fail closed，不使用 Base64 或不安全桥 fallback。
+- ~~WebView/ArrayBuffer 能力缺失时 fail closed，不使用 Base64 或不安全桥 fallback。~~ 已被后续兼容传输计划取代；当前只对两个核心安全 feature fail closed，Base64URL v1 是受约束的协商通道。
 - 如生成器或 registry 回滚，必须连同全部生成物回滚；禁止只回滚单一语言输出。
 
 ## 14. Completion checklist

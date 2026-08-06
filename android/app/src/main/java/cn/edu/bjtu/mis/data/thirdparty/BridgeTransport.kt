@@ -1,6 +1,7 @@
 package cn.edu.bjtu.mis.data.thirdparty
 
 import android.net.Uri
+import android.os.SystemClock
 import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
@@ -10,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -21,16 +23,13 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
-import java.io.BufferedOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 private const val MAX_BRIDGE_JSON_BYTES = 512 * 1024
-private const val BINARY_CHUNK_BYTES = 256 * 1024
-private const val MAX_PENDING_BINARY_REQUESTS = 4
 
 class BridgeTransport(
     private val service: ThirdPartyService,
@@ -41,13 +40,18 @@ class BridgeTransport(
     private val closePlugin: () -> Unit,
     private val diagnostics: PluginDiagnostics,
     private val binaryDirectory: File,
+    private val runtimeEnvironment: PluginWebViewRuntimeEnvironment =
+        PluginWebViewPolicy.runtimeEnvironment(),
+    private val nowMillis: () -> Long = SystemClock::elapsedRealtime,
 ) {
     private val jobs = ConcurrentHashMap<String, Job>()
-    private val binaryRequests = ConcurrentHashMap<String, PendingBinaryRequest>()
+    private val binaryTimeoutJobs = ConcurrentHashMap<String, Job>()
+    private val binaryStaging = PluginBinaryStagingManager<PluginBridgeRequest>(binaryDirectory)
     private val eventAcknowledgements =
         ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     @Volatile private var awaitingChunk: PendingChunkHeader? = null
     @Volatile private var eventReplyProxy: JavaScriptReplyProxy? = null
+    @Volatile private var negotiatedBinaryTransport: PluginBinaryTransport? = null
 
     fun onMessage(
         view: WebView,
@@ -75,7 +79,7 @@ class BridgeTransport(
             WebMessageCompat.TYPE_STRING ->
                 handleString(message.data.orEmpty(), sourceOrigin.toString(), replyProxy)
             WebMessageCompat.TYPE_ARRAY_BUFFER ->
-                handleArrayBuffer(message.arrayBuffer ?: ByteArray(0))
+                handleArrayBuffer(message.arrayBuffer ?: ByteArray(0), replyProxy)
             else -> diagnostics.record("warning", "bridge_rejected", code = "invalid_request")
         }
     }
@@ -139,8 +143,9 @@ class BridgeTransport(
     fun close() {
         jobs.values.forEach(Job::cancel)
         jobs.clear()
-        binaryRequests.values.forEach(PendingBinaryRequest::discard)
-        binaryRequests.clear()
+        binaryTimeoutJobs.values.forEach(Job::cancel)
+        binaryTimeoutJobs.clear()
+        binaryStaging.close()
         eventAcknowledgements.values.forEach { it.complete(false) }
         eventAcknowledgements.clear()
         awaitingChunk = null
@@ -162,11 +167,24 @@ class BridgeTransport(
                 postError(replyProxy, "", "invalid_request", "Bridge request is not valid JSON")
                 return
             }
-        val protocolVersion = envelope["protocolVersion"]?.jsonPrimitive?.intOrNull
-        val kind = envelope["kind"]?.jsonPrimitive?.contentOrNull
-        val requestId = envelope["requestId"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val protocolVersion = envelope.strictInt("protocolVersion")
+        val kind = envelope.strictString("kind")
+        val requestId = envelope.strictString("requestId").orEmpty()
         if (protocolVersion != THIRD_PARTY_BRIDGE_PROTOCOL_VERSION || !validRequestId(requestId)) {
-            postError(replyProxy, requestId, "invalid_request", "Invalid bridge envelope")
+            if (
+                kind == "binaryChunk" &&
+                validRequestId(requestId) &&
+                binaryStaging.transportFor(requestId) != null
+            ) {
+                failBinaryRequest(
+                    requestId,
+                    replyProxy,
+                    "invalid_request",
+                    "Invalid binary chunk envelope",
+                )
+            } else {
+                postError(replyProxy, requestId, "invalid_request", "Invalid bridge envelope")
+            }
             return
         }
         when (kind) {
@@ -175,7 +193,7 @@ class BridgeTransport(
                 return
             }
             "eventAck" -> {
-                val handled = envelope["handled"]?.jsonPrimitive?.booleanOrNull
+                val handled = envelope.strictBoolean("handled")
                 val acknowledgement = eventAcknowledgements[requestId]
                 if (handled == null || acknowledgement == null) {
                     diagnostics.record(
@@ -192,18 +210,12 @@ class BridgeTransport(
                 return
             }
             "binaryChunk" -> {
-                val index = envelope["index"]?.jsonPrimitive?.intOrNull
-                val last = envelope["last"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
-                if (index == null || last == null || awaitingChunk != null) {
-                    postError(replyProxy, requestId, "invalid_request", "Invalid binary chunk header")
-                    return
-                }
-                awaitingChunk = PendingChunkHeader(requestId, index, last)
+                handleBinaryChunkEnvelope(envelope, requestId, replyProxy)
                 return
             }
         }
-        val capability = envelope["capability"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        val method = envelope["method"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val capability = envelope.strictString("capability").orEmpty()
+        val method = envelope.strictString("method").orEmpty()
         val params = envelope["params"] as? JsonObject
         if (
             capability.isBlank() ||
@@ -215,13 +227,17 @@ class BridgeTransport(
             postError(replyProxy, requestId, "invalid_request", "Invalid capability request")
             return
         }
-        if (!PluginWebViewPolicy.isCapabilityAvailable(capability)) {
+        if (!PluginWebViewPolicy.isCapabilityAvailable(capability, runtimeEnvironment)) {
             postError(
                 replyProxy,
                 requestId,
                 "capability_unavailable",
                 "Required WebView feature is unavailable",
             )
+            return
+        }
+        if (jobs.containsKey(requestId) || binaryStaging.transportFor(requestId) != null) {
+            postError(replyProxy, requestId, "invalid_request", "Duplicate active request ID")
             return
         }
         val request = PluginBridgeRequest(
@@ -231,172 +247,248 @@ class BridgeTransport(
             params,
             callerUrl,
             replyProxy,
+            deadlineAtMillis = null,
         )
         val binary = envelope["binary"] as? JsonObject
         if (binary == null) {
             execute(request, null)
             return
         }
-        if (!PluginWebViewPolicy.supportsArrayBuffer()) {
+        val transportName = binary.strictString("transport")
+        val transport = PluginBinaryTransport.fromWireName(transportName)
+        val sha256 = binary.strictString("sha256")
+        if (transport == null || sha256 == null) {
             postError(
                 replyProxy,
                 requestId,
                 "capability_unavailable",
-                "ArrayBuffer transport is unavailable",
+                "Legacy binary declarations are unsupported; upgrade @bjtu-mis/plugin-sdk to 0.2.0",
             )
             return
         }
-        val size = binary["size"]?.jsonPrimitive?.intOrNull
-        val chunks = binary["chunks"]?.jsonPrimitive?.intOrNull
+        val negotiated = negotiatedBinaryTransport
+        if (negotiated == null) {
+            postError(
+                replyProxy,
+                requestId,
+                "capability_unavailable",
+                "Binary transport is not negotiated; call runtime.lifecycle@1#handshake first",
+            )
+            return
+        }
+        if (transport != negotiated || transport !in runtimeEnvironment.binaryTransports) {
+            postError(
+                replyProxy,
+                requestId,
+                "invalid_request",
+                "Binary declaration does not match the negotiated transport",
+            )
+            return
+        }
+        if (
+            method != "put" ||
+            capability !in setOf("storage.blob@1", "cache.resource@1")
+        ) {
+            postError(replyProxy, requestId, "invalid_request", "Binary payload is not allowed for this route")
+            return
+        }
+        if (capability !in service.manifest.requiredCapabilities + service.manifest.optionalCapabilities) {
+            postError(replyProxy, requestId, "capability_unavailable", "Plugin did not declare capability")
+            return
+        }
+        if (capability !in service.grantedCapabilities) {
+            postError(replyProxy, requestId, "permission_denied", "Plugin capability is not granted")
+            return
+        }
+        val size = binary.strictLong("size")
+        val chunks = binary.strictInt("chunks")
         val maxBytes = when (capability) {
-            "storage.blob@1" -> THIRD_PARTY_BLOB_ITEM_BYTES.toInt()
-            "cache.resource@1" -> THIRD_PARTY_CACHE_ITEM_BYTES.toInt()
-            else -> 0
+            "storage.blob@1" -> THIRD_PARTY_BLOB_ITEM_BYTES
+            else -> THIRD_PARTY_CACHE_ITEM_BYTES
         }
         if (
             size == null ||
             chunks == null ||
-            size < 0 ||
-            size > maxBytes ||
-            chunks != (size + BINARY_CHUNK_BYTES - 1) / BINARY_CHUNK_BYTES
+            params.strictLong("size") != size ||
+            ThirdPartyCapabilityRegistry.validateRequest(capability, method, params).isNotEmpty()
         ) {
             postError(replyProxy, requestId, "invalid_request", "Invalid binary declaration")
             return
         }
-        if (binaryRequests.size >= MAX_PENDING_BINARY_REQUESTS) {
-            postError(replyProxy, requestId, "quota_exceeded", "Too many pending binary requests")
-            return
-        }
-        if (!binaryDirectory.isDirectory && !binaryDirectory.mkdirs()) {
-            postError(
-                replyProxy,
-                requestId,
-                "capability_unavailable",
-                "Unable to create binary staging directory",
+        val binaryRequest = request.copy(deadlineAtMillis = capabilityDeadlineAt(capability))
+        val result = try {
+            binaryStaging.begin(
+                requestId = requestId,
+                owner = binaryRequest,
+                declaration = PluginBinaryDeclaration(
+                    transport = transport,
+                    size = size,
+                    chunks = chunks,
+                    sha256 = sha256,
+                ),
+                itemLimitBytes = maxBytes,
             )
+        } catch (error: PluginBinaryStagingException) {
+            postError(replyProxy, requestId, error.code, error.message)
             return
         }
-        val reservedBytes = binaryRequests.values.sumOf { pending ->
-            (pending.expectedSize - pending.writtenBytes).toLong()
-        }
-        if (
-            binaryDirectory.usableSpace - reservedBytes - size <
-            THIRD_PARTY_RESOURCE_SAFETY_BYTES
-        ) {
-            postError(
-                replyProxy,
-                requestId,
-                "quota_exceeded",
-                "Binary staging would consume the device safety reserve",
-            )
-            return
-        }
-        val pending = runCatching {
-            PendingBinaryRequest.create(
-                request,
-                size,
-                chunks,
-                binaryDirectory,
-            )
-        }.getOrElse {
-            postError(
-                replyProxy,
-                requestId,
-                "capability_unavailable",
-                "Unable to create binary staging file",
-            )
-            return
-        }
-        if (binaryRequests.putIfAbsent(requestId, pending) != null) {
-            pending.discard()
-            postError(replyProxy, requestId, "invalid_request", "Duplicate binary request")
-            return
-        }
-        if (size == 0) {
-            binaryRequests.remove(requestId)
-            val payload = runCatching { pending.finish() }
-                .getOrElse {
-                    pending.discard()
-                    postError(
-                        pending.request.replyProxy,
-                        requestId,
-                        "capability_unavailable",
-                        "Unable to finalize empty binary payload",
-                    )
-                    return
-                }
-            execute(pending.request, payload)
+        when (result) {
+            is PluginBinaryStagingResult.Pending -> scheduleBinaryTimeout(result.owner)
+            is PluginBinaryStagingResult.Complete -> execute(result.owner, result.payload)
         }
     }
 
-    private fun handleArrayBuffer(bytes: ByteArray) {
+    private fun handleBinaryChunkEnvelope(
+        envelope: JsonObject,
+        requestId: String,
+        replyProxy: JavaScriptReplyProxy,
+    ) {
+        val index = envelope.strictInt("index")
+        val last = envelope.strictBoolean("last")
+        val transport = binaryStaging.transportFor(requestId)
+        if (index == null || last == null || transport == null) {
+            failBinaryRequest(
+                requestId,
+                replyProxy,
+                "invalid_request",
+                "Invalid or unknown binary chunk header",
+            )
+            return
+        }
+        if (transport == PluginBinaryTransport.ArrayBuffer) {
+            if (envelope["payload"] != null || awaitingChunk != null) {
+                failBinaryRequest(
+                    requestId,
+                    replyProxy,
+                    "invalid_request",
+                    "Invalid ArrayBuffer chunk sequence",
+                )
+                return
+            }
+            awaitingChunk = PendingChunkHeader(requestId, index, last)
+            return
+        }
+        val payload = envelope.strictString("payload")
+        if (payload == null) {
+            failBinaryRequest(
+                requestId,
+                replyProxy,
+                "invalid_request",
+                "Base64URL compatibility chunks require a string payload",
+            )
+            return
+        }
+        val result = try {
+            binaryStaging.receiveBase64Url(requestId, index, last, payload)
+        } catch (error: PluginBinaryStagingException) {
+            failBinaryRequest(requestId, replyProxy, error.code, error.message)
+            return
+        }
+        handleBinaryStagingResult(requestId, result)
+    }
+
+    private fun handleArrayBuffer(
+        bytes: ByteArray,
+        replyProxy: JavaScriptReplyProxy,
+    ) {
         val header = awaitingChunk.also { awaitingChunk = null } ?: run {
             diagnostics.record("warning", "binary_rejected", code = "invalid_request")
             return
         }
-        val pending = binaryRequests[header.requestId] ?: return
-        if (
-            header.index != pending.nextChunk ||
-            bytes.isEmpty() ||
-            bytes.size > BINARY_CHUNK_BYTES ||
-            pending.writtenBytes + bytes.size > pending.expectedSize
-        ) {
-            binaryRequests.remove(header.requestId)?.discard()
-            postError(
-                pending.request.replyProxy,
+        val result = try {
+            binaryStaging.receiveArrayBuffer(
                 header.requestId,
-                "invalid_request",
-                "Invalid binary chunk sequence",
+                header.index,
+                header.last,
+                bytes,
             )
+        } catch (error: PluginBinaryStagingException) {
+            failBinaryRequest(header.requestId, replyProxy, error.code, error.message)
             return
         }
-        runCatching { pending.write(bytes) }.onFailure {
-            binaryRequests.remove(header.requestId)?.discard()
-            postError(
-                pending.request.replyProxy,
-                header.requestId,
-                "capability_unavailable",
-                "Unable to stage binary payload",
+        handleBinaryStagingResult(header.requestId, result)
+    }
+
+    private fun handleBinaryStagingResult(
+        requestId: String,
+        result: PluginBinaryStagingResult<PluginBridgeRequest>,
+    ) {
+        if (result.acknowledgeChunk) {
+            postChunkAcknowledgement(
+                result.owner.replyProxy,
+                requestId,
+                requireNotNull(result.acceptedChunkIndex),
             )
-            return
         }
-        pending.nextChunk += 1
-        val complete = header.last || pending.nextChunk == pending.expectedChunks
-        if (complete) {
-            binaryRequests.remove(header.requestId)
-            if (
-                !header.last ||
-                pending.writtenBytes != pending.expectedSize ||
-                pending.nextChunk != pending.expectedChunks
-            ) {
-                pending.discard()
-                postError(
-                    pending.request.replyProxy,
-                    header.requestId,
-                    "invalid_request",
-                    "Incomplete binary payload",
-                )
-            } else {
-                val payload = runCatching { pending.finish() }
-                    .getOrElse {
-                        pending.discard()
-                        postError(
-                            pending.request.replyProxy,
-                            header.requestId,
-                            "capability_unavailable",
-                            "Unable to finalize binary payload",
-                        )
-                        return
-                    }
-                execute(pending.request, payload)
-            }
+        if (result is PluginBinaryStagingResult.Complete) {
+            execute(result.owner, result.payload)
         }
     }
 
+    private fun scheduleBinaryTimeout(request: PluginBridgeRequest) {
+        val deadline = request.deadlineAtMillis ?: return
+        val timeoutJob = scope.launch {
+            delay((deadline - nowMillis()).coerceAtLeast(1L))
+            if (binaryStaging.cancel(request.requestId)) {
+                if (awaitingChunk?.requestId == request.requestId) awaitingChunk = null
+                postError(
+                    request.replyProxy,
+                    request.requestId,
+                    "request_timeout",
+                    "Binary upload exceeded its generated capability deadline",
+                )
+            }
+        }
+        binaryTimeoutJobs.put(request.requestId, timeoutJob)?.cancel()
+        timeoutJob.invokeOnCompletion {
+            binaryTimeoutJobs.remove(request.requestId, timeoutJob)
+        }
+    }
+
+    private fun failBinaryRequest(
+        requestId: String,
+        replyProxy: JavaScriptReplyProxy,
+        code: String,
+        message: String,
+    ) {
+        binaryStaging.cancel(requestId)
+        binaryTimeoutJobs.remove(requestId)?.cancel()
+        if (awaitingChunk?.requestId == requestId) awaitingChunk = null
+        postError(replyProxy, requestId, code, message)
+    }
+
+    private fun postChunkAcknowledgement(
+        replyProxy: JavaScriptReplyProxy,
+        requestId: String,
+        index: Int,
+    ) {
+        scope.launch(Dispatchers.Main.immediate) {
+            replyProxy.postMessage(
+                buildJsonObject {
+                    put("protocolVersion", THIRD_PARTY_BRIDGE_PROTOCOL_VERSION)
+                    put("kind", "binaryChunkAck")
+                    put("requestId", requestId)
+                    put("index", index)
+                }.toString(),
+            )
+        }
+    }
+
+    private fun capabilityDeadlineAt(capability: String): Long? {
+        val timeoutMs = ThirdPartyCapabilityRegistry.get(capability)?.timeoutMs ?: return null
+        if (timeoutMs <= 0L) return null
+        val now = nowMillis()
+        return if (timeoutMs > Long.MAX_VALUE - now) Long.MAX_VALUE else now + timeoutMs
+    }
+
     private fun execute(request: PluginBridgeRequest, binary: PluginBinaryPayload?) {
-        val startedAt = System.currentTimeMillis()
+        binaryTimeoutJobs.remove(request.requestId)?.cancel()
+        val startedAt = SystemClock.elapsedRealtime()
         val job = scope.launch {
             try {
+                val remainingTimeoutMs = request.deadlineAtMillis?.let { deadline ->
+                    (deadline - nowMillis()).coerceAtLeast(0L)
+                }
                 val response = apiRegistry.invoke(
                     service = service,
                     capability = request.capability,
@@ -409,8 +501,20 @@ class BridgeTransport(
                     closePlugin = closePlugin,
                     eventSink = ::sendEvent,
                     requestId = request.requestId,
+                    runtimeEnvironment = runtimeEnvironment,
+                    timeoutMsOverride = remainingTimeoutMs,
                 )
                 val ok = response["ok"]?.jsonPrimitive?.contentOrNull == "true"
+                if (
+                    request.capability == "runtime.lifecycle@1" &&
+                    request.method == "handshake"
+                ) {
+                    negotiatedBinaryTransport = if (ok) {
+                        runtimeEnvironment.preferredBinaryTransport
+                    } else {
+                        null
+                    }
+                }
                 diagnostics.record(
                     if (ok) "info" else "warning",
                     "capability_invoke",
@@ -421,7 +525,7 @@ class BridgeTransport(
                         ?.get("code")
                         ?.jsonPrimitive
                         ?.contentOrNull,
-                    durationMs = System.currentTimeMillis() - startedAt,
+                    durationMs = SystemClock.elapsedRealtime() - startedAt,
                 )
                 withContext(Dispatchers.Main.immediate) {
                     request.replyProxy.postMessage(
@@ -440,7 +544,9 @@ class BridgeTransport(
     }
 
     private fun cancelRequest(requestId: String) {
-        binaryRequests.remove(requestId)?.discard()
+        binaryStaging.cancel(requestId)
+        binaryTimeoutJobs.remove(requestId)?.cancel()
+        if (awaitingChunk?.requestId == requestId) awaitingChunk = null
         jobs.remove(requestId)?.cancel()
         apiRegistry.cancel(service, requestId)
         diagnostics.record(
@@ -511,6 +617,8 @@ class BridgeTransport(
                 try { return JSON.parse(value); } catch (_) { return null; }
               };
               var bridge = Object.freeze({
+                // Retained only so SDK 0.1.x can keep non-binary calls usable
+                // and fail its own binary calls on compatibility WebViews.
                 binarySupported: ${if (binarySupported) "true" else "false"},
                 postMessage: function (message) {
                   if (!nativeBridge || typeof nativeBridge.postMessage !== 'function') {
@@ -565,59 +673,8 @@ class BridgeTransport(
         val params: JsonObject,
         val callerUrl: String,
         val replyProxy: JavaScriptReplyProxy,
+        val deadlineAtMillis: Long?,
     )
-
-    private class PendingBinaryRequest private constructor(
-        val request: PluginBridgeRequest,
-        val expectedSize: Int,
-        val expectedChunks: Int,
-        private val file: File,
-        private val output: BufferedOutputStream,
-        var nextChunk: Int = 0,
-        var writtenBytes: Int = 0,
-    ) {
-        fun write(bytes: ByteArray) {
-            output.write(bytes)
-            writtenBytes += bytes.size
-        }
-
-        fun finish(): PluginBinaryPayload {
-            output.flush()
-            output.close()
-            return PluginBinaryPayload(writtenBytes.toLong(), file)
-        }
-
-        fun discard() {
-            runCatching(output::close)
-            file.delete()
-        }
-
-        companion object {
-            fun create(
-                request: PluginBridgeRequest,
-                expectedSize: Int,
-                expectedChunks: Int,
-                directory: File,
-            ): PendingBinaryRequest {
-                if (!directory.isDirectory && !directory.mkdirs()) {
-                    throw java.io.IOException("Cannot create binary staging directory")
-                }
-                val file = File.createTempFile("bridge-", ".part", directory)
-                return try {
-                    PendingBinaryRequest(
-                        request,
-                        expectedSize,
-                        expectedChunks,
-                        file,
-                        BufferedOutputStream(FileOutputStream(file), BINARY_CHUNK_BYTES),
-                    )
-                } catch (error: Exception) {
-                    file.delete()
-                    throw error
-                }
-            }
-        }
-    }
 
     private data class PendingChunkHeader(
         val requestId: String,
@@ -625,3 +682,15 @@ class BridgeTransport(
         val last: Boolean,
     )
 }
+
+private fun JsonObject.strictString(key: String): String? =
+    (this[key] as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.contentOrNull
+
+private fun JsonObject.strictInt(key: String): Int? =
+    (this[key] as? JsonPrimitive)?.takeUnless(JsonPrimitive::isString)?.intOrNull
+
+private fun JsonObject.strictLong(key: String): Long? =
+    (this[key] as? JsonPrimitive)?.takeUnless(JsonPrimitive::isString)?.longOrNull
+
+private fun JsonObject.strictBoolean(key: String): Boolean? =
+    (this[key] as? JsonPrimitive)?.takeUnless(JsonPrimitive::isString)?.booleanOrNull

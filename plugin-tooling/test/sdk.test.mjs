@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
@@ -8,6 +9,10 @@ import {
   createBjtuPluginSdk
 } from '../packages/plugin-sdk/dist/index.js';
 import { createMockTransport } from '../packages/plugin-sdk/dist/mock.js';
+import {
+  BASE64URL_CHUNK_BYTES,
+  WebViewBridgeTransport
+} from '../packages/plugin-sdk/dist/internal/webview-transport.js';
 
 test('SDK public declarations do not expose the host transport', async () => {
   const declarations = await readFile(
@@ -31,6 +36,9 @@ test('SDK performs protocol v2 handshake', async () => {
   const result = await sdk.runtime.handshake();
   assert.equal(result.protocolVersion, PROTOCOL_VERSION);
   assert.equal(result.contractProfile, 'contract_v1');
+  assert.deepEqual(result.binaryTransports, ['arraybuffer', 'base64url-chunks-v1']);
+  assert.equal(result.preferredBinaryTransport, 'arraybuffer');
+  assert.equal(transport.negotiatedBinaryTransport, 'arraybuffer');
   assert.equal(transport.requests[0].request.capability, 'runtime.lifecycle@1');
   assert.equal(transport.requests[0].request.method, 'handshake');
 });
@@ -63,7 +71,6 @@ test('SDK propagates AbortSignal to transport cancellation', async () => {
   let cancelled;
   let resolveResponse;
   const transport = {
-    binarySupported: true,
     send(request) {
       return new Promise((resolve) => {
         resolveResponse = () =>
@@ -120,12 +127,318 @@ test('SDK routes events and binary payloads', async () => {
     highContrast: false
   });
 
+  await sdk.runtime.handshake();
   const payload = new Uint8Array([1, 2, 3, 4]).buffer;
   await sdk.storage.blob.put(payload, 'application/octet-stream');
   assert.equal(transport.requests.at(-1).binaryBytes, 4);
+  assert.equal(transport.requests.at(-1).binaryTransport, 'arraybuffer');
   await sdk.storage.blob.put(new ArrayBuffer(0), 'application/octet-stream');
   assert.equal(transport.requests.at(-1).binaryBytes, 0);
   assert.equal(transport.requests.at(-1).request.params.size, 0);
+});
+
+test('SDK rejects binary writes before a successful handshake', async () => {
+  const transport = createMockTransport();
+  const sdk = createBjtuPluginSdk(transport);
+  await assert.rejects(
+    sdk.storage.blob.put(new Uint8Array([1]).buffer, 'application/octet-stream'),
+    (error) => error instanceof BjtuPluginError && error.code === 'capability_unavailable'
+  );
+});
+
+test('SDK enforces the binary handshake gate independently of the transport implementation', async () => {
+  const records = [];
+  const transport = {
+    async send(request, binary) {
+      records.push({ request, binary });
+      if (request.capability === 'runtime.lifecycle@1') {
+        return success(request.requestId, {
+          protocolVersion: PROTOCOL_VERSION,
+          contractProfile: 'contract_v1',
+          runtimeFloor: 2,
+          availableCapabilities: ['runtime.lifecycle@1', 'storage.blob@1'],
+          binaryTransports: ['base64url-chunks-v1'],
+          preferredBinaryTransport: 'base64url-chunks-v1'
+        });
+      }
+      return success(request.requestId, resourceResult());
+    },
+    cancel() {},
+    subscribe() {
+      return () => undefined;
+    }
+  };
+  const sdk = createBjtuPluginSdk(transport);
+  const payload = new Uint8Array([1]).buffer;
+
+  await assert.rejects(
+    sdk.storage.blob.put(payload, 'application/octet-stream'),
+    (error) => error instanceof BjtuPluginError && error.code === 'capability_unavailable'
+  );
+  assert.equal(records.length, 0);
+  await sdk.runtime.handshake();
+  await sdk.storage.blob.put(payload, 'application/octet-stream');
+  assert.equal(records.at(-1).binary, payload);
+});
+
+test('SDK clears a previous binary negotiation before a failed re-handshake', async () => {
+  const transport = createMockTransport();
+  const sdk = createBjtuPluginSdk(transport);
+  await sdk.runtime.handshake();
+  assert.equal(transport.negotiatedBinaryTransport, 'arraybuffer');
+
+  transport.setScenario({ capabilities: { 'runtime.lifecycle@1': false } });
+  await assert.rejects(
+    sdk.runtime.handshake(),
+    (error) => error instanceof BjtuPluginError && error.code === 'capability_unavailable'
+  );
+  assert.equal(transport.negotiatedBinaryTransport, undefined);
+  await assert.rejects(
+    sdk.storage.blob.put(new Uint8Array([1]).buffer, 'application/octet-stream'),
+    (error) => error instanceof BjtuPluginError && error.code === 'capability_unavailable'
+  );
+});
+
+test('SDK cancellation remains immediate when the transport cancel hook throws', async () => {
+  const transport = {
+    send() {
+      return new Promise(() => undefined);
+    },
+    cancel() {
+      throw new Error('bridge detached');
+    },
+    subscribe() {
+      return () => undefined;
+    }
+  };
+  const sdk = createBjtuPluginSdk(transport);
+  const controller = new AbortController();
+  const pending = sdk.configuration.get('example', { signal: controller.signal });
+  controller.abort();
+
+  await assert.rejects(
+    pending,
+    (error) => error instanceof BjtuPluginError && error.code === 'user_cancelled'
+  );
+});
+
+test('SDK normalizes the legacy host binaryTransport handshake', async () => {
+  const transport = createMockTransport({
+    responses: {
+      'runtime.lifecycle@1#handshake': {
+        protocolVersion: PROTOCOL_VERSION,
+        contractProfile: 'contract_v1',
+        runtimeFloor: 2,
+        availableCapabilities: [],
+        binaryTransport: true
+      }
+    }
+  });
+  const sdk = createBjtuPluginSdk(transport);
+  const result = await sdk.runtime.handshake();
+  assert.deepEqual(result.binaryTransports, ['arraybuffer']);
+  assert.equal(result.preferredBinaryTransport, 'arraybuffer');
+  assert.equal(transport.negotiatedBinaryTransport, 'arraybuffer');
+});
+
+test('SDK keeps non-binary calls usable on a legacy host without ArrayBuffer', async () => {
+  const transport = createMockTransport({
+    responses: {
+      'runtime.lifecycle@1#handshake': {
+        protocolVersion: PROTOCOL_VERSION,
+        contractProfile: 'contract_v1',
+        runtimeFloor: 2,
+        availableCapabilities: ['runtime.lifecycle@1', 'configuration.read@1'],
+        binaryTransport: false
+      }
+    }
+  });
+  const sdk = createBjtuPluginSdk(transport);
+  const result = await sdk.runtime.handshake();
+  assert.deepEqual(result.binaryTransports, []);
+  assert.equal(result.preferredBinaryTransport, undefined);
+  await sdk.configuration.get('example');
+  await assert.rejects(
+    sdk.storage.blob.put(new Uint8Array([1]).buffer, 'application/octet-stream'),
+    (error) => error instanceof BjtuPluginError && error.code === 'capability_unavailable'
+  );
+});
+
+test('WebView transport sends ArrayBuffer chunks with a SHA-256 declaration', async () => {
+  const messages = [];
+  const listeners = new Set();
+  const emit = (message) => listeners.forEach((listener) => listener(message));
+  const bridge = {
+    postMessage(message) {
+      messages.push(message);
+      if (message.capability === 'runtime.lifecycle@1' && message.method === 'handshake') {
+        queueMicrotask(() => emit(success(message.requestId, {
+          protocolVersion: PROTOCOL_VERSION,
+          contractProfile: 'contract_v1',
+          runtimeFloor: 2,
+          availableCapabilities: ['storage.blob@1'],
+          binaryTransports: ['arraybuffer', 'base64url-chunks-v1'],
+          preferredBinaryTransport: 'arraybuffer'
+        })));
+      } else if (message.binary?.chunks === 0) {
+        queueMicrotask(() => emit(success(message.requestId, resourceResult())));
+      } else if (message.kind === 'binaryChunk' && message.last === true) {
+        queueMicrotask(() => emit(success(message.requestId, resourceResult())));
+      }
+    },
+    addEventListener(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }
+  };
+  const sdk = createBjtuPluginSdk(new WebViewBridgeTransport(bridge));
+  await sdk.runtime.handshake();
+
+  const bytes = new Uint8Array(256 * 1024 + 1);
+  bytes.fill(0xa5);
+  await sdk.storage.blob.put(bytes.buffer, 'application/octet-stream');
+  const declaration = messages.find((message) => message.binary?.size === bytes.byteLength);
+  const chunks = messages.filter(
+    (message) => message.kind === 'binaryChunk' && message.requestId === declaration.requestId
+  );
+  assert.deepEqual(declaration.binary, {
+    transport: 'arraybuffer',
+    size: bytes.byteLength,
+    chunks: 2,
+    sha256: createHash('sha256').update(bytes).digest('hex')
+  });
+  assert.equal(chunks.length, 2);
+  assert.ok(chunks.every((chunk) => chunk.payload instanceof ArrayBuffer));
+
+  await sdk.storage.blob.put(new ArrayBuffer(0), 'application/octet-stream');
+  const empty = messages.find((message) => message.binary?.size === 0);
+  assert.equal(empty.binary.chunks, 0);
+  assert.equal(empty.binary.sha256, createHash('sha256').digest('hex'));
+});
+
+test('WebView compatibility transport uses 48 KiB unpadded Base64URL chunks with ACK backpressure', async () => {
+  const messages = [];
+  const listeners = new Set();
+  const emit = (message) => listeners.forEach((listener) => listener(message));
+  const bridge = {
+    postMessage(message) {
+      messages.push(message);
+      if (message.capability === 'runtime.lifecycle@1' && message.method === 'handshake') {
+        queueMicrotask(() => emit(success(message.requestId, {
+          protocolVersion: PROTOCOL_VERSION,
+          contractProfile: 'contract_v1',
+          runtimeFloor: 2,
+          availableCapabilities: ['cache.resource@1'],
+          binaryTransports: ['base64url-chunks-v1'],
+          preferredBinaryTransport: 'base64url-chunks-v1'
+        })));
+      }
+    },
+    addEventListener(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }
+  };
+  const sdk = createBjtuPluginSdk(new WebViewBridgeTransport(bridge));
+  await sdk.runtime.handshake();
+  const bytes = new Uint8Array(BASE64URL_CHUNK_BYTES + 1);
+  for (let index = 0; index < bytes.length; index += 1) bytes[index] = index % 256;
+  const pending = sdk.cache.put('generated', bytes.buffer, 'application/octet-stream');
+  await waitFor(() => messages.some((message) => message.kind === 'binaryChunk'));
+
+  const declaration = messages.find((message) => message.binary?.size === bytes.byteLength);
+  let chunks = messages.filter((message) => message.kind === 'binaryChunk');
+  assert.equal(declaration.binary.transport, 'base64url-chunks-v1');
+  assert.equal(declaration.binary.chunks, 2);
+  assert.equal(declaration.binary.sha256, createHash('sha256').update(bytes).digest('hex'));
+  assert.equal(chunks.length, 1);
+  assert.match(chunks[0].payload, /^[A-Za-z0-9_-]+$/u);
+  assert.equal(chunks[0].payload.includes('='), false);
+  assert.equal(chunks[0].payload.length, 64 * 1024);
+
+  emit({
+    protocolVersion: PROTOCOL_VERSION,
+    kind: 'binaryChunkAck',
+    requestId: declaration.requestId,
+    index: 0
+  });
+  await waitFor(() => messages.filter((message) => message.kind === 'binaryChunk').length === 2);
+  chunks = messages.filter((message) => message.kind === 'binaryChunk');
+  assert.equal(chunks[1].payload, 'AA');
+  emit({
+    protocolVersion: PROTOCOL_VERSION,
+    kind: 'binaryChunkAck',
+    requestId: declaration.requestId,
+    index: 1
+  });
+  emit(success(declaration.requestId, resourceResult()));
+  await pending;
+});
+
+test('WebView compatibility upload cancellation clears a stalled chunk ACK', async () => {
+  const messages = [];
+  const listeners = new Set();
+  const emit = (message) => listeners.forEach((listener) => listener(message));
+  const bridge = {
+    postMessage(message) {
+      messages.push(message);
+      if (message.capability === 'runtime.lifecycle@1' && message.method === 'handshake') {
+        queueMicrotask(() => emit(success(message.requestId, {
+          protocolVersion: PROTOCOL_VERSION,
+          contractProfile: 'contract_v1',
+          runtimeFloor: 2,
+          availableCapabilities: ['storage.blob@1'],
+          binaryTransports: ['base64url-chunks-v1'],
+          preferredBinaryTransport: 'base64url-chunks-v1'
+        })));
+      }
+    },
+    addEventListener(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }
+  };
+  const sdk = createBjtuPluginSdk(new WebViewBridgeTransport(bridge));
+  await sdk.runtime.handshake();
+  await assert.rejects(
+    sdk.storage.blob.put(new Uint8Array([1]).buffer, 'application/octet-stream', {
+      timeoutMs: 10
+    }),
+    (error) => error instanceof BjtuPluginError && error.code === 'request_timeout'
+  );
+  assert.ok(messages.some((message) => message.kind === 'cancel'));
+});
+
+test('WebView transport cancellation during SHA-256 preparation never starts an upload', async () => {
+  const messages = [];
+  const bridge = {
+    postMessage(message) {
+      messages.push(message);
+    },
+    addEventListener() {
+      return () => undefined;
+    }
+  };
+  const transport = new WebViewBridgeTransport(bridge);
+  transport.configureBinaryTransport('base64url-chunks-v1');
+  const request = {
+    protocolVersion: PROTOCOL_VERSION,
+    requestId: 'cancel-during-digest',
+    capability: 'storage.blob@1',
+    method: 'put',
+    params: { contentType: 'application/octet-stream', size: 1 }
+  };
+
+  const pending = transport.send(request, new Uint8Array([1]).buffer);
+  transport.cancel(request.requestId);
+  await assert.rejects(
+    pending,
+    (error) => error?.code === 'user_cancelled'
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(messages.filter((message) => message.binary !== undefined).length, 0);
+  assert.equal(messages.filter((message) => message.kind === 'binaryChunk').length, 0);
+  assert.equal(messages.filter((message) => message.kind === 'cancel').length, 1);
 });
 
 test('SDK enforces generated deadlines and cancels the host request', async () => {
@@ -216,9 +529,10 @@ test('Mock Host covers quota, migration and origin scenarios', async () => {
   }
 });
 
-test('Mock Host models layout, theme, lifecycle and binary feature gates', async () => {
+test('Mock Host models layout, theme, lifecycle and compatibility transport offers', async () => {
   const transport = createMockTransport({
-    binarySupported: false,
+    binaryTransports: ['base64url-chunks-v1'],
+    preferredBinaryTransport: 'base64url-chunks-v1',
     capabilities: {
       'mail.send@1': false
     }
@@ -230,8 +544,10 @@ test('Mock Host models layout, theme, lifecycle and binary feature gates', async
   const removeState = sdk.runtime.on('pause', (data) => events.push(data));
 
   const handshake = await sdk.runtime.handshake();
-  assert.equal(handshake.binaryTransport, false);
-  assert.equal(handshake.availableCapabilities.includes('storage.blob@1'), false);
+  assert.deepEqual(handshake.binaryTransports, ['base64url-chunks-v1']);
+  assert.equal(handshake.preferredBinaryTransport, 'base64url-chunks-v1');
+  assert.equal(transport.negotiatedBinaryTransport, 'base64url-chunks-v1');
+  assert.equal(handshake.availableCapabilities.includes('storage.blob@1'), true);
   assert.equal(handshake.availableCapabilities.includes('mail.send@1'), false);
 
   transport.setScenario({
@@ -270,3 +586,29 @@ test('Mock Host models layout, theme, lifecycle and binary feature gates', async
   removeLayout();
   removeState();
 });
+
+function success(requestId, result) {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    requestId,
+    ok: true,
+    result
+  };
+}
+
+function resourceResult() {
+  return {
+    handle: 'test-resource',
+    size: 0,
+    contentType: 'application/octet-stream',
+    url: '/__bjtu/resources/test-resource'
+  };
+}
+
+async function waitFor(predicate) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  assert.fail('Timed out waiting for WebView transport activity.');
+}

@@ -213,7 +213,9 @@ await bjtu.network.request(
               <li>桥 origin 固定为 self，不是 Manifest 字段。</li>
               <li>桥只注入 publisher+plugin 决定的稳定本地 HTTPS main frame。</li>
               <li>每条消息必须精确匹配 source origin；远程 frame 始终无桥。</li>
-              <li>二进制使用分块 ArrayBuffer，不使用 Base64 fallback。</li>
+              <li>二进制先握手协商：现代 WebView 使用分块 ArrayBuffer；兼容 WebView 使用 48 KiB 无填充 Base64URL 分片与逐片 ACK。</li>
+              <li>只有缺少 <code>DOCUMENT_START_SCRIPT</code> 或 <code>WEB_MESSAGE_LISTENER</code> 才拒绝运行；缺少 ArrayBuffer feature 不再关闭 Blob/Cache。</li>
+              <li>网络图片保持 <code>network.request → native resource handle → cache.promote</code>，不经过 JavaScript/Base64。</li>
             </ul>
           </section>
 

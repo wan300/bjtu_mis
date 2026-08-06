@@ -121,6 +121,9 @@ class ThirdPartyServiceApiRegistry(
         closePlugin: () -> Unit = {},
         eventSink: (PluginRuntimeEvent) -> Unit = {},
         requestId: String = "",
+        runtimeEnvironment: PluginWebViewRuntimeEnvironment =
+            PluginWebViewPolicy.runtimeEnvironment(),
+        timeoutMsOverride: Long? = null,
     ): JsonObject {
         if (!service.canRun) {
             return errorResponse("capability_unavailable", "插件尚未完成 contract_v1 授权")
@@ -168,11 +171,23 @@ class ThirdPartyServiceApiRegistry(
                 closePlugin = closePlugin,
                 eventSink = eventSink,
                 requestId = requestId,
+                runtimeEnvironment = runtimeEnvironment,
             )
-            val effectiveTimeoutMs = params["timeoutMs"]
+            val declaredTimeoutMs = params["timeoutMs"]
                 ?.jsonPrimitive
                 ?.longOrNull
                 ?: descriptor.timeoutMs
+            if (timeoutMsOverride != null && timeoutMsOverride <= 0L) {
+                return errorResponse(
+                    "request_timeout",
+                    "Capability invocation exceeded its generated deadline",
+                    retryable = true,
+                )
+            }
+            val effectiveTimeoutMs = listOfNotNull(
+                declaredTimeoutMs.takeIf { it > 0L },
+                timeoutMsOverride?.takeIf { it > 0L },
+            ).minOrNull() ?: 0L
             val invokeProvider: suspend () -> JsonElement = {
                 if (descriptor.idempotencyRequired) {
                     executeCommandOnce(call)
@@ -347,11 +362,23 @@ class ThirdPartyServiceApiRegistry(
             put("runtimeFloor", THIRD_PARTY_RUNTIME_VERSION)
             put("availableCapabilities", buildJsonArray {
                 call.service.grantedCapabilities
-                    .filter(PluginWebViewPolicy::isCapabilityAvailable)
+                    .filter { capability ->
+                        PluginWebViewPolicy.isCapabilityAvailable(
+                            capability,
+                            call.runtimeEnvironment,
+                        )
+                    }
                     .sorted()
                     .forEach { add(JsonPrimitive(it)) }
             })
-            put("binaryTransport", PluginWebViewPolicy.supportsArrayBuffer())
+            put("binaryTransports", buildJsonArray {
+                call.runtimeEnvironment.binaryTransports.forEach { transport ->
+                    add(JsonPrimitive(transport.wireName))
+                }
+            })
+            call.runtimeEnvironment.preferredBinaryTransport?.let { transport ->
+                put("preferredBinaryTransport", transport.wireName)
+            }
         }
         "ready" -> buildJsonObject { put("ready", true) }
         "close" -> {
@@ -593,7 +620,7 @@ class ThirdPartyServiceApiRegistry(
                 val payload = binary
                     ?: throw PluginRuntimeException(
                         "invalid_request",
-                        "storage.blob.put requires ArrayBuffer payload",
+                        "storage.blob.put requires a negotiated binary payload",
                     )
                 val declaredSize = params.requiredLong("size")
                 if (declaredSize != payload.size) {
@@ -641,7 +668,7 @@ class ThirdPartyServiceApiRegistry(
                 val payload = binary
                     ?: throw PluginRuntimeException(
                         "invalid_request",
-                        "cache.resource.put requires ArrayBuffer payload",
+                        "cache.resource.put requires a negotiated binary payload",
                     )
                 if (params.requiredLong("size") != payload.size) {
                     throw PluginRuntimeException("invalid_request", "Binary payload size mismatch")

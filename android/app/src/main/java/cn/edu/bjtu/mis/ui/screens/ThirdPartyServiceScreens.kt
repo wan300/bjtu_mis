@@ -71,6 +71,8 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import cn.edu.bjtu.mis.data.thirdparty.CatalogPlugin
 import cn.edu.bjtu.mis.data.thirdparty.CatalogPluginPage
+import cn.edu.bjtu.mis.data.thirdparty.PluginWebViewPolicy
+import cn.edu.bjtu.mis.data.thirdparty.PluginWebViewRuntimeEnvironment
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyCapabilityRegistry
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartySandboxResourceResolution
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartySensitiveActionConfirmer
@@ -103,6 +105,7 @@ fun ThirdPartyServicesScreen(
     repository: ThirdPartyServiceRepository,
     catalogRepository: ThirdPartyCatalogRepository,
     onOpenService: (String) -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var showInstalled by remember { mutableStateOf(false) }
@@ -115,6 +118,7 @@ fun ThirdPartyServicesScreen(
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var pendingPreview by remember { mutableStateOf<ThirdPartyServiceImportPreview?>(null) }
+    val runtimeEnvironment = rememberPluginWebViewRuntimeEnvironment()
 
     fun load() {
         scope.launch {
@@ -205,6 +209,24 @@ fun ThirdPartyServicesScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(14.dp),
     ) {
+        item {
+            InfoCard(
+                title = "插件运行环境",
+                subtitle = if (runtimeEnvironment.secureRuntimeAvailable) {
+                    "当前设备可运行 contract_v1 插件"
+                } else {
+                    "当前设备缺少核心 WebView 安全能力；仍可安装或更新，但不能启用"
+                },
+            ) {
+                PluginRuntimeEnvironmentSummary(runtimeEnvironment)
+                OutlinedButton(
+                    onClick = onOpenDiagnostics,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("查看插件运行环境诊断")
+                }
+            }
+        }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(onClick = { showInstalled = false }, enabled = showInstalled, modifier = Modifier.weight(1f)) {
@@ -423,6 +445,7 @@ private fun ThirdPartyImportPreviewCard(
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 ) {
+    val runtimeEnvironment = rememberPluginWebViewRuntimeEnvironment()
     InfoCard(
         title = if (preview.updatedExisting) "确认更新" else "确认导入",
         subtitle = "${preview.manifest.name} · ${preview.githubOwner}/${preview.githubRepo}@${preview.commitSha.take(8)}",
@@ -457,6 +480,14 @@ private fun ThirdPartyImportPreviewCard(
             "包内容：${preview.packageFileCount} 个文件，${formatBytes(preview.packageBytes)}",
             style = MaterialTheme.typography.bodySmall,
         )
+        PluginRuntimeEnvironmentSummary(runtimeEnvironment)
+        if (!runtimeEnvironment.secureRuntimeAvailable) {
+            Text(
+                "当前设备允许完成安装或更新并保留插件包，但在 WebView 更新前不能启用或运行。",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         CapabilitySummary("Required capabilities", preview.manifest.requiredCapabilities)
         if (preview.manifest.optionalCapabilities.isNotEmpty()) {
             CapabilitySummary(
@@ -775,6 +806,7 @@ private fun ThirdPartyCapabilityReviewScreen(
     }
     var configurationValues by remember(service.serviceId, service.commitSha) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var configurationError by remember(service.serviceId, service.commitSha) { mutableStateOf<String?>(null) }
+    val runtimeEnvironment = rememberPluginWebViewRuntimeEnvironment()
     LaunchedEffect(service.serviceId, service.commitSha) {
         runCatching { repository.getConfiguration(service.serviceId) }
             .onSuccess { configurationValues = it }
@@ -783,7 +815,9 @@ private fun ThirdPartyCapabilityReviewScreen(
     val configurationComplete = service.manifest.configuration
         .filter { it.required }
         .all { !(configurationValues[it.key] ?: it.default).isNullOrBlank() }
-    val canEnable = selected.containsAll(required) && configurationComplete
+    val canEnable = selected.containsAll(required) &&
+        configurationComplete &&
+        runtimeEnvironment.secureRuntimeAvailable
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -860,6 +894,18 @@ private fun ThirdPartyCapabilityReviewScreen(
             }
         }
         item {
+            InfoCard(
+                title = "当前插件运行环境",
+                subtitle = if (runtimeEnvironment.secureRuntimeAvailable) {
+                    "核心 WebView 安全能力可用"
+                } else {
+                    "缺少 DOCUMENT_START_SCRIPT 或 WEB_MESSAGE_LISTENER，已禁止启用"
+                },
+            ) {
+                PluginRuntimeEnvironmentSummary(runtimeEnvironment)
+            }
+        }
+        item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     enabled = canEnable,
@@ -880,7 +926,12 @@ private fun ThirdPartyCapabilityReviewScreen(
                 }
                 if (!canEnable) {
                     Text(
-                        if (!configurationComplete) "请先填写全部必填配置。" else "Required capabilities 未全部同意，插件无法启用。",
+                        when {
+                            !runtimeEnvironment.secureRuntimeAvailable ->
+                                "请更新系统 WebView；插件包已保留，但当前设备不能启用。"
+                            !configurationComplete -> "请先填写全部必填配置。"
+                            else -> "Required capabilities 未全部同意，插件无法启用。"
+                        },
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -888,6 +939,93 @@ private fun ThirdPartyCapabilityReviewScreen(
             }
         }
     }
+}
+
+@Composable
+fun ThirdPartyRuntimeDiagnosticsScreen() {
+    val environment = rememberPluginWebViewRuntimeEnvironment()
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(14.dp),
+    ) {
+        item {
+            SectionTitle(
+                title = "插件运行环境诊断",
+                subtitle = "状态从当前 WebView provider 实时读取，不会持久化为永久不兼容",
+            )
+        }
+        item {
+            InfoCard(
+                title = if (environment.secureRuntimeAvailable) "运行时可用" else "运行时已安全关闭",
+                subtitle = "仅 DOCUMENT_START_SCRIPT 或 WEB_MESSAGE_LISTENER 缺失时拒绝运行",
+            ) {
+                PluginRuntimeEnvironmentSummary(environment)
+            }
+        }
+        item {
+            InfoCard(
+                title = "二进制数据路径",
+                subtitle = "插件生成数据按握手协商传输；网络图片不经过 JavaScript/Base64",
+            ) {
+                Text(
+                    "network.request resource → native resource handle → cache.promote",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    "Base64URL compatibility mode 使用 48 KiB 原始分片、无填充编码和逐片 ACK。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun rememberPluginWebViewRuntimeEnvironment(): PluginWebViewRuntimeEnvironment {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var environment by remember { mutableStateOf(PluginWebViewPolicy.runtimeEnvironment()) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = object : DefaultLifecycleObserver {
+            override fun onResume(owner: LifecycleOwner) {
+                environment = PluginWebViewPolicy.runtimeEnvironment()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    return environment
+}
+
+@Composable
+private fun PluginRuntimeEnvironmentSummary(
+    environment: PluginWebViewRuntimeEnvironment,
+) {
+    Text(
+        "WebView provider: ${environment.providerDisplay}",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    Text(
+        "Binary transport: ${environment.binaryTransportDisplay}",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    FeatureStatus("DOCUMENT_START_SCRIPT", environment.documentStartScriptSupported)
+    FeatureStatus("WEB_MESSAGE_LISTENER", environment.webMessageListenerSupported)
+    FeatureStatus("WEB_MESSAGE_ARRAY_BUFFER", environment.webMessageArrayBufferSupported)
+}
+
+@Composable
+private fun FeatureStatus(name: String, supported: Boolean) {
+    Text(
+        "$name: ${if (supported) "supported" else "missing"}",
+        style = MaterialTheme.typography.bodySmall,
+        color = if (supported) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            MaterialTheme.colorScheme.error
+        },
+    )
 }
 
 @Composable

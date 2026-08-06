@@ -113,7 +113,6 @@ function injectMockHost(html: string): string {
   window.addEventListener('error', function () { errors += 1; update(); });
   window.addEventListener('unhandledrejection', function () { errors += 1; update(); });
   var bridge = Object.freeze({
-    binarySupported: true,
     postMessage: function (message) {
       if (!message || message.kind === 'binaryChunk' || message.kind === 'cancel' || message.kind === 'eventAck') return;
       requests += 1;
@@ -126,7 +125,8 @@ function injectMockHost(html: string): string {
           contractProfile: ${JSON.stringify(CAPABILITY_REGISTRY.contractProfile)},
           runtimeFloor: ${CAPABILITY_REGISTRY.runtimeFloor},
           availableCapabilities: ${capabilities},
-          binaryTransport: true
+          binaryTransports: ['arraybuffer', 'base64url-chunks-v1'],
+          preferredBinaryTransport: 'arraybuffer'
         };
       }
       var envelope = result === undefined

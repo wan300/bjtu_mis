@@ -15,6 +15,9 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import cn.edu.bjtu.mis.data.thirdparty.BridgeTransport
 import cn.edu.bjtu.mis.data.thirdparty.FileThirdPartyKvStore
+import cn.edu.bjtu.mis.data.thirdparty.PluginBinaryTransport
+import cn.edu.bjtu.mis.data.thirdparty.PluginCapabilityCall
+import cn.edu.bjtu.mis.data.thirdparty.PluginCapabilityProvider
 import cn.edu.bjtu.mis.data.thirdparty.PluginDiagnostics
 import cn.edu.bjtu.mis.data.thirdparty.PluginNavigationController
 import cn.edu.bjtu.mis.data.thirdparty.PluginRuntimeEvent
@@ -37,6 +40,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -46,6 +51,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.security.MessageDigest
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -287,6 +294,21 @@ class ThirdPartyWebViewV3InstrumentationTest {
                 webView.destroy()
             }
         }
+    }
+
+    @Test
+    fun realJavaScriptUploadsThroughArrayBufferTransport() {
+        assumeTrue(PluginWebViewPolicy.supportsSecureTransport())
+        assumeTrue(
+            WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER),
+        )
+        runBinaryUploadProbe(PluginBinaryTransport.ArrayBuffer)
+    }
+
+    @Test
+    fun realJavaScriptUploadsThroughBase64UrlCompatibilityTransport() {
+        assumeTrue(PluginWebViewPolicy.supportsSecureTransport())
+        runBinaryUploadProbe(PluginBinaryTransport.Base64UrlChunksV1)
     }
 
     @Test
@@ -546,6 +568,235 @@ class ThirdPartyWebViewV3InstrumentationTest {
         }
     }
 
+    private fun runBinaryUploadProbe(transportMode: PluginBinaryTransport) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val service = binaryUploadService(context.cacheDir)
+        val origin = ThirdPartyServiceSandbox.originFor(
+            service.serviceId,
+            service.publisherSubjectId,
+        )
+        val host = requireNotNull(Uri.parse(origin).host)
+        val bytes = ByteArray(transportMode.chunkBytes + 1) { index -> (index % 251).toByte() }
+        val expectedDigest = MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
+        val observedDigest = AtomicReference<String>()
+        val finalResponse = CountDownLatch(1)
+        val binaryDirectory = File(context.cacheDir, "plugin-bridge-${UUID.randomUUID()}")
+        val bridgeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val provider = object : PluginCapabilityProvider {
+            override val capabilityIds = setOf("storage.blob@1")
+
+            override suspend fun invoke(call: PluginCapabilityCall) = buildJsonObject {
+                val received = requireNotNull(call.binary).openInputStream().use { it.readBytes() }
+                observedDigest.set(MessageDigest.getInstance("SHA-256").digest(received).toHex())
+                put("handle", "instrumentation-resource")
+                put("size", received.size)
+                put("contentType", "application/octet-stream")
+                put("url", "/__bjtu/resources/instrumentation-resource")
+            }
+        }
+        val environment = PluginWebViewPolicy.runtimeEnvironment().copy(
+            webMessageArrayBufferSupported = transportMode == PluginBinaryTransport.ArrayBuffer,
+        )
+        val bridge = BridgeTransport(
+            service = service,
+            apiRegistry = ThirdPartyServiceApiRegistry(
+                moduleRepository = null,
+                mailRepository = null,
+                providerOverrides = listOf(provider),
+            ),
+            confirmer = ThirdPartySensitiveActionConfirmer { _, _ -> true },
+            scope = bridgeScope,
+            navigationController = PluginNavigationController(service) {},
+            closePlugin = {},
+            diagnostics = PluginDiagnostics(service.serviceId),
+            binaryDirectory = binaryDirectory,
+            runtimeEnvironment = environment,
+        )
+        val chunkCount = (bytes.size + transportMode.chunkBytes - 1) / transportMode.chunkBytes
+        val transportSetup: String
+        val initialChunkDispatch: String
+        val acknowledgementBranch: String
+        when (transportMode) {
+            PluginBinaryTransport.ArrayBuffer -> {
+                transportSetup = """
+                    var uploadBytes = new Uint8Array(${bytes.size});
+                    for (var byteIndex = 0; byteIndex < uploadBytes.length; byteIndex += 1) {
+                      uploadBytes[byteIndex] = byteIndex % 251;
+                    }
+                    var sendArrayBufferChunks = function () {
+                      for (var index = 0; index < $chunkCount; index += 1) {
+                        var start = index * ${transportMode.chunkBytes};
+                        bridge.postMessage({
+                          protocolVersion: 2,
+                          kind: 'binaryChunk',
+                          requestId: 'upload-request',
+                          index: index,
+                          last: index === ${chunkCount - 1},
+                          payload: uploadBytes.slice(
+                            start,
+                            Math.min(start + ${transportMode.chunkBytes}, uploadBytes.length)
+                          ).buffer
+                        });
+                      }
+                    };
+                """.trimIndent()
+                initialChunkDispatch = "sendArrayBufferChunks();"
+                acknowledgementBranch = ""
+            }
+            PluginBinaryTransport.Base64UrlChunksV1 -> {
+                val encodedChunks = (0 until chunkCount).joinToString(",") { index ->
+                    val start = index * transportMode.chunkBytes
+                    val chunk = bytes.copyOfRange(
+                        start,
+                        minOf(start + transportMode.chunkBytes, bytes.size),
+                    )
+                    "'${Base64.getUrlEncoder().withoutPadding().encodeToString(chunk)}'"
+                }
+                transportSetup = """
+                    var compatibilityChunks = [$encodedChunks];
+                    var sendCompatibilityChunk = function (index) {
+                      bridge.postMessage({
+                        protocolVersion: 2,
+                        kind: 'binaryChunk',
+                        requestId: 'upload-request',
+                        index: index,
+                        last: index === compatibilityChunks.length - 1,
+                        payload: compatibilityChunks[index]
+                      });
+                    };
+                """.trimIndent()
+                initialChunkDispatch = "sendCompatibilityChunk(0);"
+                acknowledgementBranch = """
+                    } else if (
+                      message.requestId === 'upload-request' &&
+                      message.kind === 'binaryChunkAck'
+                    ) {
+                      var nextChunk = message.index + 1;
+                      if (nextChunk < compatibilityChunks.length) {
+                        sendCompatibilityChunk(nextChunk);
+                      }
+                """.trimIndent()
+            }
+        }
+        val html = """
+            <!doctype html>
+            <script>
+              var bridge = window.__BJTU_PLUGIN_BRIDGE_V2__;
+              $transportSetup
+              bridge.addEventListener(function (message) {
+                if (message.requestId === 'handshake-request' && message.ok === true) {
+                  bridge.postMessage({
+                    protocolVersion: 2,
+                    requestId: 'upload-request',
+                    capability: 'storage.blob@1',
+                    method: 'put',
+                    params: {contentType: 'application/octet-stream', size: ${bytes.size}},
+                    binary: {
+                      transport: '${transportMode.wireName}',
+                      size: ${bytes.size},
+                      chunks: $chunkCount,
+                      sha256: '$expectedDigest'
+                    }
+                  });
+                  $initialChunkDispatch
+                $acknowledgementBranch
+                } else if (message.requestId === 'upload-request' && message.ok !== undefined) {
+                  binaryProbe.postMessage(JSON.stringify(message));
+                }
+              });
+              bridge.postMessage({
+                protocolVersion: 2,
+                requestId: 'handshake-request',
+                capability: 'runtime.lifecycle@1',
+                method: 'handshake',
+                params: {sdkVersion: '0.2.0'}
+              });
+            </script>
+        """.trimIndent()
+        lateinit var webView: WebView
+
+        instrumentation.runOnMainSync {
+            webView = WebView(context)
+            PluginWebViewPolicy.configure(webView)
+            WebViewCompat.addDocumentStartJavaScript(
+                webView,
+                PluginWebViewPolicy.managedStorageGuardScript() +
+                    "\n" +
+                    BridgeTransport.documentStartScript(
+                        environment.webMessageArrayBufferSupported,
+                    ),
+                setOf(origin),
+            )
+            WebViewCompat.addWebMessageListener(
+                webView,
+                BridgeTransport.OBJECT_NAME,
+                setOf(origin),
+                object : WebViewCompat.WebMessageListener {
+                    override fun onPostMessage(
+                        view: WebView,
+                        message: WebMessageCompat,
+                        sourceOrigin: Uri,
+                        isMainFrame: Boolean,
+                        replyProxy: JavaScriptReplyProxy,
+                    ) = bridge.onMessage(view, message, sourceOrigin, isMainFrame, replyProxy)
+                },
+            )
+            WebViewCompat.addWebMessageListener(
+                webView,
+                "binaryProbe",
+                setOf(origin),
+                object : WebViewCompat.WebMessageListener {
+                    override fun onPostMessage(
+                        view: WebView,
+                        message: WebMessageCompat,
+                        sourceOrigin: Uri,
+                        isMainFrame: Boolean,
+                        replyProxy: JavaScriptReplyProxy,
+                    ) {
+                        if (isMainFrame && message.data.orEmpty().contains("\"ok\":true")) {
+                            finalResponse.countDown()
+                        }
+                    }
+                },
+            )
+            webView.webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): WebResourceResponse? = if (request.url.host == host) {
+                    WebResourceResponse(
+                        "text/html",
+                        "UTF-8",
+                        ByteArrayInputStream(html.toByteArray()),
+                    )
+                } else {
+                    null
+                }
+            }
+            webView.loadUrl("$origin/index.html")
+        }
+
+        try {
+            assertTrue(
+                "Timed out waiting for ${transportMode.wireName} upload",
+                finalResponse.await(20, TimeUnit.SECONDS),
+            )
+            assertEquals(expectedDigest, observedDigest.get())
+        } finally {
+            bridge.close()
+            instrumentation.runOnMainSync {
+                runCatching {
+                    WebViewCompat.removeWebMessageListener(webView, BridgeTransport.OBJECT_NAME)
+                    WebViewCompat.removeWebMessageListener(webView, "binaryProbe")
+                }
+                webView.stopLoading()
+                webView.destroy()
+            }
+            binaryDirectory.deleteRecursively()
+        }
+    }
+
     private fun backAcknowledgementService(cacheDir: File): ThirdPartyService {
         val manifest = ThirdPartyServiceManifest(
             schemaVersion = 3,
@@ -581,6 +832,45 @@ class ThirdPartyWebViewV3InstrumentationTest {
             verificationLevel = "test",
         )
     }
+
+    private fun binaryUploadService(cacheDir: File): ThirdPartyService {
+        val manifest = ThirdPartyServiceManifest(
+            schemaVersion = 3,
+            id = "io.example.binary-upload",
+            name = "Binary upload test",
+            version = "1.0.0",
+            entrypoint = "index.html",
+            icon = "icon.svg",
+            capabilities = ThirdPartyCapabilityDeclaration(
+                required = listOf("runtime.lifecycle@1", "storage.blob@1"),
+            ),
+            dataSchemaVersion = 1,
+        )
+        return ThirdPartyService(
+            serviceId = manifest.id,
+            manifest = manifest,
+            sourceUrl = "https://example.invalid/plugin.zip",
+            githubOwner = "example",
+            githubRepo = "binary-upload",
+            defaultBranch = "main",
+            commitSha = "c".repeat(40),
+            packageDigestSha256 = "d".repeat(64),
+            installDir = File(cacheDir, "plugin-binary-upload").absolutePath,
+            grantedCapabilities = setOf("runtime.lifecycle@1", "storage.blob@1"),
+            allowedOrigins = emptyList(),
+            enabled = true,
+            needsReview = false,
+            installedAt = "2026-08-05T00:00:00Z",
+            updatedAt = "2026-08-05T00:00:00Z",
+            publisherSubjectId = "test-publisher",
+            runtimeProfile = ThirdPartyRuntimeProfile.ContractV1.value,
+            runtimeFloor = 2,
+            compatibilityState = ThirdPartyRuntimeProfile.ContractV1.value,
+            verificationLevel = "test",
+        )
+    }
+
+    private fun ByteArray.toHex(): String = joinToString("") { byte -> "%02x".format(byte) }
 
     private data class BridgeObservation(
         val data: String,

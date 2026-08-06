@@ -17,6 +17,13 @@ listener returns `true` when it consumes navigation. Cache resources returned by
 network requests can be retained with `cache.promote()` or released with
 `cache.deleteHandle()`.
 
+Call `runtime.handshake()` before `storage.blob.put()` or `cache.put()`. The host
+negotiates either the preferred ArrayBuffer channel or the 48 KiB, unpadded
+Base64URL compatibility channel. The compatibility channel acknowledges each
+chunk before the SDK sends the next one. Network response bodies remain native
+resource handles and should be retained with `cache.promote()`; they are never
+routed through JavaScript/Base64.
+
 Persistent state must use SDK KV/Blob/Cache APIs. Contract runtimes install their
 managed-storage guard before plugin code and do not expose the bridge if that
 guard cannot disable browser-managed persistence. Zero-byte Blob and Cache
