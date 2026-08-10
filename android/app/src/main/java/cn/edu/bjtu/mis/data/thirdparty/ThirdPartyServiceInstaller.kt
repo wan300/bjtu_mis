@@ -6,6 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
+import okhttp3.Authenticator
+import okhttp3.CookieJar
 import okhttp3.Request
 import java.io.File
 import java.io.IOException
@@ -19,6 +21,7 @@ private const val MaxDownloadBytes = 25L * 1024L * 1024L
 private const val MaxExtractedBytes = 50L * 1024L * 1024L
 private const val MaxExtractedEntries = 1000
 private const val StagingMaxAgeMillis = 24L * 60L * 60L * 1000L
+private const val MaxReadmeBytes = 1L * 1024L * 1024L
 
 data class PreparedThirdPartyServicePackage(
     val token: String,
@@ -68,6 +71,15 @@ class ThirdPartyServiceInstaller(
     private val installedRoot = File(root, "installed").canonicalFile
     private val deletionRoot = File(root, "deletion").canonicalFile
     private val preparedPackages = ConcurrentHashMap<String, PreparedThirdPartyServicePackage>()
+    private val readmeClient = client.client.newBuilder()
+        .cookieJar(CookieJar.NO_COOKIES)
+        .authenticator(Authenticator.NONE)
+        .proxyAuthenticator(Authenticator.NONE)
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .retryOnConnectionFailure(false)
+        .cache(null)
+        .build()
 
     suspend fun prepareFromGitHub(sourceUrl: String): PreparedThirdPartyServicePackage {
         cleanupStalePreparedImports()
@@ -103,6 +115,53 @@ class ThirdPartyServiceInstaller(
         val prepared = prepareFromGitHub(sourceUrl)
         return commitPreparedImport(prepared.token)
     }
+
+    /**
+     * Loads the README for an already-pinned plugin revision. This client deliberately does not
+     * share the campus Cookie jar or follow redirects.
+     */
+    suspend fun fetchReadme(source: GitHubRepositoryRef, commitSha: String): String? =
+        withContext(Dispatchers.IO) {
+            val parsedSource = runCatching { parseGitHubRepositoryUrl(source.canonicalUrl) }
+                .getOrElse { throw ThirdPartyServiceException("README preview requires a public GitHub repository", it) }
+            if (parsedSource.owner != source.owner || parsedSource.repo != source.repo) {
+                throw ThirdPartyServiceException("README preview repository identity mismatch")
+            }
+            val normalizedCommit = commitSha.trim().takeIf { it.matches(Regex("^[a-fA-F0-9]{7,40}$")) }
+                ?: throw ThirdPartyServiceException("README preview requires a pinned GitHub commit")
+            val request = Request.Builder()
+                .url("$normalizedApiBaseUrl/repos/${source.owner}/${source.repo}/readme?ref=$normalizedCommit")
+                .header("Accept", "application/vnd.github.raw+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .get()
+                .build()
+            readmeClient.newCall(request).execute().use { response ->
+                if (response.code == 404) {
+                    null
+                } else if (!response.isSuccessful) {
+                    throw ThirdPartyServiceException("GitHub README 获取失败：HTTP ${response.code}")
+                } else {
+                    val body = response.body
+                        ?: throw ThirdPartyServiceException("GitHub README 内容为空")
+                    if (body.contentLength() > MaxReadmeBytes) {
+                        throw ThirdPartyServiceException("GitHub README 超过 1 MiB 限制")
+                    }
+                    val output = java.io.ByteArrayOutputStream()
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            if (output.size().toLong() + read > MaxReadmeBytes) {
+                                throw ThirdPartyServiceException("GitHub README 超过 1 MiB 限制")
+                            }
+                            output.write(buffer, 0, read)
+                        }
+                    }
+                    output.toString(Charsets.UTF_8.name())
+                }
+            }
+        }
 
     suspend fun prepareFromCatalog(plugin: CatalogPlugin): PreparedThirdPartyServicePackage {
         cleanupStalePreparedImports()

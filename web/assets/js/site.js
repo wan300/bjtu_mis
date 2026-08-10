@@ -3,7 +3,7 @@
   const releaseListingUrl = "https://github.com/wan300/bjtu_mis_Android/releases";
   const fallbackReleases = [
     {
-      tag_name: "v1.4.0",
+      tag_name: "v1.4.1",
       html_url: "https://github.com/wan300/bjtu_mis_Android/releases/latest",
       prerelease: false,
       published_at: "",
@@ -111,7 +111,7 @@
   ];
   const fallbackApk = "https://github.com/wan300/bjtu_mis_Android/releases/latest";
   const fallbackRelease = "https://github.com/wan300/bjtu_mis_Android/releases/latest";
-  const fallbackTag = "v1.4.0";
+  const fallbackTag = "v1.4.1";
   const fallbackSizeText = "--";
   const releaseRefreshInterval = 5 * 60 * 1000;
   const imageAssetQuery = "?v=2026062602";

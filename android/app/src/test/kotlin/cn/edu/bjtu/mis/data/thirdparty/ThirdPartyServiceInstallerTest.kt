@@ -5,9 +5,11 @@ import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.Cookie
 import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -200,6 +202,101 @@ class ThirdPartyServiceInstallerTest {
             server.takeRequest()
             assertTrue(server.takeRequest().path!!.contains("/zipball/abc1234def5678"))
         }
+    }
+
+    @Test
+    fun fetchesPinnedReadmeWithoutCookiesAndRejectsOversizedContent() = runBlocking {
+        MockWebServer().use { server ->
+            val cookieJar = AppCookieJar().apply {
+                replaceAll(
+                    listOf(
+                        Cookie.Builder()
+                            .name("campus_session")
+                            .value("secret")
+                            .hostOnlyDomain(server.hostName)
+                            .path("/")
+                            .build(),
+                    ),
+                )
+            }
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "text/markdown; charset=utf-8")
+                    .setBody("# Demo\n\nREADME"),
+            )
+            val installer = ThirdPartyServiceInstaller(
+                client = BjtuHttpClient(cookieJar),
+                servicesRoot = temp.newFolder("readme-services"),
+                apiBaseUrl = server.url("/").toString().trimEnd('/'),
+            )
+
+            assertEquals(
+                "# Demo\n\nREADME",
+                installer.fetchReadme(
+                    GitHubRepositoryRef("alice", "demo", "https://github.com/alice/demo"),
+                    "abc1234def5678",
+                ),
+            )
+            val request = server.takeRequest()
+            assertEquals("/repos/alice/demo/readme?ref=abc1234def5678", request.path)
+            assertEquals("application/vnd.github.raw+json", request.getHeader("Accept"))
+            assertNull(request.getHeader("Cookie"))
+            assertNull(request.getHeader("Authorization"))
+
+            server.enqueue(MockResponse().setResponseCode(404))
+            assertNull(
+                installer.fetchReadme(
+                    GitHubRepositoryRef("alice", "demo", "https://github.com/alice/demo"),
+                    "abc1234def5678",
+                ),
+            )
+
+            server.enqueue(MockResponse().setBody("x".repeat(1024 * 1024 + 1)))
+            assertThrows(ThirdPartyServiceException::class.java) {
+                runBlocking {
+                    installer.fetchReadme(
+                        GitHubRepositoryRef("alice", "demo", "https://github.com/alice/demo"),
+                        "abc1234def5678",
+                    )
+                }
+            }
+
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(302)
+                    .setHeader("Location", server.url("/redirected-readme")),
+            )
+            assertThrows(ThirdPartyServiceException::class.java) {
+                runBlocking {
+                    installer.fetchReadme(
+                        GitHubRepositoryRef("alice", "demo", "https://github.com/alice/demo"),
+                        "abc1234def5678",
+                    )
+                }
+            }
+
+            Unit
+        }
+
+        val disconnectedServer = MockWebServer()
+        disconnectedServer.start()
+        val disconnectedApiUrl = disconnectedServer.url("/").toString().trimEnd('/')
+        disconnectedServer.shutdown()
+        val disconnectedInstaller = ThirdPartyServiceInstaller(
+            client = BjtuHttpClient(AppCookieJar()),
+            servicesRoot = temp.newFolder("readme-network-failure-services"),
+            apiBaseUrl = disconnectedApiUrl,
+        )
+        assertThrows(java.io.IOException::class.java) {
+            runBlocking {
+                disconnectedInstaller.fetchReadme(
+                    GitHubRepositoryRef("alice", "demo", "https://github.com/alice/demo"),
+                    "abc1234def5678",
+                )
+            }
+        }
+        Unit
     }
 
     @Test

@@ -6,10 +6,10 @@
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>Web 插件开发者文档 - BJTU MIS Android</title>
+    <title>Web 插件 API 文档 - BJTU MIS Android</title>
     <meta
       name="description"
-      content="BJTU MIS Android SDK-first、Capability 驱动的 Manifest v3 / contract_v1 Web 插件开发文档。"
+      content="BJTU MIS Android Manifest v3 contract_v1 Web 插件的 SDK、Capability 与插件目录 API 文档。"
     >
     <link rel="icon" type="image/png" href="assets/icons/icon_home.png?v=2026062602">
     <link rel="stylesheet" href="assets/css/styles.css?v=2026062602">
@@ -39,24 +39,26 @@
       <section class="docs-hero" aria-labelledby="docs-title">
         <div class="docs-hero__copy reveal">
           <a class="back-link" href="index.html">返回主页</a>
-          <p class="eyebrow">SDK-first · contract_v1 · protocol v2</p>
-          <h1 id="docs-title">Capability 驱动的 Web 插件</h1>
+          <p class="eyebrow">Manifest v3 · contract_v1 · protocol v2</p>
+          <h1 id="docs-title">BJTU Web 插件 API</h1>
           <p>
-            插件编写普通 TypeScript/Web 业务代码，通过类型化 SDK 调用宿主能力。
-            Manifest 只声明版本化 Capability 和按用途拆分的公网 origin；桥接协议、
-            权限、配额、错误和平台支持都从单一 Contract Registry 自动生成。
+            面向 BJTU MIS Android 的类型化 Web 插件接口。插件通过 SDK 调用版本化
+            Capability，通过 <code>/api/v3</code> 使用目录、制品和投稿服务；权限、超时、
+            配额和错误均由同一 Contract Registry 定义。
           </p>
           <div class="docs-hero__actions">
-            <a class="btn btn--signal" href="#quickstart">开始开发</a>
+            <a class="btn btn--signal" href="#quickstart">快速开始</a>
             <a class="btn btn--ghost" href="assets/schemas/third-party-service-manifest.schema.json" download>Manifest schema</a>
             <a class="btn btn--ghost" href="assets/schemas/bjtu-marketplace.schema.json" download>Marketplace schema</a>
           </div>
         </div>
         <div class="docs-hero__panel reveal" aria-label="运行时摘要">
+          <div class="ticket-row"><span>Manifest</span><strong>v3</strong></div>
           <div class="ticket-row"><span>Profile</span><strong>contract_v1</strong></div>
           <div class="ticket-row"><span>Protocol</span><strong>v2</strong></div>
+          <div class="ticket-row"><span>Runtime floor</span><strong>2</strong></div>
           <div class="ticket-row"><span>Bridge</span><strong>host-fixed self</strong></div>
-          <div class="ticket-row"><span>Legacy</span><strong>rescue only</strong></div>
+          <div class="ticket-row"><span>Directory API</span><strong>/api/v3</strong></div>
         </div>
       </section>
 
@@ -66,11 +68,13 @@
           <a href="#compatibility">兼容边界</a>
           <a href="#quickstart">快速开始</a>
           <a href="#manifest">Manifest</a>
-          <a href="#sdk">SDK</a>
+          <a href="#sdk">SDK 与生命周期</a>
+          <a href="#runtime-api">校园读取 API</a>
           <a href="#origins">Origin 与桥</a>
           <a href="#network">网络</a>
           <a href="#storage">存储与资源</a>
           <a href="#commands">写能力</a>
+          <a href="#platform-api">目录平台 API</a>
           <a href="#release">发布检查</a>
         </aside>
 
@@ -94,6 +98,10 @@
           <section class="docs-section reveal" id="quickstart">
             <p class="eyebrow">Quickstart</p>
             <h2>Vanilla TypeScript + Vite</h2>
+            <p>
+              工具链要求 Node.js 20 至 22。仓库中的 <code>plugin-tooling</code> 工作区提供
+              <code>@bjtu-mis/plugin-sdk</code>、<code>@bjtu-mis/plugin-cli</code> 与默认模板。
+            </p>
             <pre><code>cd plugin-tooling
 npm ci
 npm run build
@@ -106,6 +114,10 @@ npm run dev</code></pre>
               <code>bjtu dev --android</code>，可通过稳定插件 origin 联调 Vite 和
               HMR；命令退出时自动撤销 <code>adb reverse</code> 和 debug 开关。
             </p>
+            <div class="docs-callout">
+              <strong>发布结构</strong>
+              <p><code>entrypoint</code>、图标、迁移入口和截图均位于 <code>dist/</code>。发布 ZIP 仅包含 <code>bjtu-plugin.json</code>、<code>bjtu-marketplace.json</code> 和 <code>dist/</code>。</p>
+            </div>
             <pre><code>bjtu lint --source .
 bjtu lint --marketplace .
 bjtu test .
@@ -125,32 +137,61 @@ bjtu pack .</code></pre>
   "entrypoint": "index.html",
   "icon": "icon.svg",
   "capabilities": {
-    "required": ["runtime.lifecycle@1", "network.request@1"],
+    "required": [
+      "runtime.lifecycle@1",
+      "configuration.read@1",
+      "network.request@1"
+    ],
     "optional": ["storage.blob@1"]
   },
   "origins": {
     "connect": ["https://api.example.com"],
     "media": ["https://cdn.example.com"]
   },
-  "data_schema_version": 1
+  "data_schema_version": 1,
+  "configuration": [{
+    "key": "API_TOKEN",
+    "label": "服务令牌",
+    "description": "用于访问示例服务的令牌。",
+    "type": "secret",
+    "required": true
+  }]
 }</code></pre>
             <p>
               空 <code>origins</code>、<code>configuration</code> 和 optional 列表必须
               省略。KV/Blob 需要 <code>data_schema_version</code>；版本提升还需要
               <code>migration_entrypoint</code>。
             </p>
+            <div class="docs-table-wrap">
+              <table class="docs-table docs-table--dense">
+                <thead><tr><th>声明</th><th>对应规则</th></tr></thead>
+                <tbody>
+                  <tr><td><code>runtime.lifecycle@1</code></td><td>必须位于 <code>capabilities.required</code>。</td></tr>
+                  <tr><td><code>origins.frame</code></td><td>必须同时声明 <code>remote.frame@1</code>；远程 iframe 始终无桥。</td></tr>
+                  <tr><td><code>origins.navigation</code></td><td>必须同时声明 <code>navigation.external@1</code>；打开外部链接必须由用户手势触发。</td></tr>
+                  <tr><td><code>configuration</code></td><td>必须同时声明 <code>configuration.read@1</code>。最多 32 项，key 为全大写 <code>UPPER_SNAKE_CASE</code>；secret 没有默认值。</td></tr>
+                  <tr><td><code>data_schema_version</code></td><td>仅 KV/Blob 可用；版本大于 1 时必须给出 <code>migration_entrypoint</code>。</td></tr>
+                </tbody>
+              </table>
+            </div>
             <p>
               描述、作者、分类、标签、许可证和截图放入独立
               <code>bjtu-marketplace.json</code>。大厅投稿必须提供它；GitHub 直链
               安装可以省略。<code>bjtu-plugin.dev.json</code> 只能用于 Mock/HMR，
               <code>bjtu pack</code> 会拒绝把它放入发布包。
             </p>
+            <p>
+              仓库根 <code>README.md</code> 是可选的投稿说明。客户端会在安装确认前从已固定的 GitHub commit
+              读取它，最大 1 MiB；请求使用无 Cookie、无认证、禁止重定向的只读客户端。
+              README 不属于 Manifest、不会打入规范化制品，也不参与包摘要；缺失或读取失败不会阻止安装确认。
+            </p>
             <div class="docs-table-wrap">
-              <table>
-                <thead><tr><th>稳定 Capability</th><th>用途</th></tr></thead>
+              <table class="docs-table">
+                <thead><tr><th>Capability 组</th><th>用途</th></tr></thead>
                 <tbody>
                   <tr><td><code>runtime.lifecycle@1</code></td><td>握手、ready、close 与宿主事件。</td></tr>
                   <tr><td><code>configuration.read@1</code></td><td>读取 Manifest 声明的配置。</td></tr>
+                  <tr><td><code>remote.frame@1</code> / <code>navigation.external@1</code></td><td>声明 sandbox 远程 frame，或按用户手势打开已声明的外部链接。</td></tr>
                   <tr><td><code>identity.profile@1</code></td><td>读取当前用户概要。</td></tr>
                   <tr><td><code>academic.*@1</code></td><td>课表、成绩、考试、校历、进度、作业和资源读取。</td></tr>
                   <tr><td><code>mail.read@1</code></td><td>读取邮箱目录和消息。</td></tr>
@@ -161,30 +202,44 @@ bjtu pack .</code></pre>
             <p>
               beta Capability 包括 <code>network.request@1</code>、
               <code>storage.kv@2</code>、<code>storage.blob@1</code>、
-              <code>cache.resource@1</code> 和受确认的课程、作业、邮件 Command。
+              <code>cache.resource@1</code>、
+              <code>academic.userCourses.command@1</code>、
+              <code>academic.homework.submit@1</code> 和 <code>mail.send@1</code>。
             </p>
           </section>
 
           <section class="docs-section reveal" id="sdk">
             <p class="eyebrow">Type-safe API</p>
             <h2>只通过 SDK 调用</h2>
-            <pre><code>import { createBjtuPluginSdk } from '@bjtu-mis/plugin-sdk';
+            <pre><code>import { BjtuPluginError, createBjtuPluginSdk } from '@bjtu-mis/plugin-sdk';
 
 const bjtu = createBjtuPluginSdk();
 const runtime = await bjtu.runtime.handshake();
 await bjtu.runtime.ready();
 
+const disposeBack = bjtu.runtime.on('back', () =&gt; {
+  if (!canGoBackInPlugin()) return false;
+  goBackInPlugin();
+  return true;
+});
+
 const profile = await bjtu.campus.getProfile();
 console.log(profile.data, profile.meta.syncedAt);
 
 const controller = new AbortController();
-await bjtu.network.request(
-  { url: 'https://api.example.com/data' },
-  {
-    signal: controller.signal,
-    onProgress: ({ loaded, total }) =&gt; console.log(loaded, total)
-  }
-);</code></pre>
+try {
+  await bjtu.network.request(
+    { url: 'https://api.example.com/data' },
+    {
+      signal: controller.signal,
+      onProgress: ({ loaded, total }) =&gt; console.log(loaded, total)
+    }
+  );
+} catch (error) {
+  if (error instanceof BjtuPluginError) console.error(error.code, error.message);
+} finally {
+  disposeBack();
+}</code></pre>
             <p>
               SDK 提供 <code>runtime</code>、<code>configuration</code>、
               <code>network</code>、<code>storage.kv</code>、
@@ -199,6 +254,53 @@ await bjtu.network.request(
               <code>method</code>、取消、订阅事件和统一错误。底层 transport 是私有
               实现，不再公开 <code>window.BjtuService</code>。
             </p>
+            <ul class="docs-checklist">
+              <li><code>handshake()</code> 返回可用 Capability、协议版本、runtime floor，以及 <code>arraybuffer</code> / <code>base64url-chunks-v1</code> 二进制传输能力。</li>
+              <li>每个调用可传 <code>signal</code>、<code>onProgress</code> 和较短的 <code>timeoutMs</code>；超出 Capability 上限会被 SDK 拒绝。</li>
+              <li>只有 <code>runtime.on('back', listener)</code> 的 listener 返回 <code>true</code> 时，返回操作才被插件消费。</li>
+              <li>失败统一为 <code>BjtuPluginError</code>，可能的 code 包括 <code>permission_denied</code>、<code>capability_unavailable</code>、<code>origin_denied</code>、<code>request_timeout</code>、<code>quota_exceeded</code>、<code>user_cancelled</code>。</li>
+            </ul>
+          </section>
+
+          <section class="docs-section reveal" id="runtime-api">
+            <p class="eyebrow">Campus read API</p>
+            <h2>统一的校园读取接口</h2>
+            <p>
+              身份、教务和邮件的读取响应均为 <code>{ data, meta }</code>。
+              <code>meta</code> 固定包含 <code>syncedAt</code>、<code>source</code>、
+              <code>coverage</code> 与 <code>fromCache</code>，因此页面可明确呈现数据新鲜度。
+            </p>
+            <div class="docs-table-wrap">
+              <table class="docs-table docs-table--dense">
+                <thead><tr><th>SDK 方法</th><th>请求参数</th><th>Capability</th></tr></thead>
+                <tbody>
+                  <tr><td><code>campus.getProfile(options)</code></td><td><code>forceRefresh?</code></td><td><code>identity.profile@1</code></td></tr>
+                  <tr><td><code>campus.getTimetable(options)</code></td><td><code>forceRefresh?</code></td><td><code>academic.timetable@1</code></td></tr>
+                  <tr><td><code>campus.getScores(request)</code></td><td><code>term?</code>、<code>courseType?</code>、<code>forceRefresh?</code></td><td><code>academic.scores@1</code></td></tr>
+                  <tr><td><code>campus.getHistoryScores(request)</code></td><td><code>term?</code>、<code>forceRefresh?</code></td><td><code>academic.scores@1</code></td></tr>
+                  <tr><td><code>campus.getExams(request)</code></td><td><code>term?</code>、<code>forceRefresh?</code></td><td><code>academic.exams@1</code></td></tr>
+                  <tr><td><code>campus.getCalendar(request)</code></td><td><code>month?</code>、<code>forceRefresh?</code></td><td><code>academic.calendar@1</code></td></tr>
+                  <tr><td><code>campus.getProgress(options)</code></td><td><code>forceRefresh?</code></td><td><code>academic.progress@1</code></td></tr>
+                  <tr><td><code>campus.getHomework(request)</code></td><td><code>status?</code>、<code>forceRefresh?</code></td><td><code>academic.homework@1</code></td></tr>
+                  <tr><td><code>campus.getCourseResources(request)</code></td><td><code>courseId</code> 必填；<code>term?</code>、<code>folderId?</code>、<code>search?</code>、<code>categoryKey?</code>、<code>forceRefresh?</code></td><td><code>academic.resources@1</code></td></tr>
+                  <tr><td><code>mail.listFolders(options)</code></td><td><code>forceRefresh?</code></td><td><code>mail.read@1</code></td></tr>
+                  <tr><td><code>mail.listMessages(request)</code></td><td><code>folderId?</code>、<code>start?</code>、<code>limit?</code>（1-100）、<code>forceRefresh?</code></td><td><code>mail.read@1</code></td></tr>
+                  <tr><td><code>mail.getMessage(messageId, mailbox?)</code></td><td><code>messageId</code> 必填；<code>mailbox?</code></td><td><code>mail.read@1</code></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <h3>只读校园代理</h3>
+            <pre><code>const result = await bjtu.campus.request({
+  service: 'aa',
+  method: 'GET',
+  path: '/registered-path',
+  query: { term: '2025-2026-2' },
+  accept: 'application/json'
+});</code></pre>
+            <p>
+              <code>campus.request@1</code> 只允许 <code>mis</code>、<code>aa</code>、<code>ve</code> 中由宿主登记的
+              <code>GET</code>/<code>HEAD</code> 路径，响应上限为 5 MiB。它不会向插件暴露 Cookie、认证头或明文凭据。
+            </p>
           </section>
 
           <section class="docs-section reveal" id="origins">
@@ -206,8 +308,9 @@ await bjtu.network.request(
             <h2>Origin 与桥由宿主守住</h2>
             <p>
               Manifest 只按用途声明 <code>connect</code>、<code>media</code>、
-              <code>frame</code> 和 <code>navigation</code>。公共制品只允许标准 HTTPS
-              origin，禁止校园、私网、回环、链路本地、路径和通配符。
+              <code>frame</code> 和 <code>navigation</code>。所有来源必须是规范 HTTPS origin，
+              禁止私网、回环、链路本地、路径和通配符；<code>connect</code>、<code>media</code>
+              与 <code>frame</code> 还禁止校园域名。
             </p>
             <ul class="docs-checklist">
               <li>桥 origin 固定为 self，不是 Manifest 字段。</li>
@@ -228,6 +331,14 @@ await bjtu.network.request(
               <code>Host</code>、<code>Cookie</code>、<code>Content-Length</code> 等
               传输层 header。
             </p>
+            <pre><code>const response = await bjtu.network.request(
+  { url: 'https://api.example.com/events', method: 'GET' },
+  { onProgress: ({ loaded, total, phase }) =&gt; updateProgress(loaded, total, phase) }
+);
+
+if (response.bodyType === 'resource' && response.resource) {
+  await bjtu.cache.promote(response.resource.handle, 'events/latest');
+}</code></pre>
             <ul class="docs-checklist">
               <li>六种 HTTP 方法；JSON、文本、FormData 和 Blob handle 请求体。</li>
               <li>默认 15 秒、上限 60 秒；最多 5 次重定向。</li>
@@ -247,6 +358,29 @@ await bjtu.network.request(
               <li>资源通过 <code>/__bjtu/resources/&lt;handle&gt;</code> 提供 GET、HEAD 和 Range。</li>
               <li>升级使用影子迁移和上一版本快照，失败时原子回滚。</li>
             </ul>
+            <p>
+              <code>storage.kv</code> 提供 <code>get</code>、<code>set</code>、<code>remove</code>、
+              <code>keys</code>、<code>usage</code>、<code>batch</code>、<code>transaction</code>、
+              <code>export</code>、<code>import</code> 和 <code>watch</code>。
+              <code>storage.blob</code> 提供 <code>put</code>、<code>getInfo</code>、<code>delete</code>；
+              <code>cache</code> 提供 <code>put</code>、<code>match</code>、<code>promote</code>、
+              <code>deleteHandle</code>、<code>delete</code>、<code>pin</code> 和 <code>usage</code>。
+            </p>
+            <div class="docs-callout">
+              <strong>二进制写入先握手</strong>
+              <p>调用 <code>storage.blob.put</code> 或 <code>cache.put</code> 前必须完成 <code>runtime.handshake()</code>。SDK 会在宿主协商的 ArrayBuffer 或 Base64URL 分片通道上传数据。</p>
+            </div>
+            <pre><code>import { createBjtuPluginMigrationSdk } from '@bjtu-mis/plugin-sdk';
+
+const migration = createBjtuPluginMigrationSdk();
+const previous = await migration.storage.get('settings');
+await migration.storage.set('settings', upgradeSettings(previous));
+await migration.commit();</code></pre>
+            <p>
+              <code>migration_entrypoint</code> 只能使用影子 KV 的 <code>get</code>、<code>set</code>、
+              <code>remove</code>、<code>keys</code>、<code>usage</code>、<code>clear</code> 和显式
+              <code>commit()</code>。网络、校园读取和 Command Capability 在迁移中不可用。
+            </p>
           </section>
 
           <section class="docs-section reveal" id="commands">
@@ -258,6 +392,100 @@ await bjtu.network.request(
               <code>idempotency_conflict</code>。加密回执不保存请求正文，保留 7 天，
               每插件最多 1024 条。邮件和作业不会静默发送或提交。
             </p>
+            <div class="docs-table-wrap">
+              <table class="docs-table">
+                <thead><tr><th>SDK 方法</th><th>必填字段</th><th>超时</th></tr></thead>
+                <tbody>
+                  <tr><td><code>campus.saveUserCourse(key, course)</code></td><td><code>idempotencyKey</code>、<code>course</code></td><td>15 秒</td></tr>
+                  <tr><td><code>campus.deleteUserCourse(key, id)</code></td><td><code>idempotencyKey</code>、<code>id</code></td><td>15 秒</td></tr>
+                  <tr><td><code>campus.submitHomework(request)</code></td><td><code>idempotencyKey</code>、<code>homeworkId</code>、<code>courseId</code></td><td>60 秒</td></tr>
+                  <tr><td><code>mail.send(request)</code></td><td><code>idempotencyKey</code>、<code>to</code>、<code>subject</code></td><td>60 秒</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="docs-section reveal" id="platform-api">
+            <p class="eyebrow">Plugin directory REST API</p>
+            <h2>目录、制品与投稿均使用 <code>/api/v3</code></h2>
+            <p>
+              <code>/api/v3</code> 只返回 <code>contract_v1</code> 插件。目录、详情和更新解析
+              使用 camelCase；投稿状态接口保留 <code>source_url</code>、<code>plugin_id</code>、
+              <code>commit_sha</code> 等记录字段名。失败响应统一为 <code>{ error: { code, message } }</code>。
+            </p>
+            <div class="docs-table-wrap">
+              <table class="docs-table docs-table--dense">
+                <thead><tr><th>接口</th><th>认证</th><th>用途</th></tr></thead>
+                <tbody>
+                  <tr><td><code>GET /api/v3/plugins</code></td><td>否</td><td>目录列表。支持 <code>query?</code>、<code>category?</code>、<code>cursor?</code>、<code>limit?</code>；limit 为 1-50，默认 20。</td></tr>
+                  <tr><td><code>GET /api/v3/plugins/:id</code></td><td>否</td><td>详情，包含 Capability、origin、digest、发布者 identity、数据版本和制品 URL。</td></tr>
+                  <tr><td><code>POST /api/v3/plugins/resolve-updates</code></td><td>否</td><td>最多提交 100 个已安装记录，解析更新、publisher 不匹配和 P0-A 替换状态。</td></tr>
+                  <tr><td><code>GET /api/v3/plugins/:id/versions/:commit/artifact</code></td><td>否</td><td>下载规范化 ZIP，响应含 <code>ETag</code>、<code>Digest: sha-256=...</code> 和 <code>X-Content-Type-Options: nosniff</code>。</td></tr>
+                  <tr><td><code>GET /api/v3/plugins/:id/versions/:commit/icon</code></td><td>否</td><td>读取图标，使用 sandbox CSP。</td></tr>
+                  <tr><td><code>POST /api/v3/submissions</code></td><td>GitHub 会话 + CSRF</td><td>提交公开 GitHub 仓库根链接，创建异步校验任务。</td></tr>
+                  <tr><td><code>GET /api/v3/submissions/:id</code></td><td>本人或管理员</td><td>读取任务状态、识别到的 plugin ID、commit 和错误信息。</td></tr>
+                  <tr><td><code>GET /api/v3/me/plugins</code></td><td>GitHub 会话</td><td>读取当前用户的 contract_v1 投稿和插件记录。</td></tr>
+                  <tr><td><code>POST /api/v3/plugins/:id/revalidate</code></td><td>插件所有者 + CSRF</td><td>为同一公开仓库重新创建校验任务。</td></tr>
+                  <tr><td><code>POST /api/v3/plugins/:id/unpublish</code></td><td>插件所有者 + CSRF</td><td>下架当前插件。</td></tr>
+                  <tr><td><code>POST /api/v3/plugins/:id/reports</code></td><td>GitHub 会话 + CSRF</td><td>提交举报；<code>reason</code> 必填，<code>details</code> 可选。</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <h3>目录与更新</h3>
+            <pre><code>GET /api/v3/plugins?category=academic&amp;limit=20
+
+{
+  "apiVersion": 3,
+  "contractProfile": "contract_v1",
+  "items": [{
+    "id": "io.example.demo",
+    "version": "1.0.0",
+    "runtimeFloor": 2,
+    "capabilities": { "required": ["runtime.lifecycle@1"], "optional": [] },
+    "origins": { "connect": [], "media": [], "frame": [], "navigation": [] },
+    "archiveSha256": "...",
+    "packageDigestSha256": "..."
+  }],
+  "nextCursor": null
+}</code></pre>
+            <pre><code>POST /api/v3/plugins/resolve-updates
+Content-Type: application/json
+
+{
+  "installed": [{
+    "id": "io.example.demo",
+    "commitSha": "previous-commit",
+    "publisherSubjectId": "github-owner:12345",
+    "contractProfile": "contract_v1"
+  }]
+}</code></pre>
+            <h3>投稿和 CSRF</h3>
+            <p>
+              先经 <code>GET /api/v1/auth/github/start</code> 完成 GitHub 登录；再使用
+              <code>GET /api/v1/auth/me</code> 取得 <code>csrfToken</code>，在所有写请求中发送
+              <code>X-CSRF-Token</code>。投稿只接受 <code>https://github.com/{owner}/{repo}</code>
+              形式的公开仓库根链接；每个账号每天最多提交或重校验 10 次。
+            </p>
+            <pre><code>POST /api/v3/submissions
+X-CSRF-Token: &lt;csrfToken&gt;
+Content-Type: application/json
+
+{ "repositoryUrl": "https://github.com/example/course-reminder" }
+
+// 202 Accepted
+{
+  "apiVersion": 3,
+  "id": "submission-id",
+  "status": "queued",
+  "requiredSchemaVersion": 3,
+  "requiredManifest": "bjtu-plugin.json",
+  "requiredMarketplace": "bjtu-marketplace.json",
+  "contractProfile": "contract_v1"
+}</code></pre>
+            <div class="docs-callout">
+              <strong>平台不执行插件代码</strong>
+              <p>校验 worker 只下载归档、静态扫描并规范化打包 Manifest、marketplace 与 <code>dist/</code>。首次发布后 publisher subject 固定为 GitHub owner 数值 ID；owner 转移需管理员审批。</p>
+            </div>
           </section>
 
           <section class="docs-section reveal" id="release">

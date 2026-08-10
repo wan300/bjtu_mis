@@ -162,8 +162,8 @@ android {
         applicationId = "cn.edu.bjtu.mis"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "v1.4.0"
+        versionCode = 8
+        versionName = "v1.4.1"
 
         buildConfigField("String", "PLUGIN_CATALOG_BASE_URL", "\"https://bjtu.cc\"")
 
@@ -264,6 +264,10 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.coil.svg)
+    implementation(libs.commonmark)
+    implementation(libs.commonmark.gfm.tables)
+    implementation(libs.commonmark.gfm.strikethrough)
+    implementation(libs.commonmark.gfm.task.list.items)
 
     ksp(libs.androidx.room.compiler)
 

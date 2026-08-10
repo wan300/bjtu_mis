@@ -118,6 +118,8 @@ fun ThirdPartyServicesScreen(
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var pendingPreview by remember { mutableStateOf<ThirdPartyServiceImportPreview?>(null) }
+    var readmePreview by remember { mutableStateOf<ThirdPartyServiceImportPreview?>(null) }
+    var readmeState by remember { mutableStateOf<LoadState<String?>>(LoadState.Loading) }
     val runtimeEnvironment = rememberPluginWebViewRuntimeEnvironment()
 
     fun load() {
@@ -180,6 +182,7 @@ fun ThirdPartyServicesScreen(
                 .onSuccess {
                     githubUrl = ""
                     pendingPreview = null
+                    readmePreview = null
                     message = if (it.updatedExisting) {
                         "已更新服务，请重新确认 Capability"
                     } else {
@@ -194,8 +197,29 @@ fun ThirdPartyServicesScreen(
 
     fun cancelPreview(preview: ThirdPartyServiceImportPreview) {
         repository.discardPreparedImport(preview.token)
+        if (readmePreview?.token == preview.token) readmePreview = null
         pendingPreview = null
         message = "已取消导入"
+    }
+
+    fun loadReadme(preview: ThirdPartyServiceImportPreview) {
+        readmeState = LoadState.Loading
+        scope.launch {
+            runCatching { repository.loadPreparedImportReadme(preview) }
+                .onSuccess {
+                    if (readmePreview?.token == preview.token) readmeState = LoadState.Data(it)
+                }
+                .onFailure {
+                    if (readmePreview?.token == preview.token) {
+                        readmeState = LoadState.Error(it.message ?: "GitHub README 暂时不可用")
+                    }
+                }
+        }
+    }
+
+    fun showReadme(preview: ThirdPartyServiceImportPreview) {
+        readmePreview = preview
+        loadReadme(preview)
     }
 
     LaunchedEffect(Unit) {
@@ -262,7 +286,13 @@ fun ThirdPartyServicesScreen(
                 Text(currentMessage, color = if (currentMessage.contains("失败")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             } }
             pendingPreview?.let { preview -> item {
-                ThirdPartyImportPreviewCard(preview, busy, { commitPreview(preview) }, { cancelPreview(preview) })
+                ThirdPartyImportPreviewCard(
+                    preview = preview,
+                    busy = busy,
+                    onConfirm = { commitPreview(preview) },
+                    onCancel = { cancelPreview(preview) },
+                    onShowReadme = { showReadme(preview) },
+                )
             } }
             when (val current = catalogState) {
                 LoadState.Loading, is LoadState.Error -> item { LoadingOrError(current) }
@@ -323,6 +353,7 @@ fun ThirdPartyServicesScreen(
                     busy = busy,
                     onConfirm = { commitPreview(preview) },
                     onCancel = { cancelPreview(preview) },
+                    onShowReadme = { showReadme(preview) },
                 )
             }
         }
@@ -367,6 +398,15 @@ fun ThirdPartyServicesScreen(
             }
         }
         }
+    }
+
+    readmePreview?.let { preview ->
+        PluginReadmePreviewDialog(
+            preview = preview,
+            state = readmeState,
+            onRetry = { loadReadme(preview) },
+            onDismiss = { readmePreview = null },
+        )
     }
 }
 
@@ -444,6 +484,7 @@ private fun ThirdPartyImportPreviewCard(
     busy: Boolean,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
+    onShowReadme: () -> Unit,
 ) {
     val runtimeEnvironment = rememberPluginWebViewRuntimeEnvironment()
     InfoCard(
@@ -516,6 +557,9 @@ private fun ThirdPartyImportPreviewCard(
             navigation = preview.manifest.navigationOrigins,
             bridge = preview.manifest.bridgeOrigins,
         )
+        OutlinedButton(onClick = onShowReadme, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Text("查看 README")
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             Button(onClick = onConfirm, enabled = !busy, modifier = Modifier.weight(1f)) {
                 Text(if (preview.updatedExisting) "确认更新" else "确认导入")

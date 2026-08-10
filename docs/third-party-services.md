@@ -319,3 +319,14 @@ npm test
 npm run test:integration
 npm run test:e2e
 ```
+
+## GitHub README 预览
+
+Android 插件大厅和 GitHub 直链导入会在安装预检完成后提供 README 预览。预览请求固定到
+预检使用的 `owner/repo@commit`，单次 README 不超过 1 MiB，并使用无 Cookie、无认证、禁止
+重定向的只读客户端；成功内容只保存在本次应用进程的有界内存缓存中，不写入 Room 或文件。
+
+README Markdown 在宿主侧清洗后以独立浮窗 WebView 展示。该 WebView 禁用 JavaScript、DOM
+存储、文件访问和混合内容，不注入插件桥，也不加载插件资源。仅允许 HTTPS GitHub/GitHub
+User Content/GitHub Assets 图片，其他资源会被移除；README 链接只在用户点击时交给系统浏览器。
+README 缺失或读取失败不会阻止用户继续确认或取消安装。

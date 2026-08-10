@@ -7,6 +7,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.util.LinkedHashMap
 
 class ThirdPartyServiceRepository(
     private val dao: ThirdPartyServiceDao,
@@ -21,6 +22,11 @@ class ThirdPartyServiceRepository(
 ) {
     private val bundledInstallMutex = Mutex()
     private val cleanupMutex = Mutex()
+    private val readmeCacheMutex = Mutex()
+    private val readmeCache = object : LinkedHashMap<ReadmeCacheKey, ReadmeCacheValue>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<ReadmeCacheKey, ReadmeCacheValue>?): Boolean =
+            size > ReadmeCacheLimit
+    }
     private var bundledInstallChecked = false
 
     suspend fun ensureBundledServicesInstalled() {
@@ -232,6 +238,31 @@ class ThirdPartyServiceRepository(
         val service = getService(serviceId)
             ?: throw ThirdPartyServiceException("插件不存在：$serviceId")
         return grantCapabilities(service, grantedCapabilities)
+    }
+
+    /**
+     * Keeps README content in memory only, keyed by the same repository revision that was
+     * downloaded during import preflight. Missing README files are also cached for the session.
+     */
+    suspend fun loadPreparedImportReadme(preview: ThirdPartyServiceImportPreview): String? {
+        val key = ReadmeCacheKey(preview.githubOwner, preview.githubRepo, preview.commitSha)
+        readmeCacheMutex.withLock {
+            readmeCache[key]?.let { cached ->
+                return cached.markdown
+            }
+        }
+        val readme = installer.fetchReadme(
+            source = GitHubRepositoryRef(
+                owner = preview.githubOwner,
+                repo = preview.githubRepo,
+                canonicalUrl = preview.sourceUrl,
+            ),
+            commitSha = preview.commitSha,
+        )
+        readmeCacheMutex.withLock {
+            readmeCache[key] = ReadmeCacheValue(readme)
+        }
+        return readme
     }
 
     private suspend fun grantCapabilities(
@@ -670,6 +701,16 @@ class ThirdPartyServiceRepository(
             verificationLevel = verificationLevel,
         )
 }
+
+private data class ReadmeCacheKey(
+    val owner: String,
+    val repo: String,
+    val commitSha: String,
+)
+
+private data class ReadmeCacheValue(val markdown: String?)
+
+private const val ReadmeCacheLimit = 10
 
 private fun missingConfigurationKeys(
     manifest: ThirdPartyServiceManifest,

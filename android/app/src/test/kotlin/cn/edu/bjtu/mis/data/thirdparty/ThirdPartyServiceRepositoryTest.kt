@@ -213,6 +213,25 @@ class ThirdPartyServiceRepositoryTest {
     }
 
     @Test
+    fun preparedReadmeIsCachedByPinnedRepositoryRevision() = runBlocking {
+        MockWebServer().use { server ->
+            val dao = FakeThirdPartyServiceDao()
+            val repository = repository(server, dao)
+            enqueueGithubPackage(server)
+            val preview = repository.prepareImportFromGitHub("https://github.com/alice/demo")
+            server.enqueue(
+                MockResponse()
+                    .setHeader("Content-Type", "text/markdown")
+                    .setBody("# Demo README"),
+            )
+
+            assertEquals("# Demo README", repository.loadPreparedImportReadme(preview))
+            assertEquals("# Demo README", repository.loadPreparedImportReadme(preview))
+            assertEquals(4, server.requestCount)
+        }
+    }
+
+    @Test
     fun failedPhysicalCleanupLeavesTombstoneAndRetriesOnNextStartup() = runBlocking {
         MockWebServer().use { server ->
             val servicesRoot = temp.newFolder("services-${System.nanoTime()}")
