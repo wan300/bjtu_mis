@@ -617,7 +617,6 @@ fun ProfileThemeScreen(
     onUiStyleSelected: (AppUiStyle) -> Unit,
     onReduceMotionSelected: (AppEffectOverride) -> Unit,
     onReduceTransparencySelected: (AppEffectOverride) -> Unit,
-    onHideThirdPartyServiceTopBarChanged: (Boolean) -> Unit = {},
 ) {
     val effects = LocalAppEffects.current
     LazyColumn(
@@ -703,17 +702,6 @@ fun ProfileThemeScreen(
                     override = appearance.reduceTransparencyOverride,
                     effectiveValue = effects.reduceTransparency,
                     onOverrideChanged = onReduceTransparencySelected,
-                )
-            }
-        }
-        item {
-            ThemeSettingsSection(
-                title = "插件显示",
-                subtitle = "调整第三方插件运行时的宿主界面",
-            ) {
-                PluginDisplayPreferenceRow(
-                    checked = appearance.hideThirdPartyServiceTopBar,
-                    onCheckedChange = onHideThirdPartyServiceTopBarChanged,
                 )
             }
         }
@@ -921,58 +909,6 @@ private fun EffectPreferenceRow(
     }
 }
 
-@Composable
-private fun PluginDisplayPreferenceRow(
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    val isApple = LocalAppUiStyle.current == AppUiStyle.Apple
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("hide-third-party-service-top-bar")
-            .toggleable(
-                value = checked,
-                role = Role.Switch,
-                onValueChange = onCheckedChange,
-            ),
-        color = MaterialTheme.colorScheme.surface,
-        shape = MaterialTheme.shapes.large,
-        border = if (isApple) {
-            null
-        } else {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
-        },
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                Text(
-                    text = "隐藏插件页顶栏",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = "插件将占满应用内容区；使用系统返回键或返回手势浏览历史并退出",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
-                checked = checked,
-                onCheckedChange = null,
-            )
-        }
-    }
-}
 
 @Composable
 private fun ProfileInfoDetailScreen(

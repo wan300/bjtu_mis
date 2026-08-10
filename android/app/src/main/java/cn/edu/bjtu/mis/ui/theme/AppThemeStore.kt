@@ -1,7 +1,6 @@
 package cn.edu.bjtu.mis.ui.theme
 
 import android.content.Context
-import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -52,8 +51,6 @@ class AppThemeStore(
                 reduceTransparencyOverride = AppEffectOverride.fromStorageValue(
                     preferences[REDUCE_TRANSPARENCY],
                 ),
-                hideThirdPartyServiceTopBar = preferences[HIDE_THIRD_PARTY_SERVICE_TOP_BAR]
-                    ?: false,
             )
         }
 
@@ -103,18 +100,10 @@ class AppThemeStore(
         }
     }
 
-    suspend fun saveHideThirdPartyServiceTopBar(hidden: Boolean) {
-        dataStore.edit { preferences ->
-            preferences[HIDE_THIRD_PARTY_SERVICE_TOP_BAR] = hidden
-        }
-    }
-
     private companion object {
         val THEME = stringPreferencesKey("theme")
         val UI_STYLE = stringPreferencesKey("ui_style")
         val REDUCE_MOTION = stringPreferencesKey("reduce_motion")
         val REDUCE_TRANSPARENCY = stringPreferencesKey("reduce_transparency")
-        val HIDE_THIRD_PARTY_SERVICE_TOP_BAR =
-            booleanPreferencesKey("hide_third_party_service_top_bar")
     }
 }

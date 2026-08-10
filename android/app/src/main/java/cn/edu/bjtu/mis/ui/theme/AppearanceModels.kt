@@ -37,7 +37,6 @@ data class AppAppearancePreferences(
     val uiStyle: AppUiStyle = AppUiStyle.Classic,
     val reduceMotionOverride: AppEffectOverride = AppEffectOverride.FollowSystem,
     val reduceTransparencyOverride: AppEffectOverride = AppEffectOverride.FollowSystem,
-    val hideThirdPartyServiceTopBar: Boolean = false,
 )
 
 data class EffectiveAppEffects(

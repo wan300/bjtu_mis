@@ -211,7 +211,6 @@ fun BjtuMisApp(
     var hasOpenedOpenWebUiAgent by rememberSaveable { mutableStateOf(false) }
     var updateCheckStarted by remember { mutableStateOf(false) }
     var pendingUpdate by remember { mutableStateOf<AppUpdateInfo?>(null) }
-    var thirdPartyServiceTitle by remember { mutableStateOf<String?>(null) }
     var homeworkDetailTarget by remember { mutableStateOf<HomeworkItem?>(null) }
     var homeworkDetailReturnRoute by rememberSaveable { mutableStateOf(ModuleKeys.Homework) }
     var initialLoadStrategyConsumed by rememberSaveable { mutableStateOf(false) }
@@ -293,22 +292,6 @@ fun BjtuMisApp(
                 onAppearancePreview(null)
                 haptics.perform(AppHapticEvent.Error)
                 snackbarHostState.showSnackbar("透明效果设置保存失败")
-            }
-        }
-    }
-
-    fun setThirdPartyServiceTopBarHidden(hidden: Boolean) {
-        if (hidden == appearance.hideThirdPartyServiceTopBar) return
-        onAppearancePreview(appearance.copy(hideThirdPartyServiceTopBar = hidden))
-        scope.launch {
-            try {
-                container.themeStore.saveHideThirdPartyServiceTopBar(hidden)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                onAppearancePreview(null)
-                haptics.perform(AppHapticEvent.Error)
-                snackbarHostState.showSnackbar("插件显示设置保存失败，已恢复原设置")
             }
         }
     }
@@ -470,19 +453,6 @@ fun BjtuMisApp(
             hasOpenedOpenWebUiAgent = true
         }
     }
-    LaunchedEffect(current) {
-        val serviceId = thirdPartyServiceIdFromRoute(current)
-        if (serviceId == null) {
-            thirdPartyServiceTitle = null
-        } else {
-            thirdPartyServiceTitle = null
-            thirdPartyServiceTitle = runCatching {
-                container.thirdPartyServiceRepository.getService(serviceId)?.manifest?.name
-            }
-                .getOrNull()
-                ?.takeIf { it.isNotBlank() }
-        }
-    }
     LaunchedEffect(requestedRoute, ready) {
         val route = requestedRoute
         if (ready == true && !route.isNullOrBlank()) {
@@ -630,8 +600,6 @@ fun BjtuMisApp(
                             onUiStyleSelected = ::selectUiStyle,
                             onReduceMotionSelected = ::selectReduceMotion,
                             onReduceTransparencySelected = ::selectReduceTransparency,
-                            onHideThirdPartyServiceTopBarChanged =
-                                ::setThirdPartyServiceTopBarHidden,
                         )
                     }
                     RouteProfileHomeworkReminder -> MainScreenPadding {
@@ -785,20 +753,7 @@ fun BjtuMisApp(
                             title = "插件运行环境诊断",
                             onBack = { current = THIRD_PARTY_SERVICES_ROUTE },
                         )
-                        thirdPartyServiceIdFromRoute(current) != null -> {
-                            if (
-                                !shouldHideAppTopBarForThirdPartyService(
-                                    route = current,
-                                    hideThirdPartyServiceTopBar =
-                                        appearance.hideThirdPartyServiceTopBar,
-                                )
-                            ) {
-                                DetailTitleBar(
-                                    title = thirdPartyServiceTitle ?: "第三方服务",
-                                    onBack = { current = THIRD_PARTY_SERVICES_ROUTE },
-                                )
-                            }
-                        }
+                        thirdPartyServiceIdFromRoute(current) != null -> Unit
                         current in ProfileDetailRouteTitles -> DetailTitleBar(
                             title = ProfileDetailRouteTitles.getValue(current),
                             onBack = {
@@ -925,12 +880,6 @@ fun BjtuMisApp(
 
 private fun normalizeRoute(route: String): String =
     if (route == LegacyNativeAgentRoute) ModuleKeys.OpenWebUiAgent else route
-
-internal fun shouldHideAppTopBarForThirdPartyService(
-    route: String,
-    hideThirdPartyServiceTopBar: Boolean,
-): Boolean =
-    hideThirdPartyServiceTopBar && thirdPartyServiceIdFromRoute(route) != null
 
 @Composable
 private fun MainScreenPadding(content: @Composable () -> Unit) {

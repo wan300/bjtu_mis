@@ -34,11 +34,6 @@ class AppearanceModelsTest {
     }
 
     @Test
-    fun `plugin top bar remains visible by default`() {
-        assertFalse(AppAppearancePreferences().hideThirdPartyServiceTopBar)
-    }
-
-    @Test
     fun `all existing theme storage values remain stable`() {
         assertEquals(AppThemeOption.Default, AppThemeOption.fromStorageValue("default"))
         assertEquals(AppThemeOption.MascotGold, AppThemeOption.fromStorageValue("mascot_gold"))
