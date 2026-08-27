@@ -26,6 +26,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.io.File
+import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -42,13 +43,17 @@ class BridgeTransport(
     private val binaryDirectory: File,
     private val runtimeEnvironment: PluginWebViewRuntimeEnvironment =
         PluginWebViewPolicy.runtimeEnvironment(),
+    private val backgroundRuntime: Boolean = false,
     private val nowMillis: () -> Long = SystemClock::elapsedRealtime,
 ) {
+    internal val runtimeId = UUID.randomUUID().toString()
     private val jobs = ConcurrentHashMap<String, Job>()
     private val binaryTimeoutJobs = ConcurrentHashMap<String, Job>()
     private val binaryStaging = PluginBinaryStagingManager<PluginBridgeRequest>(binaryDirectory)
     private val eventAcknowledgements =
         ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+    private val pendingEvents = ArrayDeque<PluginRuntimeEvent>()
+    private val pendingEventsLock = Any()
     @Volatile private var awaitingChunk: PendingChunkHeader? = null
     @Volatile private var eventReplyProxy: JavaScriptReplyProxy? = null
     @Volatile private var negotiatedBinaryTransport: PluginBinaryTransport? = null
@@ -75,6 +80,7 @@ class BridgeTransport(
             return
         }
         eventReplyProxy = replyProxy
+        flushPendingEvents()
         when (message.type) {
             WebMessageCompat.TYPE_STRING ->
                 handleString(message.data.orEmpty(), sourceOrigin.toString(), replyProxy)
@@ -85,7 +91,25 @@ class BridgeTransport(
     }
 
     fun sendEvent(event: PluginRuntimeEvent) {
+        if (eventReplyProxy == null) {
+            synchronized(pendingEventsLock) {
+                if (eventReplyProxy == null) {
+                    if (pendingEvents.size == MAX_PENDING_EVENTS) pendingEvents.removeFirst()
+                    pendingEvents.addLast(event)
+                    return
+                }
+            }
+        }
         postEvent(event, requiresAcknowledgement = false)
+    }
+
+    private fun flushPendingEvents() {
+        val queued = synchronized(pendingEventsLock) {
+            buildList {
+                while (pendingEvents.isNotEmpty()) add(pendingEvents.removeFirst())
+            }
+        }
+        queued.forEach { event -> postEvent(event, requiresAcknowledgement = false) }
     }
 
     suspend fun sendEventAwaitingAcknowledgement(
@@ -141,6 +165,8 @@ class BridgeTransport(
     }
 
     fun close() {
+        AndroidAccessibilityController.detachRuntime(runtimeId)
+        AndroidNativeEventController.detachRuntime(runtimeId)
         jobs.values.forEach(Job::cancel)
         jobs.clear()
         binaryTimeoutJobs.values.forEach(Job::cancel)
@@ -150,6 +176,7 @@ class BridgeTransport(
         eventAcknowledgements.clear()
         awaitingChunk = null
         eventReplyProxy = null
+        synchronized(pendingEventsLock) { pendingEvents.clear() }
         scope.cancel()
     }
 
@@ -502,6 +529,8 @@ class BridgeTransport(
                     eventSink = ::sendEvent,
                     requestId = request.requestId,
                     runtimeEnvironment = runtimeEnvironment,
+                    runtimeId = runtimeId,
+                    backgroundRuntime = backgroundRuntime,
                     timeoutMsOverride = remainingTimeoutMs,
                 )
                 val ok = response["ok"]?.jsonPrimitive?.contentOrNull == "true"
@@ -605,6 +634,7 @@ class BridgeTransport(
 
     companion object {
         const val OBJECT_NAME = "BjtuPluginNativeV2"
+        private const val MAX_PENDING_EVENTS = 128
 
         fun documentStartScript(binarySupported: Boolean): String = """
             (function () {

@@ -175,6 +175,8 @@ class ThirdPartyServiceRepository(
             existing?.runtimeProfile != ThirdPartyRuntimeProfile.ContractV1.value ||
             (installed.manifest.requiredCapabilities.toSet() - previousDeclaredCapabilities).isNotEmpty() ||
             (declaredCapabilities - previousDeclaredCapabilities).isNotEmpty() ||
+            (previousDeclaredCapabilities.filter { it.startsWith("android.") }.toSet() -
+                declaredCapabilities).isNotEmpty() ||
             (installed.manifest.remoteOrigins.toSet() -
                 previousService?.manifest?.remoteOrigins.orEmpty().toSet()).isNotEmpty()
         val entity = installed.toEntity(
@@ -212,6 +214,23 @@ class ThirdPartyServiceRepository(
             installed.manifest.id,
             setOfNotNull(installed.commitSha, existing?.commitSha),
         )
+        if (previousService != null && (requiresSecurityReview || !entity.enabled)) {
+            revokeAllAndroidAutomation(
+                previousService.publisherSubjectId,
+                previousService.serviceId,
+            )
+        } else if (
+            previousService != null &&
+            (
+                "android.accessibility.events@1" !in entity.toModel().grantedCapabilities ||
+                    "android.accessibility.events@1" !in declaredCapabilities
+                )
+        ) {
+            AndroidAccessibilityController.revokeAccessibility(
+                previousService.publisherSubjectId,
+                previousService.serviceId,
+            )
+        }
         return ThirdPartyServiceInstallResult(
             service = entity.toModel(),
             updatedExisting = existing != null,
@@ -300,6 +319,12 @@ class ThirdPartyServiceRepository(
             needsReview = false,
             updatedAt = nowIso(),
         )
+        if ("android.accessibility.events@1" !in normalized) {
+            AndroidAccessibilityController.revokeAccessibility(
+                service.publisherSubjectId,
+                service.serviceId,
+            )
+        }
         return getService(service.serviceId)
             ?: throw ThirdPartyServiceException("插件不存在：${service.serviceId}")
     }
@@ -322,21 +347,32 @@ class ThirdPartyServiceRepository(
         configurationStore.save(serviceId, normalized)
         val complete = missingConfigurationKeys(service.manifest, normalized).isEmpty()
         val requiredCapabilities = service.manifest.requiredCapabilities.toSet()
+        val enabled = service.runtimeProfile == ThirdPartyRuntimeProfile.ContractV1.value &&
+            !service.needsReview &&
+            complete &&
+            service.grantedCapabilities.containsAll(requiredCapabilities)
         dao.updateGrantState(
             serviceId = serviceId,
             grantedCapabilitiesJson = AppJson.encodeToString(service.grantedCapabilities.sorted()),
-            enabled = service.runtimeProfile == ThirdPartyRuntimeProfile.ContractV1.value &&
-                !service.needsReview &&
-                complete &&
-                service.grantedCapabilities.containsAll(requiredCapabilities),
+            enabled = enabled,
             needsReview = service.needsReview,
             updatedAt = nowIso(),
         )
+        if (!enabled) {
+            revokeAllAndroidAutomation(
+                service.publisherSubjectId,
+                service.serviceId,
+            )
+        }
         return getService(serviceId) ?: throw ThirdPartyServiceException("第三方服务不存在：$serviceId")
     }
 
     suspend fun requireReview(serviceId: String) {
         val service = getService(serviceId) ?: throw ThirdPartyServiceException("第三方服务不存在：$serviceId")
+        revokeAllAndroidAutomation(
+            service.publisherSubjectId,
+            service.serviceId,
+        )
         dao.updateGrantState(
             serviceId = serviceId,
             grantedCapabilitiesJson = AppJson.encodeToString(service.grantedCapabilities.sorted()),
@@ -356,6 +392,10 @@ class ThirdPartyServiceRepository(
 
     suspend fun deleteService(serviceId: String) {
         val existing = dao.getService(serviceId) ?: return
+        revokeAllAndroidAutomation(
+            existing.publisherSubjectId,
+            existing.serviceId,
+        )
         val webStorageSubject = existing.publisherSubjectId
             .takeIf(String::isNotBlank)
             ?: existing.commitSha
@@ -499,8 +539,25 @@ class ThirdPartyServiceRepository(
         if (currentKvShadowed && store != null) {
             store.discardShadow(namespace)
         }
+        val restoredService = restored.toModel()
+        val restoredDeclared = restoredService.manifest.requiredCapabilities +
+            restoredService.manifest.optionalCapabilities
+        if (!restoredService.canRun) {
+            revokeAllAndroidAutomation(
+                restoredService.publisherSubjectId,
+                restoredService.serviceId,
+            )
+        } else if (
+            "android.accessibility.events@1" !in restoredService.grantedCapabilities ||
+                "android.accessibility.events@1" !in restoredDeclared
+        ) {
+            AndroidAccessibilityController.revokeAccessibility(
+                restoredService.publisherSubjectId,
+                restoredService.serviceId,
+            )
+        }
         installer.pruneInstalledVersions(serviceId, setOf(snapshot.commitSha, current.commitSha))
-        return restored.toModel()
+        return restoredService
     }
 
     private fun PreparedThirdPartyServicePackage.toPreview(
@@ -700,6 +757,11 @@ class ThirdPartyServiceRepository(
             runtimeFloor = runtimeFloor,
             verificationLevel = verificationLevel,
         )
+
+    private fun revokeAllAndroidAutomation(publisherSubjectId: String, serviceId: String) {
+        AndroidAccessibilityController.revokeService(publisherSubjectId, serviceId)
+        AndroidNativeRuntimeController.revokeService(publisherSubjectId, serviceId)
+    }
 }
 
 private data class ReadmeCacheKey(

@@ -59,9 +59,14 @@ import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyServiceRepository
 import cn.edu.bjtu.mis.data.thirdparty.FileThirdPartyKvStore
 import cn.edu.bjtu.mis.data.thirdparty.FileThirdPartyResourceStore
 import cn.edu.bjtu.mis.data.thirdparty.FilePluginCommandReceiptStore
+import cn.edu.bjtu.mis.data.thirdparty.FilePluginAutomationStore
+import cn.edu.bjtu.mis.data.thirdparty.PluginAutomationSupervisor
 import cn.edu.bjtu.mis.data.thirdparty.PluginNetworkProvider
 import cn.edu.bjtu.mis.data.thirdparty.PluginBinaryStagingManager
 import cn.edu.bjtu.mis.data.thirdparty.AndroidThirdPartyWebStorageCleaner
+import cn.edu.bjtu.mis.data.thirdparty.AndroidSystemCapabilityProvider
+import cn.edu.bjtu.mis.data.thirdparty.AndroidNativeCapabilityProvider
+import cn.edu.bjtu.mis.data.thirdparty.AndroidNativeEventController
 import cn.edu.bjtu.mis.data.thirdparty.WebViewThirdPartyDataMigrationRunner
 import cn.edu.bjtu.mis.data.update.AppUpdateChecker
 import cn.edu.bjtu.mis.data.update.AppUpdatePreferenceStore
@@ -235,6 +240,9 @@ class AppContainer(context: Context) {
     val thirdPartyCommandReceiptStore: FilePluginCommandReceiptStore by lazy {
         FilePluginCommandReceiptStore(appContext)
     }
+    val pluginAutomationStore: FilePluginAutomationStore by lazy {
+        FilePluginAutomationStore(appContext)
+    }
     val thirdPartyNetworkProvider: PluginNetworkProvider by lazy {
         PluginNetworkProvider(thirdPartyResourceStore)
     }
@@ -275,7 +283,31 @@ class AppContainer(context: Context) {
                 resourceStore = thirdPartyResourceStore,
                 networkProvider = thirdPartyNetworkProvider,
                 commandReceiptStore = thirdPartyCommandReceiptStore,
+                androidSystemProvider = AndroidSystemCapabilityProvider(
+                    appContext,
+                    pluginAutomationStore,
+                ),
+                androidNativeProvider = AndroidNativeCapabilityProvider(
+                    context = appContext,
+                    resourceStore = thirdPartyResourceStore,
+                    automationStore = pluginAutomationStore,
+                ),
             )
         }
+    }
+    val pluginAutomationSupervisor: PluginAutomationSupervisor by lazy {
+        PluginAutomationSupervisor(
+            context = appContext,
+            repository = thirdPartyServiceRepository,
+            apiRegistry = thirdPartyServiceApiRegistry,
+            resourceStore = thirdPartyResourceStore,
+            kvStore = thirdPartyKvStore,
+            automationStore = pluginAutomationStore,
+        ).also(AndroidNativeEventController::configureSupervisor)
+    }
+
+    init {
+        // Restores only already-authorized persistent plugin runtimes after process recreation.
+        pluginAutomationSupervisor
     }
 }

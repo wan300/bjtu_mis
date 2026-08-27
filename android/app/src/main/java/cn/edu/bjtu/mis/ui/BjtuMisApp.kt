@@ -141,6 +141,7 @@ import cn.edu.bjtu.mis.ui.theme.LocalAppUiStyle
 import cn.edu.bjtu.mis.ui.theme.LocalAppWindowWidthClass
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 private const val RouteHome = "overview"
 private const val RouteServices = "services"
@@ -150,6 +151,7 @@ private const val RouteProfileTrainingInfo = "profile_training_info"
 private const val RouteProfileTheme = "profile_theme"
 private const val RouteProfileHomeworkReminder = "profile_homework_reminder"
 private const val RouteHomeworkDetail = "homework_detail"
+private const val UiStyleUndoSnackbarDurationMillis = 5_000L
 private val MainRoutes = setOf(RouteHome, RouteServices, ModuleKeys.OpenWebUiAgent, ModuleKeys.Profile)
 private val ProfileDetailRouteTitles = mapOf(
     RouteProfilePersonalInfo to "人员信息",
@@ -245,10 +247,12 @@ fun BjtuMisApp(
                     onPreview = onAppearancePreview,
                     persist = container.themeStore::saveUiStyle,
                     showUndo = { message ->
-                        snackbarHostState.showSnackbar(
-                            message = message,
-                            actionLabel = "撤销",
-                        ) == SnackbarResult.ActionPerformed
+                        withTimeoutOrNull(UiStyleUndoSnackbarDurationMillis) {
+                            snackbarHostState.showSnackbar(
+                                message = message,
+                                actionLabel = "撤销",
+                            )
+                        } == SnackbarResult.ActionPerformed
                     },
                 )
                 if (outcome == UiStyleChangeOutcome.Undone) {

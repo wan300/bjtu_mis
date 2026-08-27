@@ -137,6 +137,123 @@ test('SDK routes events and binary payloads', async () => {
   assert.equal(transport.requests.at(-1).request.params.size, 0);
 });
 
+test('SDK exposes typed Android automation namespaces and events', async () => {
+  const transport = createMockTransport();
+  const sdk = createBjtuPluginSdk(transport);
+  const received = [];
+  const remove = sdk.android.accessibility.events.onReceived((event) => {
+    received.push(event);
+  });
+
+  const status = await sdk.android.accessibility.events.getStatus();
+  await sdk.android.accessibility.events.subscribe({
+    eventTypes: ['viewClicked'],
+    packageNames: ['com.example.app'],
+    persistent: true,
+    includeSource: true
+  });
+  await sdk.android.accessibility.nodes.find({ selector: { clickable: true }, maxResults: 4 });
+  await sdk.android.accessibility.actions.performGlobal({
+    idempotencyKey: 'go-home-1',
+    action: 'home'
+  });
+  await sdk.android.packages.list({ includeSystem: false });
+  await sdk.android.settings.open({ action: 'android.settings.ACCESSIBILITY_SETTINGS' });
+  await transport.emit('android.accessibility.events@1', 'received', {
+    subscriptionId: 'subscription-1',
+    eventType: 'viewClicked',
+    packageName: 'com.example.app',
+    className: 'android.widget.Button',
+    eventTime: 42,
+    source: null
+  });
+  remove();
+
+  assert.equal(status.connected, true);
+  assert.deepEqual(
+    transport.requests.map(({ request }) => `${request.capability}#${request.method}`),
+    [
+      'android.accessibility.events@1#getStatus',
+      'android.accessibility.events@1#subscribe',
+      'android.accessibility.nodes@1#find',
+      'android.accessibility.actions@1#performGlobal',
+      'android.packages.read@1#list',
+      'android.settings.open@1#open'
+    ]
+  );
+  assert.equal(received[0].eventType, 'viewClicked');
+});
+
+test('SDK exposes persistent Android native namespaces and foreground gate', async () => {
+  const transport = createMockTransport();
+  const sdk = createBjtuPluginSdk(transport);
+  const networkEvents = [];
+  const dispose = sdk.android.network.onChanged((event) => networkEvents.push(event));
+
+  const device = await sdk.android.device.getInfo();
+  const network = await sdk.android.network.getStatus();
+  await sdk.android.battery.subscribe({ persistent: true });
+  await sdk.android.haptics.perform({ durationMs: 12 });
+  await sdk.android.notifications.show({
+    idempotencyKey: 'notice-1',
+    id: 'notice',
+    title: 'Mock',
+    body: 'Body'
+  });
+  await sdk.android.calendar.create({
+    idempotencyKey: 'calendar-1',
+    title: 'Mock event',
+    startMs: 1,
+    endMs: 2
+  });
+  await transport.emit('android.network.status@1', 'changed', {
+    online: true,
+    validated: true,
+    metered: false,
+    transport: 'wifi'
+  });
+
+  assert.equal(device.platform, 'android');
+  assert.equal(network.transport, 'wifi');
+  assert.equal(networkEvents.length, 1);
+  assert.ok(
+    transport.requests.some(
+      ({ request }) => request.capability === 'android.calendar.write@1' && request.method === 'create'
+    )
+  );
+  dispose();
+
+  const background = createBjtuPluginSdk(createMockTransport({ lifecycle: 'background' }));
+  await assert.rejects(
+    background.android.files.pick(),
+    (error) => error instanceof BjtuPluginError && error.code === 'foreground_required'
+  );
+});
+
+test('Mock Host models disconnected accessibility and Android quotas', async () => {
+  const disconnected = createBjtuPluginSdk(
+    createMockTransport({ accessibilityService: 'disconnected' })
+  );
+  assert.equal((await disconnected.android.accessibility.events.getStatus()).connected, false);
+  await assert.rejects(
+    disconnected.android.accessibility.nodes.getRoot(),
+    (error) => error instanceof BjtuPluginError && error.code === 'capability_unavailable'
+  );
+
+  const quota = createBjtuPluginSdk(createMockTransport({ quota: 'exceeded' }));
+  await assert.rejects(
+    quota.android.accessibility.actions.performGlobal({
+      idempotencyKey: 'go-home-2',
+      action: 'home'
+    }),
+    (error) => error instanceof BjtuPluginError && error.code === 'quota_exceeded'
+  );
+  await assert.rejects(
+    quota.android.settings.open({ action: 'android.settings.ACCESSIBILITY_SETTINGS' }),
+    (error) => error instanceof BjtuPluginError && error.code === 'quota_exceeded'
+  );
+});
+
 test('SDK rejects binary writes before a successful handshake', async () => {
   const transport = createMockTransport();
   const sdk = createBjtuPluginSdk(transport);

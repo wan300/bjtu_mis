@@ -162,6 +162,20 @@ export type CampusRequestResult = CapabilityResponse<'campus.request@1#request'>
 export type MailFoldersReadResult = CapabilityResponse<'mail.read@1#listFolders'>;
 export type MailMessagesReadResult = CapabilityResponse<'mail.read@1#listMessages'>;
 export type MailMessageReadResult = CapabilityResponse<'mail.read@1#getMessage'>;
+export type AndroidAccessibilityStatus = CapabilityResponse<'android.accessibility.events@1#getStatus'>;
+export type AndroidAccessibilitySubscription = CapabilityResponse<'android.accessibility.events@1#subscribe'>;
+export type AndroidAccessibilityEvent = CapabilityEventData<'android.accessibility.events@1#received'>;
+export type AndroidAccessibilityNode = CapabilityResponse<'android.accessibility.nodes@1#get'>;
+export type AndroidAccessibilityNodeList = CapabilityResponse<'android.accessibility.nodes@1#find'>;
+export type AndroidPackageInfo = CapabilityResponse<'android.packages.read@1#get'>;
+export type AndroidPackageList = CapabilityResponse<'android.packages.read@1#list'>;
+export type AndroidResolvedActivities = CapabilityResponse<'android.packages.read@1#resolveIntent'>;
+export type AndroidSettingsOpenResult = CapabilityResponse<'android.settings.open@1#open'>;
+export type AndroidNetworkStatus = CapabilityResponse<'android.network.status@1#getStatus'>;
+export type AndroidBatteryStatus = CapabilityResponse<'android.battery.status@1#getStatus'>;
+export type AndroidNetworkChangedEvent = CapabilityEventData<'android.network.status@1#changed'>;
+export type AndroidBatteryChangedEvent = CapabilityEventData<'android.battery.status@1#changed'>;
+export type AndroidSensorChangedEvent = CapabilityEventData<'android.sensors.read@1#changed'>;
 export type CommandReceipt =
   | CapabilityResponse<'academic.userCourses.command@1#save'>
   | CapabilityResponse<'academic.homework.submit@1#submit'>
@@ -309,6 +323,139 @@ export interface BjtuPluginSdk {
       request: CapabilityRequest<'mail.send@1#send'>,
       options?: InvokeOptions
     ): Promise<CapabilityResponse<'mail.send@1#send'>>;
+  };
+  readonly android: {
+    readonly accessibility: {
+      readonly events: {
+        getStatus(options?: InvokeOptions): Promise<AndroidAccessibilityStatus>;
+        subscribe(
+          request: CapabilityRequest<'android.accessibility.events@1#subscribe'>,
+          options?: InvokeOptions
+        ): Promise<AndroidAccessibilitySubscription>;
+        unsubscribe(
+          subscriptionId: string,
+          options?: InvokeOptions
+        ): Promise<CapabilityResponse<'android.accessibility.events@1#unsubscribe'>>;
+        listSubscriptions(
+          options?: InvokeOptions
+        ): Promise<CapabilityResponse<'android.accessibility.events@1#listSubscriptions'>>;
+        onReceived(
+          listener: (
+            data: AndroidAccessibilityEvent,
+            envelope: PluginEventV2
+          ) => boolean | void | Promise<boolean | void>
+        ): () => void;
+      };
+      readonly nodes: {
+        getRoot(
+          request?: CapabilityRequest<'android.accessibility.nodes@1#getRoot'>,
+          options?: InvokeOptions
+        ): Promise<CapabilityResponse<'android.accessibility.nodes@1#getRoot'>>;
+        find(
+          request: CapabilityRequest<'android.accessibility.nodes@1#find'>,
+          options?: InvokeOptions
+        ): Promise<AndroidAccessibilityNodeList>;
+        get(nodeId: string, options?: InvokeOptions): Promise<AndroidAccessibilityNode>;
+      };
+      readonly actions: {
+        performNode(
+          request: CapabilityRequest<'android.accessibility.actions@1#performNode'>,
+          options?: InvokeOptions
+        ): Promise<CapabilityResponse<'android.accessibility.actions@1#performNode'>>;
+        performGlobal(
+          request: CapabilityRequest<'android.accessibility.actions@1#performGlobal'>,
+          options?: InvokeOptions
+        ): Promise<CapabilityResponse<'android.accessibility.actions@1#performGlobal'>>;
+        dispatchGesture(
+          request: CapabilityRequest<'android.accessibility.actions@1#dispatchGesture'>,
+          options?: InvokeOptions
+        ): Promise<CapabilityResponse<'android.accessibility.actions@1#dispatchGesture'>>;
+      };
+    };
+    readonly packages: {
+      list(
+        request?: CapabilityRequest<'android.packages.read@1#list'>,
+        options?: InvokeOptions
+      ): Promise<AndroidPackageList>;
+      get(packageName: string, options?: InvokeOptions): Promise<AndroidPackageInfo>;
+      resolveIntent(
+        request: CapabilityRequest<'android.packages.read@1#resolveIntent'>,
+        options?: InvokeOptions
+      ): Promise<AndroidResolvedActivities>;
+    };
+    readonly settings: {
+      open(
+        request: CapabilityRequest<'android.settings.open@1#open'>,
+        options?: InvokeOptions
+      ): Promise<AndroidSettingsOpenResult>;
+    };
+    readonly device: {
+      getInfo(options?: InvokeOptions): Promise<CapabilityResponse<'android.device.info@1#getInfo'>>;
+    };
+    readonly network: {
+      getStatus(options?: InvokeOptions): Promise<AndroidNetworkStatus>;
+      subscribe(
+        request?: CapabilityRequest<'android.network.status@1#subscribe'>,
+        options?: InvokeOptions
+      ): Promise<CapabilityResponse<'android.network.status@1#subscribe'>>;
+      unsubscribe(subscriptionId: string, options?: InvokeOptions): Promise<CapabilityResponse<'android.network.status@1#unsubscribe'>>;
+      onChanged(listener: (data: AndroidNetworkChangedEvent, envelope: PluginEventV2) => boolean | void | Promise<boolean | void>): () => void;
+    };
+    readonly battery: {
+      getStatus(options?: InvokeOptions): Promise<AndroidBatteryStatus>;
+      subscribe(
+        request?: CapabilityRequest<'android.battery.status@1#subscribe'>,
+        options?: InvokeOptions
+      ): Promise<CapabilityResponse<'android.battery.status@1#subscribe'>>;
+      unsubscribe(subscriptionId: string, options?: InvokeOptions): Promise<CapabilityResponse<'android.battery.status@1#unsubscribe'>>;
+      onChanged(listener: (data: AndroidBatteryChangedEvent, envelope: PluginEventV2) => boolean | void | Promise<boolean | void>): () => void;
+    };
+    readonly haptics: {
+      perform(request: CapabilityRequest<'android.haptics.perform@1#perform'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.haptics.perform@1#perform'>>;
+    };
+    readonly files: {
+      pick(request?: CapabilityRequest<'android.files.pick@1#pick'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.files.pick@1#pick'>>;
+      save(request: CapabilityRequest<'android.files.save@1#save'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.files.save@1#save'>>;
+    };
+    readonly media: {
+      pick(request?: CapabilityRequest<'android.media.pick@1#pick'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.media.pick@1#pick'>>;
+    };
+    readonly share: {
+      open(request: CapabilityRequest<'android.share.open@1#open'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.share.open@1#open'>>;
+    };
+    readonly notifications: {
+      getStatus(options?: InvokeOptions): Promise<CapabilityResponse<'android.notifications.post@1#getStatus'>>;
+      show(request: CapabilityRequest<'android.notifications.post@1#show'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.notifications.post@1#show'>>;
+      schedule(request: CapabilityRequest<'android.notifications.post@1#schedule'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.notifications.post@1#schedule'>>;
+      cancel(request: CapabilityRequest<'android.notifications.post@1#cancel'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.notifications.post@1#cancel'>>;
+    };
+    readonly location: {
+      getStatus(options?: InvokeOptions): Promise<CapabilityResponse<'android.location.read@1#getStatus'>>;
+      getCurrent(request?: CapabilityRequest<'android.location.read@1#getCurrent'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.location.read@1#getCurrent'>>;
+    };
+    readonly calendar: {
+      list(request: CapabilityRequest<'android.calendar.read@1#list'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.calendar.read@1#list'>>;
+      create(request: CapabilityRequest<'android.calendar.write@1#create'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.calendar.write@1#create'>>;
+      update(request: CapabilityRequest<'android.calendar.write@1#update'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.calendar.write@1#update'>>;
+      delete(request: CapabilityRequest<'android.calendar.write@1#delete'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.calendar.write@1#delete'>>;
+    };
+    readonly camera: {
+      capturePhoto(options?: InvokeOptions): Promise<CapabilityResponse<'android.camera.capture@1#capturePhoto'>>;
+    };
+    readonly audio: {
+      start(request: CapabilityRequest<'android.audio.record@1#start'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.audio.record@1#start'>>;
+      stop(request: CapabilityRequest<'android.audio.record@1#stop'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.audio.record@1#stop'>>;
+    };
+    readonly sensors: {
+      list(options?: InvokeOptions): Promise<CapabilityResponse<'android.sensors.read@1#list'>>;
+      subscribe(request: CapabilityRequest<'android.sensors.read@1#subscribe'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.sensors.read@1#subscribe'>>;
+      unsubscribe(subscriptionId: string, options?: InvokeOptions): Promise<CapabilityResponse<'android.sensors.read@1#unsubscribe'>>;
+      onChanged(listener: (data: AndroidSensorChangedEvent, envelope: PluginEventV2) => boolean | void | Promise<boolean | void>): () => void;
+    };
+    readonly biometric: {
+      getStatus(options?: InvokeOptions): Promise<CapabilityResponse<'android.biometric.verify@1#getStatus'>>;
+      verify(request: CapabilityRequest<'android.biometric.verify@1#verify'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.biometric.verify@1#verify'>>;
+    };
   };
 }
 
@@ -470,17 +617,17 @@ export function createBjtuPluginSdk(
     }
   };
 
-  const subscribe = (
+  const subscribe = <TData>(
     capability: CapabilityId,
     event: string,
     listener: (
-      data: unknown,
+      data: TData,
       envelope: PluginEventV2
     ) => boolean | void | Promise<boolean | void>
   ) =>
     transport.subscribe((envelope) => {
       if (envelope.capability === capability && envelope.event === event) {
-        return listener(envelope.data, envelope);
+        return listener(envelope.data as TData, envelope);
       }
       return false;
     });
@@ -670,6 +817,116 @@ export function createBjtuPluginSdk(
         ),
       send: (request, options) =>
         invoke('mail.send@1#send', request, options)
+    },
+    android: {
+      accessibility: {
+        events: {
+          getStatus: (options) =>
+            invoke('android.accessibility.events@1#getStatus', {}, options),
+          subscribe: (request, options) =>
+            invoke('android.accessibility.events@1#subscribe', request, options),
+          unsubscribe: (subscriptionId, options) =>
+            invoke('android.accessibility.events@1#unsubscribe', { subscriptionId }, options),
+          listSubscriptions: (options) =>
+            invoke('android.accessibility.events@1#listSubscriptions', {}, options),
+          onReceived: (listener) =>
+            subscribe('android.accessibility.events@1', 'received', listener)
+        },
+        nodes: {
+          getRoot: (request = {}, options) =>
+            invoke('android.accessibility.nodes@1#getRoot', request, options),
+          find: (request, options) =>
+            invoke('android.accessibility.nodes@1#find', request, options),
+          get: (nodeId, options) =>
+            invoke('android.accessibility.nodes@1#get', { nodeId }, options)
+        },
+        actions: {
+          performNode: (request, options) =>
+            invoke('android.accessibility.actions@1#performNode', request, options),
+          performGlobal: (request, options) =>
+            invoke('android.accessibility.actions@1#performGlobal', request, options),
+          dispatchGesture: (request, options) =>
+            invoke('android.accessibility.actions@1#dispatchGesture', request, options)
+        }
+      },
+      packages: {
+        list: (request = {}, options) =>
+          invoke('android.packages.read@1#list', request, options),
+        get: (packageName, options) =>
+          invoke('android.packages.read@1#get', { packageName }, options),
+        resolveIntent: (request, options) =>
+          invoke('android.packages.read@1#resolveIntent', request, options)
+      },
+      settings: {
+        open: (request, options) =>
+          invoke('android.settings.open@1#open', request, options)
+      },
+      device: {
+        getInfo: (options) => invoke('android.device.info@1#getInfo', {}, options)
+      },
+      network: {
+        getStatus: (options) => invoke('android.network.status@1#getStatus', {}, options),
+        subscribe: (request = {}, options) =>
+          invoke('android.network.status@1#subscribe', request, options),
+        unsubscribe: (subscriptionId, options) =>
+          invoke('android.network.status@1#unsubscribe', { subscriptionId }, options),
+        onChanged: (listener) => subscribe('android.network.status@1', 'changed', listener)
+      },
+      battery: {
+        getStatus: (options) => invoke('android.battery.status@1#getStatus', {}, options),
+        subscribe: (request = {}, options) =>
+          invoke('android.battery.status@1#subscribe', request, options),
+        unsubscribe: (subscriptionId, options) =>
+          invoke('android.battery.status@1#unsubscribe', { subscriptionId }, options),
+        onChanged: (listener) => subscribe('android.battery.status@1', 'changed', listener)
+      },
+      haptics: {
+        perform: (request, options) => invoke('android.haptics.perform@1#perform', request, options)
+      },
+      files: {
+        pick: (request = {}, options) => invoke('android.files.pick@1#pick', request, options),
+        save: (request, options) => invoke('android.files.save@1#save', request, options)
+      },
+      media: {
+        pick: (request = {}, options) => invoke('android.media.pick@1#pick', request, options)
+      },
+      share: {
+        open: (request, options) => invoke('android.share.open@1#open', request, options)
+      },
+      notifications: {
+        getStatus: (options) => invoke('android.notifications.post@1#getStatus', {}, options),
+        show: (request, options) => invoke('android.notifications.post@1#show', request, options),
+        schedule: (request, options) => invoke('android.notifications.post@1#schedule', request, options),
+        cancel: (request, options) => invoke('android.notifications.post@1#cancel', request, options)
+      },
+      location: {
+        getStatus: (options) => invoke('android.location.read@1#getStatus', {}, options),
+        getCurrent: (request = {}, options) => invoke('android.location.read@1#getCurrent', request, options)
+      },
+      calendar: {
+        list: (request, options) => invoke('android.calendar.read@1#list', request, options),
+        create: (request, options) => invoke('android.calendar.write@1#create', request, options),
+        update: (request, options) => invoke('android.calendar.write@1#update', request, options),
+        delete: (request, options) => invoke('android.calendar.write@1#delete', request, options)
+      },
+      camera: {
+        capturePhoto: (options) => invoke('android.camera.capture@1#capturePhoto', {}, options)
+      },
+      audio: {
+        start: (request, options) => invoke('android.audio.record@1#start', request, options),
+        stop: (request, options) => invoke('android.audio.record@1#stop', request, options)
+      },
+      sensors: {
+        list: (options) => invoke('android.sensors.read@1#list', {}, options),
+        subscribe: (request, options) => invoke('android.sensors.read@1#subscribe', request, options),
+        unsubscribe: (subscriptionId, options) =>
+          invoke('android.sensors.read@1#unsubscribe', { subscriptionId }, options),
+        onChanged: (listener) => subscribe('android.sensors.read@1', 'changed', listener)
+      },
+      biometric: {
+        getStatus: (options) => invoke('android.biometric.verify@1#getStatus', {}, options),
+        verify: (request, options) => invoke('android.biometric.verify@1#verify', request, options)
+      }
     }
   };
 }

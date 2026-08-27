@@ -26,6 +26,27 @@ SDK calls use camelCase. Read methods return `{ data, meta }`; `meta` contains `
 | `storage.kv@2` | beta | `storage.kv` | none | 10000 ms | `get`, `set`, `remove`, `keys`, `usage`, `batch`, `transaction`, `export`, `import` |
 | `storage.blob@1` | beta | `storage.blob` | none | 60000 ms | `put`, `getInfo`, `delete` |
 | `cache.resource@1` | beta | `cache.resource` | none | 60000 ms | `put`, `promote`, `deleteHandle`, `match`, `delete`, `pin`, `usage` |
+| `android.accessibility.events@1` | beta | `android.accessibility.events` | none | 5000 ms | `getStatus`, `subscribe`, `unsubscribe`, `listSubscriptions` |
+| `android.accessibility.nodes@1` | beta | `android.accessibility.nodes` | none | 5000 ms | `getRoot`, `find`, `get` |
+| `android.accessibility.actions@1` | beta | `android.accessibility.actions` | none | 10000 ms | `performNode`, `performGlobal`, `dispatchGesture` |
+| `android.packages.read@1` | beta | `android.packages.read` | none | 10000 ms | `list`, `get`, `resolveIntent` |
+| `android.settings.open@1` | beta | `android.settings.open` | none | 5000 ms | `open` |
+| `android.device.info@1` | beta | `android.device.info` | none | 5000 ms | `getInfo` |
+| `android.network.status@1` | beta | `android.network.status` | none | 5000 ms | `getStatus`, `subscribe`, `unsubscribe` |
+| `android.battery.status@1` | beta | `android.battery.status` | none | 5000 ms | `getStatus`, `subscribe`, `unsubscribe` |
+| `android.haptics.perform@1` | beta | `android.haptics.perform` | none | 5000 ms | `perform` |
+| `android.files.pick@1` | beta | `android.files.pick` | none | 120000 ms | `pick` |
+| `android.files.save@1` | beta | `android.files.save` | none | 120000 ms | `save` |
+| `android.media.pick@1` | beta | `android.media.pick` | none | 120000 ms | `pick` |
+| `android.share.open@1` | beta | `android.share.open` | none | 30000 ms | `open` |
+| `android.notifications.post@1` | beta | `android.notifications.post` | none | 10000 ms | `getStatus`, `show`, `schedule`, `cancel` |
+| `android.location.read@1` | beta | `android.location.read` | none | 60000 ms | `getStatus`, `getCurrent` |
+| `android.calendar.read@1` | beta | `android.calendar.read` | none | 10000 ms | `list` |
+| `android.calendar.write@1` | beta | `android.calendar.write` | none | 10000 ms | `create`, `update`, `delete` |
+| `android.camera.capture@1` | beta | `android.camera.capture` | none | 120000 ms | `capturePhoto` |
+| `android.audio.record@1` | beta | `android.audio.record` | none | 30000 ms | `start`, `stop` |
+| `android.sensors.read@1` | beta | `android.sensors.read` | none | 5000 ms | `list`, `subscribe`, `unsubscribe` |
+| `android.biometric.verify@1` | beta | `android.biometric.verify` | none | 60000 ms | `getStatus`, `verify` |
 | `academic.userCourses.command@1` | beta | `academic.user_courses.write` | eachCall | 15000 ms | `save`, `delete` |
 | `academic.homework.submit@1` | beta | `academic.homework.submit` | eachCall | 60000 ms | `submit` |
 | `mail.send@1` | beta | `mail.send` | eachCall | 60000 ms | `send` |
@@ -1431,6 +1452,2084 @@ Response schema:
 ```
 
 Errors: `permission_denied`, `request_timeout`.
+
+## android.accessibility.events@1
+
+读取无障碍事件：读取用户启用的 Android 无障碍事件；持久订阅会在插件后台运行时继续生效。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+Events: `received`.
+
+### getStatus
+
+Request schema:
+
+```json
+{
+  "$ref": "#/schemas/empty"
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/accessibilityStatus"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`.
+
+### subscribe
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventTypes",
+    "persistent",
+    "includeSource"
+  ],
+  "properties": {
+    "eventTypes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/schemas/accessibilityEventType"
+      }
+    },
+    "packageNames": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9_]+(\\.[a-zA-Z0-9_]+)+$"
+      }
+    },
+    "persistent": {
+      "type": "boolean"
+    },
+    "includeSource": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/accessibilitySubscription"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `quota_exceeded`.
+
+### unsubscribe
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subscriptionId"
+  ],
+  "properties": {
+    "subscriptionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/deletionResult"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `invalid_request`.
+
+### listSubscriptions
+
+Request schema:
+
+```json
+{
+  "$ref": "#/schemas/empty"
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "array",
+  "items": {
+    "$ref": "#/schemas/accessibilitySubscription"
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`.
+
+## android.accessibility.nodes@1
+
+读取无障碍节点：读取活动窗口的结构化节点快照；密码和敏感输入值始终脱敏。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+### getRoot
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "windowId": {
+      "type": "integer"
+    },
+    "maxDepth": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 64
+    },
+    "maxNodes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4096
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/accessibilityNode"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `resource_too_large`.
+
+### find
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "selector"
+  ],
+  "properties": {
+    "windowId": {
+      "type": "integer"
+    },
+    "selector": {
+      "$ref": "#/schemas/accessibilityNodeSelector"
+    },
+    "maxResults": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 256
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/accessibilityNodeList"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `resource_too_large`.
+
+### get
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "nodeId"
+  ],
+  "properties": {
+    "nodeId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/accessibilityNode"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `invalid_request`, `quota_exceeded`.
+
+## android.accessibility.actions@1
+
+执行无障碍动作：允许插件操作其他应用的无障碍节点、全局导航和触摸手势；首次授权后持续有效。
+
+Stability: **beta** · confirmation: **none** · idempotency: **required**
+
+### performNode
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "nodeId",
+    "action"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "nodeId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "click",
+        "longClick",
+        "focus",
+        "clearFocus",
+        "select",
+        "clearSelection",
+        "scrollForward",
+        "scrollBackward",
+        "scrollUp",
+        "scrollDown",
+        "scrollLeft",
+        "scrollRight",
+        "expand",
+        "collapse",
+        "dismiss",
+        "showOnScreen",
+        "setText",
+        "setSelection",
+        "copy",
+        "paste"
+      ]
+    },
+    "arguments": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/automationReceipt"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `invalid_request`, `quota_exceeded`, `idempotency_conflict`.
+
+### performGlobal
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "action"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "back",
+        "home",
+        "recents",
+        "notifications",
+        "quickSettings",
+        "powerDialog",
+        "splitScreen"
+      ]
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/automationReceipt"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `invalid_request`, `quota_exceeded`, `idempotency_conflict`.
+
+### dispatchGesture
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "strokes"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "strokes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/schemas/accessibilityGestureStroke"
+      }
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/automationReceipt"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `invalid_request`, `quota_exceeded`, `idempotency_conflict`.
+
+## android.packages.read@1
+
+读取已安装应用：读取设备上的应用包、权限、组件和签名摘要；不读取应用私有数据。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+### list
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "includeSystem": {
+      "type": "boolean"
+    },
+    "includeDisabled": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/packageList"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `resource_too_large`.
+
+### get
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "packageName"
+  ],
+  "properties": {
+    "packageName": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_]+(\\.[a-zA-Z0-9_]+)+$"
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/packageInfo"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `invalid_request`.
+
+### resolveIntent
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "action"
+  ],
+  "properties": {
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "dataUri": {
+      "type": "string",
+      "maxLength": 512
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/resolvedActivityList"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `invalid_request`.
+
+## android.settings.open@1
+
+打开系统设置：打开 android.settings.* 系统设置页面；宿主拒绝任意 Intent、组件和额外参数。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+### open
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "action"
+  ],
+  "properties": {
+    "action": {
+      "type": "string",
+      "pattern": "^android\\.settings\\.[A-Z0-9_]+$"
+    },
+    "packageName": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_]+(\\.[a-zA-Z0-9_]+)+$"
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/settingsOpenResult"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `invalid_request`, `quota_exceeded`.
+
+## android.device.info@1
+
+undefined：读取最小化的设备和宿主应用信息；不包含稳定硬件标识符。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+### getInfo
+
+Request schema:
+
+```json
+{
+  "$ref": "#/schemas/empty"
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "platform",
+    "sdkInt",
+    "manufacturer",
+    "model",
+    "locale",
+    "timezone",
+    "appVersion"
+  ],
+  "properties": {
+    "platform": {
+      "const": "android"
+    },
+    "sdkInt": {
+      "type": "integer"
+    },
+    "manufacturer": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "model": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "locale": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "timezone": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "appVersion": {
+      "type": "string",
+      "maxLength": 120
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`.
+
+## android.network.status@1
+
+undefined：读取和订阅最小化网络状态；不返回 SSID、BSSID、MAC 或 IP。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+Events: `changed`.
+
+### getStatus
+
+Request schema:
+
+```json
+{
+  "$ref": "#/schemas/empty"
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "online",
+    "validated",
+    "metered",
+    "transport"
+  ],
+  "properties": {
+    "online": {
+      "type": "boolean"
+    },
+    "validated": {
+      "type": "boolean"
+    },
+    "metered": {
+      "type": "boolean"
+    },
+    "transport": {
+      "type": "string",
+      "enum": [
+        "wifi",
+        "cellular",
+        "ethernet",
+        "vpn",
+        "other",
+        "none"
+      ]
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`.
+
+### subscribe
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "persistent": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subscriptionId",
+    "persistent"
+  ],
+  "properties": {
+    "subscriptionId": {
+      "type": "string"
+    },
+    "persistent": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `quota_exceeded`, `capability_unavailable`.
+
+### unsubscribe
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subscriptionId"
+  ],
+  "properties": {
+    "subscriptionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "deleted"
+  ],
+  "properties": {
+    "deleted": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`.
+
+## android.battery.status@1
+
+undefined：读取和订阅电池状态。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+Events: `changed`.
+
+### getStatus
+
+Request schema:
+
+```json
+{
+  "$ref": "#/schemas/empty"
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "level",
+    "charging",
+    "status"
+  ],
+  "properties": {
+    "level": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "charging": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "charging",
+        "discharging",
+        "full",
+        "notCharging",
+        "unknown"
+      ]
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`.
+
+### subscribe
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "persistent": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subscriptionId",
+    "persistent"
+  ],
+  "properties": {
+    "subscriptionId": {
+      "type": "string"
+    },
+    "persistent": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `quota_exceeded`, `capability_unavailable`.
+
+### unsubscribe
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subscriptionId"
+  ],
+  "properties": {
+    "subscriptionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "deleted"
+  ],
+  "properties": {
+    "deleted": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`.
+
+## android.haptics.perform@1
+
+undefined：执行受限时长的设备振动反馈。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+### perform
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "durationMs"
+  ],
+  "properties": {
+    "durationMs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "performed",
+    "durationMs"
+  ],
+  "properties": {
+    "performed": {
+      "type": "boolean"
+    },
+    "durationMs": {
+      "type": "integer"
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `quota_exceeded`.
+
+## android.files.pick@1
+
+undefined：通过系统文件选择器导入受限大小的文件到插件加密 blob 存储。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+### pick
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "mimeTypes": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 120
+      }
+    },
+    "multiple": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "handle",
+          "name",
+          "mimeType",
+          "size"
+        ],
+        "properties": {
+          "handle": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "mimeType": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `user_cancelled`, `quota_exceeded`, `resource_too_large`, `capability_unavailable`.
+
+## android.files.save@1
+
+undefined：通过系统保存面板将当前插件 blob 导出为用户选择的文件。
+
+Stability: **beta** · confirmation: **none** · idempotency: **required**
+
+### save
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "handle",
+    "fileName",
+    "mimeType"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "handle": {
+      "type": "string",
+      "pattern": "^blob-[a-f0-9]{64}$"
+    },
+    "fileName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "mimeType": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 160
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/commandReceipt"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `user_cancelled`, `invalid_request`, `resource_too_large`, `idempotency_conflict`, `capability_unavailable`.
+
+## android.media.pick@1
+
+undefined：通过系统照片选择器导入图片或视频到插件加密 blob 存储。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+### pick
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "mediaType": {
+      "type": "string",
+      "enum": [
+        "image",
+        "video",
+        "mixed"
+      ],
+      "default": "image"
+    },
+    "multiple": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "handle",
+          "name",
+          "mimeType",
+          "size"
+        ],
+        "properties": {
+          "handle": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "mimeType": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `user_cancelled`, `quota_exceeded`, `resource_too_large`, `capability_unavailable`.
+
+## android.share.open@1
+
+undefined：通过 Android chooser 分享文本、HTTPS URL 或当前插件 blob。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+### open
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "title": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 8192
+    },
+    "url": {
+      "type": "string",
+      "pattern": "^https://",
+      "maxLength": 2048
+    },
+    "handle": {
+      "type": "string",
+      "pattern": "^blob-[a-f0-9]{64}$"
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "opened"
+  ],
+  "properties": {
+    "opened": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `invalid_request`, `quota_exceeded`, `capability_unavailable`.
+
+## android.notifications.post@1
+
+undefined：显示、计划和取消受配额约束的插件本地通知。
+
+Stability: **beta** · confirmation: **none** · idempotency: **required**
+
+### getStatus
+
+Request schema:
+
+```json
+{
+  "$ref": "#/schemas/empty"
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "granted",
+    "enabled"
+  ],
+  "properties": {
+    "granted": {
+      "type": "boolean"
+    },
+    "enabled": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`.
+
+### show
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "id",
+    "title",
+    "body"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "body": {
+      "type": "string",
+      "maxLength": 1024
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/commandReceipt"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `quota_exceeded`, `idempotency_conflict`, `capability_unavailable`.
+
+### schedule
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "id",
+    "title",
+    "body",
+    "triggerAtMs"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "body": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "triggerAtMs": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/commandReceipt"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `quota_exceeded`, `idempotency_conflict`, `capability_unavailable`.
+
+### cancel
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "id"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/commandReceipt"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `idempotency_conflict`, `capability_unavailable`.
+
+## android.location.read@1
+
+undefined：读取一次前台位置；不会请求后台定位。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+### getStatus
+
+Request schema:
+
+```json
+{
+  "$ref": "#/schemas/empty"
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "granted",
+    "enabled"
+  ],
+  "properties": {
+    "granted": {
+      "type": "boolean"
+    },
+    "enabled": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`.
+
+### getCurrent
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "highAccuracy": {
+      "type": "boolean",
+      "default": false
+    },
+    "timeoutMs": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 60000,
+      "default": 15000
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "latitude",
+    "longitude",
+    "time"
+  ],
+  "properties": {
+    "latitude": {
+      "type": "number",
+      "minimum": -90,
+      "maximum": 90
+    },
+    "longitude": {
+      "type": "number",
+      "minimum": -180,
+      "maximum": 180
+    },
+    "accuracy": {
+      "type": "number",
+      "minimum": 0
+    },
+    "time": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `capability_unavailable`, `quota_exceeded`.
+
+## android.calendar.read@1
+
+undefined：读取受日期和条数限制的系统日历事件。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+### list
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "startMs",
+    "endMs"
+  ],
+  "properties": {
+    "startMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "endMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 200,
+      "default": 50
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "events"
+  ],
+  "properties": {
+    "events": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "startMs",
+          "endMs",
+          "allDay"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "startMs": {
+            "type": "integer"
+          },
+          "endMs": {
+            "type": "integer"
+          },
+          "allDay": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `invalid_request`, `quota_exceeded`, `capability_unavailable`.
+
+## android.calendar.write@1
+
+undefined：创建、更新或删除日历事件；使用幂等回执。
+
+Stability: **beta** · confirmation: **none** · idempotency: **required**
+
+### create
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "title",
+    "startMs",
+    "endMs"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "location": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "startMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "endMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "allDay": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/commandReceipt"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `invalid_request`, `idempotency_conflict`, `capability_unavailable`.
+
+### update
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "id"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "location": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "startMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "endMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "allDay": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/commandReceipt"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `invalid_request`, `idempotency_conflict`, `capability_unavailable`.
+
+### delete
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "id"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/commandReceipt"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `invalid_request`, `idempotency_conflict`, `capability_unavailable`.
+
+## android.camera.capture@1
+
+undefined：通过系统相机 UI 拍摄照片并导入加密 blob 存储。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+### capturePhoto
+
+Request schema:
+
+```json
+{
+  "$ref": "#/schemas/empty"
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "handle",
+    "mimeType",
+    "size"
+  ],
+  "properties": {
+    "handle": {
+      "type": "string"
+    },
+    "mimeType": {
+      "const": "image/jpeg"
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `user_cancelled`, `resource_too_large`, `capability_unavailable`.
+
+## android.audio.record@1
+
+undefined：在可见前台插件 runtime 中录制受时长限制的音频。
+
+Stability: **beta** · confirmation: **none** · idempotency: **required**
+
+### start
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "recordingId"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "recordingId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/commandReceipt"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `invalid_request`, `idempotency_conflict`, `capability_unavailable`.
+
+### stop
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "recordingId"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "recordingId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "$ref": "#/schemas/commandReceipt"
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `invalid_request`, `resource_too_large`, `idempotency_conflict`, `capability_unavailable`.
+
+## android.sensors.read@1
+
+undefined：读取受限频率的常规设备传感器，不包含 body sensor 数据。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+Events: `changed`.
+
+### list
+
+Request schema:
+
+```json
+{
+  "$ref": "#/schemas/empty"
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sensors"
+  ],
+  "properties": {
+    "sensors": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "accelerometer",
+          "gyroscope",
+          "magneticField",
+          "light",
+          "pressure"
+        ]
+      }
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`.
+
+### subscribe
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sensor"
+  ],
+  "properties": {
+    "sensor": {
+      "type": "string",
+      "enum": [
+        "accelerometer",
+        "gyroscope",
+        "magneticField",
+        "light",
+        "pressure"
+      ]
+    },
+    "persistent": {
+      "type": "boolean",
+      "default": false
+    },
+    "rateHz": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20,
+      "default": 5
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subscriptionId",
+    "persistent",
+    "rateHz"
+  ],
+  "properties": {
+    "subscriptionId": {
+      "type": "string"
+    },
+    "persistent": {
+      "type": "boolean"
+    },
+    "rateHz": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `quota_exceeded`, `capability_unavailable`.
+
+### unsubscribe
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subscriptionId"
+  ],
+  "properties": {
+    "subscriptionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "deleted"
+  ],
+  "properties": {
+    "deleted": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`.
+
+## android.biometric.verify@1
+
+undefined：打开系统生物识别确认，只返回结果且不读取生物特征数据。
+
+Stability: **beta** · confirmation: **none** · idempotency: **none**
+
+### getStatus
+
+Request schema:
+
+```json
+{
+  "$ref": "#/schemas/empty"
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "available"
+  ],
+  "properties": {
+    "available": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`.
+
+### verify
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "title"
+  ],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "subtitle": {
+      "type": "string",
+      "maxLength": 240
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verified"
+  ],
+  "properties": {
+    "verified": {
+      "type": "boolean"
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `foreground_required`, `user_cancelled`, `capability_unavailable`, `quota_exceeded`.
 
 ## academic.userCourses.command@1
 

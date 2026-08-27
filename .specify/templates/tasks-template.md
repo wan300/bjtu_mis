@@ -1,7 +1,7 @@
 # Tasks: [FEATURE NAME]
 
 **Input**: spec and plan for [FEATURE NAME]  
-**Constitution Version**: 1.2.0
+**Constitution Version**: 2.0.0
 
 ## Task Rules
 
@@ -9,6 +9,7 @@
 - Tasks that touch parser, provider, repository, Agent tools or Open WebUI local-first behavior MUST include matching tests or fixtures.
 - Tasks that touch credentials, Cookie, mail, coursework actions, files, archives or generated outputs MUST include explicit safety checks.
 - Tasks that touch third-party plugins MUST preserve Manifest v3 / contract_v1 compatibility, registry-generated Capability contracts, stable publisher identity, host-fixed self/main-frame bridge isolation, split origins, transactional storage and the read-only campus registry.
+- Tasks that touch Android automation MUST include service-unavailable, redaction/expiry, runtime quota, foreground-priority/background-restore, idempotency-without-confirmer, restricted package/settings, revocation and API 26/35 instrumentation coverage.
 - High-risk changes MUST reference the active ExecPlan and include rollback verification tasks.
 
 ## Phase 1: Setup and Scope

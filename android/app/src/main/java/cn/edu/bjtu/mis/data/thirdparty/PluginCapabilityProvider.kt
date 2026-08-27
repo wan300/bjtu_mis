@@ -38,6 +38,8 @@ data class PluginCapabilityCall(
     val eventSink: (PluginRuntimeEvent) -> Unit,
     val requestId: String,
     val runtimeEnvironment: PluginWebViewRuntimeEnvironment,
+    val runtimeId: String = "direct",
+    val backgroundRuntime: Boolean = false,
 )
 
 interface PluginCapabilityProvider {

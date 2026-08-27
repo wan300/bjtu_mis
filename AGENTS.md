@@ -156,6 +156,7 @@ Open WebUI：
 - `openwebui` 包下的 Android 插件负责 WebView/Capacitor 与原生工具桥接。
 - `android/open-webui/src/lib/local-first/` 负责前端侧本地优先 Agent loop、工具注册和 Android 参数传递。
 - `data/thirdparty` 与 `ThirdPartyServiceScreens.kt` 共同实现 Manifest v3 / contract_v1 插件 runtime；只允许稳定本地 origin 的 main frame 获得桥，远程 frame 永远无桥。
+- `AndroidSystemCapabilities.kt`、`AndroidNativeCapabilities.kt`、`PluginAutomationStore.kt` 与 `PluginAutomationSupervisor.kt` 实现 constitution 列举的持久 Android Capability；后台 WebView 仍使用相同稳定本地 origin/main-frame 桥，最多 4 个且前台页面优先接收事件。系统 UI、运行时权限、前台定位和录音 gate 不能由后台 runtime 绕过。
 - 插件公网访问按 connect/media/frame/navigation origin 分离；校园会话访问只允许走 MIS/AA/VE 的只读 `campus.request` registry。
 - 插件重要数据使用按 publisher subject + plugin ID 隔离的加密 `app.storage`，更新必须保持影子迁移、上一版本包/KV 快照和失败原子回滚。
 
@@ -183,6 +184,7 @@ Open WebUI：
 - 修改 Agent 工具、workspace、归档、文档或邮件工具时，补充对应 `data/agent` 或 `data/agent/tools` 单元测试。
 - 修改 Open WebUI local-first、handoff、工具参数或流式输出时，运行前端 Vitest。
 - 修改第三方插件 Manifest、publisher、WebView、KV、迁移、回滚、清理或校园代理时，补充对应 JVM 测试，并编译或执行 `androidTest` 中的 Room 11→12 和 WebView 安全场景。
+- 修改 constitution 列举的 `android.*` 持久 Capability 时，必须覆盖服务/权限未启用、节点脱敏/过期、过滤与限流、持久恢复、前台优先、免逐次确认的动作幂等、系统 UI 前台 gate、无 raw URI、资源隔离、包字段最小化、Settings Intent 限制和撤销/更新/删除清理；真实服务场景在 API 26/35 instrumentation 验证。
 - 修改 Capability 契约时，先改 `plugin-tooling/contracts/capability-contracts.json`，运行生成器并提交全部生成物；不得直接手改生成的 SDK、Kotlin descriptor/schema 或 API 文档。
 - 数据库迁移必须同时维护 `android/app/schemas/` 与迁移测试；第三方插件迁移当前覆盖 Room 11→12。
 
@@ -210,6 +212,8 @@ Open WebUI：
 - 公网 origin 必须按 connect/media/frame/navigation 最小声明；公共制品只允许 HTTPS，开发者模式仅允许 localhost HTTP，普通 origin 不得指向校园、私网、回环或链路本地地址。
 - 插件更新必须保留增量授权、影子 KV migration、上一版本包和数据快照；删除清理失败必须保留 tombstone 并重试。
 - `campus.request` 只能调用 registry 中 MIS/AA/VE 的 `GET`/`HEAD` 只读路径，且不得向插件暴露 Cookie、认证头或明文凭据。
+- 仅 constitution 原则 I 严格列出的 Android Capability 可在首次/增量审阅后持久授权。事件最多 16 订阅/插件与 60 events/s/订阅；节点最多 4,096、深度 64、handle 30 秒；通用持久订阅遵循契约频率；动作必须幂等且不得记录敏感数据；后台 runtime 全局最多 4 个并提供持续通知与全部停止。系统 UI、运行时权限、后台定位和静默录音不得由持久授权绕过。
+- `android.packages.read@1` 只返回契约字段，不返回 APK 路径、私有数据或图标；`android.settings.open@1` 只允许 `android.settings.*` 与可选 `package:` data，不得扩展为通用 Intent。
 - 涉及生产配置、网络安全配置、权限、前台服务、数据迁移或删除操作时，先写执行计划并明确回滚。
 
 ## 8. Pull request / change expectations

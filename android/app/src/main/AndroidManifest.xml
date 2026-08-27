@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -47,6 +49,12 @@
             android:exported="false"
             android:supportsPictureInPicture="true" />
 
+        <activity
+            android:name=".data.thirdparty.PluginNativeInteractionActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true" />
+
         <receiver
             android:name=".widget.TimetableWidgetProvider"
             android:exported="false"
@@ -73,6 +81,33 @@
             android:name=".data.sync.SessionKeepAliveForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".data.thirdparty.PluginNativeRuntimeService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".data.thirdparty.PluginAccessibilityService"
+            android:description="@string/accessibility_service_description"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/plugin_accessibility_service_config" />
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-authorized plugin accessibility automation" />
+        </service>
+
+        <receiver
+            android:name=".data.thirdparty.StopPluginAutomationReceiver"
+            android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -36,7 +36,7 @@ interface LintModule {
     schema: LintSchema,
     options?: { requireMarketplace?: boolean }
   ): LintResult;
-  loadManifestSchema(repositoryRoot: string, result: LintResult): LintSchema;
+  loadManifestSchema(repositoryRoot: string, result: LintResult): LintSchema | null;
 }
 
 export interface ValidatedPackage {
@@ -221,6 +221,7 @@ export async function validateAndBuildPackage(options: {
   const require = createRequire(import.meta.url);
   const lint = require(path.join(options.repositoryRoot, 'tools', 'third-party-service-lint.cjs')) as LintModule;
   const lintSchema = lint.loadManifestSchema(options.repositoryRoot, lintResult);
+  if (!lintSchema) throw new Error(lintResult.errors.join('\n'));
   lint.lintPlugin(packageRoot, lintResult, lintSchema, { requireMarketplace: true });
   if (lintResult.errors.length) throw new Error(lintResult.errors.join('\n'));
   const manifest = JSON.parse(

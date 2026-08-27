@@ -18,6 +18,8 @@ COPY --from=build /app/dist ./dist
 COPY web/platform/src/migrations ./src/migrations
 COPY tools /repo/tools
 COPY docs/third-party-service-manifest.schema.json /repo/docs/third-party-service-manifest.schema.json
+COPY docs/bjtu-marketplace.schema.json /repo/docs/bjtu-marketplace.schema.json
+COPY plugin-tooling/contracts/capability-contracts.json /repo/plugin-tooling/contracts/capability-contracts.json
 COPY web/assets/schemas/third-party-service-manifest.schema.json /repo/web/assets/schemas/third-party-service-manifest.schema.json
 RUN mkdir -p /data/artifacts && chown -R plugin-platform:plugin-platform /data /app
 USER plugin-platform

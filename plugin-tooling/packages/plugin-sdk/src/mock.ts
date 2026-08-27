@@ -24,6 +24,7 @@ export interface MockHostScenario {
   quota?: 'normal' | 'exceeded';
   migrationFailure?: boolean;
   lifecycle?: 'active' | 'background' | 'destroyed';
+  accessibilityService?: 'connected' | 'disconnected';
   cspViolation?: boolean;
   originViolation?: boolean;
   binaryTransports?: readonly BinaryTransport[];
@@ -69,6 +70,7 @@ export function createMockTransport(initial: MockHostScenario = {}): MockPluginT
     network: 'online',
     quota: 'normal',
     lifecycle: 'active',
+    accessibilityService: 'connected',
     binaryTransports: ['arraybuffer', 'base64url-chunks-v1'],
     preferredBinaryTransport: 'arraybuffer',
     ...initial
@@ -148,6 +150,36 @@ export function createMockTransport(initial: MockHostScenario = {}): MockPluginT
       if (scenario.originViolation || scenario.cspViolation) {
         return failure(request.requestId, 'origin_denied', 'Mock origin/CSP policy rejected the call.');
       }
+      if (
+        scenario.lifecycle === 'background' &&
+        [
+          'android.files.pick@1',
+          'android.files.save@1',
+          'android.media.pick@1',
+          'android.share.open@1',
+          'android.camera.capture@1',
+          'android.audio.record@1',
+          'android.biometric.verify@1',
+          'android.location.read@1'
+        ].includes(request.capability)
+      ) {
+        return failure(
+          request.requestId,
+          'foreground_required',
+          'Mock Android system UI capability requires the foreground plugin page.'
+        );
+      }
+      if (
+        request.capability.startsWith('android.accessibility.') &&
+        request.method !== 'getStatus' &&
+        scenario.accessibilityService === 'disconnected'
+      ) {
+        return failure(
+          request.requestId,
+          'capability_unavailable',
+          'Mock Android accessibility service is disconnected.'
+        );
+      }
       if (request.capability === 'network.request@1' && scenario.network === 'offline') {
         return failure(request.requestId, 'http_error', 'Mock host is offline.', true);
       }
@@ -156,7 +188,12 @@ export function createMockTransport(initial: MockHostScenario = {}): MockPluginT
       }
       if (
         scenario.quota === 'exceeded' &&
-        (request.capability.startsWith('storage.') || request.capability === 'cache.resource@1')
+        (
+          request.capability.startsWith('storage.') ||
+          request.capability === 'cache.resource@1' ||
+          request.capability === 'android.accessibility.actions@1' ||
+          request.capability === 'android.settings.open@1'
+        )
       ) {
         return failure(request.requestId, 'quota_exceeded', 'Mock quota was exceeded.');
       }
@@ -277,6 +314,27 @@ function defaultResponse(request: PluginRequestV2, scenario: MockHostScenario): 
   if (route === 'runtime.lifecycle@1#ready') return { ready: true };
   if (route === 'runtime.lifecycle@1#close') return { closed: true };
   if (route === 'configuration.read@1#get') return { value: null };
+  if (route === 'android.accessibility.events@1#getStatus') {
+    const connected = scenario.accessibilityService !== 'disconnected';
+    return { enabled: connected, connected, subscriptionCount: 0 };
+  }
+  if (route === 'android.device.info@1#getInfo') {
+    return {
+      platform: 'android',
+      sdkInt: 35,
+      manufacturer: 'Mock',
+      model: 'Mock device',
+      locale: 'zh-CN',
+      timezone: 'Asia/Shanghai',
+      appVersion: '0.0.0-mock'
+    };
+  }
+  if (route === 'android.network.status@1#getStatus') {
+    return { online: scenario.network === 'online', validated: scenario.network === 'online', metered: false, transport: scenario.network === 'online' ? 'wifi' : 'none' };
+  }
+  if (route === 'android.battery.status@1#getStatus') {
+    return { level: 80, charging: false, status: 'discharging' };
+  }
   if (route === 'navigation.external@1#open') return { opened: true };
   if (
     route.endsWith('#getInfo') ||

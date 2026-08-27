@@ -82,6 +82,17 @@ jobs:
       - name: Unit tests
         working-directory: web/platform
         run: npm test
+      - name: Verify production image contract inputs
+        run: |
+          docker build -f web/platform/Dockerfile -t bjtu-plugin-platform-ci .
+          docker run --rm --entrypoint node bjtu-plugin-platform-ci -e '
+            const lint = require("/repo/tools/third-party-service-lint.cjs");
+            const result = { errors: [], warnings: [] };
+            const schema = lint.loadManifestSchema("/repo", result);
+            if (!schema || result.errors.length || schema.packageLimits.files <= 0) {
+              throw new Error(result.errors.join("\n") || "contract package limits are invalid");
+            }
+          '
       - name: PostgreSQL migration and constraint tests
         working-directory: web/platform
         run: npm run test:integration

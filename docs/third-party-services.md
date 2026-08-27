@@ -124,6 +124,16 @@ dist/
 - `academic.userCourses.command@1`
 - `academic.homework.submit@1`
 - `mail.send@1`
+- `android.accessibility.events@1`
+- `android.accessibility.nodes@1`
+- `android.accessibility.actions@1`
+- `android.packages.read@1`
+- `android.settings.open@1`
+- `android.device.info@1`、`android.network.status@1`、`android.battery.status@1`
+- `android.haptics.perform@1`、`android.files.pick@1`、`android.files.save@1`、`android.media.pick@1`
+- `android.share.open@1`、`android.notifications.post@1`、`android.location.read@1`
+- `android.calendar.read@1`、`android.calendar.write@1`、`android.camera.capture@1`
+- `android.audio.record@1`、`android.sensors.read@1`、`android.biometric.verify@1`
 
 精确方法、请求/响应 schema、权限、确认、幂等、配额、超时、错误和平台支持范围见
 [生成的 API 参考](generated/plugin-capability-api.md)。
@@ -157,7 +167,7 @@ try {
 ```
 
 SDK 公开 `runtime`、`configuration`、`network`、`storage.kv`、`storage.blob`、
-`cache`、`navigation`、`campus` 和 `mail`。常用身份、教务和邮件方法的 `data`
+`cache`、`navigation`、`campus`、`mail` 和 `android`。常用身份、教务和邮件方法的 `data`
 结构由 Registry 生成具体 TypeScript 类型；仅通用 `campus.request@1` 的业务载荷
 保持 `unknown`。所有校园读取统一返回：
 
@@ -172,6 +182,69 @@ SDK 公开 `runtime`、`configuration`、`network`、`storage.kv`、`storage.blo
   }
 }
 ```
+
+### Android 系统自动化与原生能力
+
+以下 21 项 beta Capability 只在 Android API 26+ 可用，仍经 publisher+plugin 的稳定
+本地 main-frame origin 和 protocol v2 调用。用户必须在首次安装或更新增量审阅中授权；
+授权按 publisher+plugin 持久保存，状态订阅可在页面关闭或进程重启后由最多四个后台
+WebView runtime 恢复。无障碍相关调用还要求用户在系统设置中另行启用 BJTU MIS 插件
+无障碍服务。服务未启用时，节点、事件订阅和动作返回 `capability_unavailable`，错误详情
+包含可打开的 `android.settings.ACCESSIBILITY_SETTINGS` action。
+
+```ts
+const status = await bjtu.android.accessibility.events.getStatus();
+const subscription = await bjtu.android.accessibility.events.subscribe({
+  eventTypes: ['viewClicked', 'windowContentChanged'],
+  packageNames: ['com.example.app'],
+  includeSource: true,
+  persistent: true
+});
+
+const dispose = bjtu.android.accessibility.events.onReceived((event) => {
+  console.log(event.eventType, event.source);
+});
+
+const root = await bjtu.android.accessibility.nodes.getRoot({
+  maxDepth: 16,
+  maxNodes: 1024
+});
+await bjtu.android.accessibility.actions.performNode({
+  idempotencyKey: crypto.randomUUID(),
+  nodeId: root.nodeId,
+  action: 'click'
+});
+```
+
+- `events` 每插件最多 16 个订阅、每订阅最多 60 events/s。`persistent: true` 会在页面
+  关闭或 App 进程重启后恢复；前台插件页面优先接收，后台 WebView 不重复派发。
+- `nodes` 每次快照最多 4,096 节点、深度 64，opaque `nodeId` 30 秒失效。密码、
+  邮箱、姓名、地址和电话输入值不返回；节点以 `sensitive: true` 标识脱敏。
+- `actions` 支持节点动作、全局动作和最多 16 笔画的手势，每分钟最多 120 次。首次或
+  增量授权后不再逐次弹窗，但每次仍必须提供 idempotency key；加密回执只保存摘要和
+  结果，不保存输入文本、节点文本或手势轨迹。
+- `packages` 返回包名、标签、版本、UID、启用/系统状态、安装更新时间、请求/授予权限、
+  最多 4,096 个组件和签名 SHA-256；不返回 APK 路径、应用私有数据或图标字节。
+- `settings.open` 每分钟最多 30 次，只接受 `android.settings.*` action 和可选包名。
+  宿主只构造无 data 或 `package:` data 的隐式 Intent，不接受 extras、显式组件或任意 URI。
+- 后台自动化全局最多运行 4 个插件，并显示持续通知及“全部停止”。插件删除、禁用、
+  授权撤销、publisher 不匹配、能力声明丢失、更新进入复审或无障碍服务断开时立即停止
+  runtime、清除订阅并失效 node handle。
+- `network`、`battery` 和 `sensors` 可使用 `persistent: true` 订阅。每插件最多 16 个；
+  网络/电池最多 60 events/s，传感器最多 20 Hz。设备和网络信息不包含硬件稳定 ID、
+  SSID、BSSID、MAC 或 IP。
+- `files`、`media`、`share`、`camera` 和 `biometric` 必须由前台插件页面触发系统 UI；
+  后台调用返回 `foreground_required`。文件或媒体只返回隔离加密 Blob handle，永不返回
+  raw URI、任意路径或可持续 URI。
+- 定位只允许前台一次性读取，最长 60 秒，不请求后台定位；录音只能由可见前台 runtime
+  启动，单段最多 10 分钟，停止后保存为隔离加密 Blob。运行时权限、系统选择器和生物识别
+  弹窗仍由 Android 控制，持久授权不能绕过它们。
+- 日历读取限制为 366 天/200 条；日历写入、文件保存、通知和录音命令使用 idempotency
+  key 与加密摘要回执，但不再显示宿主逐次确认。通知每插件每小时最多 60 条；haptics
+  单次最多 1 秒且不得循环。
+
+这些能力当前只面向项目既有 GitHub APK 分发。`QUERY_ALL_PACKAGES`、无障碍服务和
+special-use 前台服务在任何 Google Play 发布前必须重新完成政策与数据范围审查。
 
 迁移页面只能使用 `createBjtuPluginMigrationSdk()`，其表面仅包含影子 KV 和显式
 `commit()`；网络、校园读取和 Command Capability 不可用。
@@ -264,8 +337,11 @@ KV 快照和 Blob 影子索引；失败时原子恢复。
 
 ## 8. Command Capability
 
-所有会改变校园或宿主状态的调用都是 Command Capability。每次调用都必须经过用户
-确认并携带 idempotency key。宿主按“key + 请求摘要”处理：
+所有会改变校园或宿主状态的调用都是 Command Capability。除上文严格列举并在首次或
+增量 Capability 审阅时持久授权的 Android Command Capability（无障碍动作、文件保存、
+通知、日历写入和录音）外，每次调用都必须经过用户确认并携带 idempotency key。这些
+Android 命令免逐次确认，但仍要求 idempotency key、摘要回执和运行时配额。宿主按
+“key + 请求摘要”处理：
 
 - 相同 key 和摘要返回原回执，不重复执行。
 - 相同 key、不同摘要返回 `idempotency_conflict`。
@@ -277,7 +353,7 @@ KV 快照和 Blob 影子索引；失败时原子恢复。
 
 统一错误至少包括：
 
-`permission_denied`、`capability_unavailable`、`invalid_request`、
+`permission_denied`、`capability_unavailable`、`foreground_required`、`invalid_request`、
 `origin_denied`、`network_timeout`、`request_timeout`、`http_error`、`quota_exceeded`、
 `resource_too_large`、`migration_failed`、`user_cancelled` 和
 `idempotency_conflict`。

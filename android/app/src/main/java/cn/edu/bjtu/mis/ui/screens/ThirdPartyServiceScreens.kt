@@ -71,6 +71,9 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import cn.edu.bjtu.mis.data.thirdparty.CatalogPlugin
 import cn.edu.bjtu.mis.data.thirdparty.CatalogPluginPage
+import cn.edu.bjtu.mis.data.thirdparty.AndroidAccessibilityController
+import cn.edu.bjtu.mis.data.thirdparty.AndroidNativeEventController
+import cn.edu.bjtu.mis.data.thirdparty.AndroidNativeRuntimeController
 import cn.edu.bjtu.mis.data.thirdparty.PluginWebViewPolicy
 import cn.edu.bjtu.mis.data.thirdparty.PluginWebViewRuntimeEnvironment
 import cn.edu.bjtu.mis.data.thirdparty.ThirdPartyCapabilityRegistry
@@ -383,6 +386,23 @@ fun ThirdPartyServicesScreen(
                                     onOpenService(thirdPartyServiceRoute(service.serviceId))
                                 }
                             },
+                            onStopAutomation = {
+                                AndroidAccessibilityController.stopServiceRuntime(
+                                    service.publisherSubjectId,
+                                    service.serviceId,
+                                )
+                                AndroidNativeRuntimeController.revokeService(
+                                    service.publisherSubjectId,
+                                    service.serviceId,
+                                )
+                                message = "已停止 ${service.manifest.name} 的后台自动化"
+                            },
+                            onReviewAutomation = {
+                                scope.launch {
+                                    repository.requireReview(service.serviceId)
+                                    onOpenService(thirdPartyServiceRoute(service.serviceId))
+                                }
+                            },
                             onDelete = {
                                 scope.launch {
                                     busy = true
@@ -659,9 +679,14 @@ private fun ThirdPartyServiceManagementCard(
     onOpen: () -> Unit,
     onUpdate: () -> Unit,
     onConfigure: () -> Unit,
+    onStopAutomation: () -> Unit,
+    onReviewAutomation: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val context = LocalContext.current
     val canUpdateFromGitHub = service.sourceUrl.startsWith("https://github.com/")
+    val hasAccessibilityGrant = service.grantedCapabilities.any { it.startsWith("android.accessibility.") }
+    val hasAndroidGrant = service.grantedCapabilities.any { it.startsWith("android.") }
     InfoCard(
         title = service.manifest.name,
         subtitle = "${service.manifest.version} · ${service.githubOwner}/${service.githubRepo}",
@@ -712,6 +737,54 @@ private fun ThirdPartyServiceManagementCard(
         if (service.manifest.configuration.isNotEmpty()) {
             OutlinedButton(onClick = onConfigure, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                 Text("配置插件环境变量")
+            }
+        }
+        if (hasAndroidGrant && service.canRun) {
+            val connected = AndroidAccessibilityController.isConnected()
+            val accessibilityPersistent = AndroidAccessibilityController.hasPersistentSubscriptions(
+                service.publisherSubjectId,
+                service.serviceId,
+            )
+            val nativePersistent = AndroidNativeEventController.hasPersistentSubscriptions(
+                service.publisherSubjectId,
+                service.serviceId,
+            )
+            val state = buildList {
+                if (hasAccessibilityGrant) {
+                    add(if (connected) "无障碍服务已连接" else "无障碍服务未连接")
+                }
+                if (nativePersistent) add("原生状态订阅运行中")
+                if (accessibilityPersistent || nativePersistent) add("存在持久订阅") else add("暂无持久订阅")
+            }.joinToString(" · ")
+            Text(
+                "后台自动化：$state",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (!hasAccessibilityGrant || connected) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = onStopAutomation, enabled = !busy, modifier = Modifier.weight(1f)) {
+                    Text("停止后台运行")
+                }
+                OutlinedButton(onClick = onReviewAutomation, enabled = !busy, modifier = Modifier.weight(1f)) {
+                    Text("撤销或调整授权")
+                }
+            }
+            if (hasAccessibilityGrant && !connected) {
+                TextButton(
+                    onClick = {
+                        context.startActivity(
+                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("打开系统无障碍设置")
+                }
             }
         }
     }
@@ -843,8 +916,11 @@ private fun ThirdPartyCapabilityReviewScreen(
     onBackToServices: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val required = service.manifest.requiredCapabilities
     val optional = service.manifest.optionalCapabilities
+    val androidSystemCapabilities = (required + optional)
+        .filter { it.startsWith("android.") }
     var selected by remember(service.serviceId, service.commitSha) {
         mutableStateOf(service.reviewCapabilitySelection)
     }
@@ -880,6 +956,64 @@ private fun ThirdPartyCapabilityReviewScreen(
                 Text("版本：${service.manifest.version}", style = MaterialTheme.typography.bodySmall)
                 Text("来源：${service.sourceUrl}", style = MaterialTheme.typography.bodySmall)
                 Text("Digest：${service.packageDigestSha256.take(12)}", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        if (androidSystemCapabilities.isNotEmpty()) {
+            item {
+                InfoCard(
+                    title = "Android 原生能力授权",
+                    subtitle = "这些能力在首次同意后会持续授权给插件，直到你在插件管理或系统设置中撤销",
+                ) {
+                    val accessibilityCapabilities = androidSystemCapabilities.filter {
+                        it.startsWith("android.accessibility.") ||
+                            it == "android.packages.read@1" ||
+                            it == "android.settings.open@1"
+                    }
+                    val nativeCapabilities = androidSystemCapabilities - accessibilityCapabilities.toSet()
+                    if (accessibilityCapabilities.isNotEmpty()) {
+                        Text(
+                            "插件可读取无障碍事件和窗口节点、操作其他应用、查询已安装应用或打开系统设置。密码和敏感输入值始终脱敏。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    if (nativeCapabilities.isNotEmpty()) {
+                        Text(
+                            "插件可使用受限设备状态、文件/媒体、通知、定位、日历、相机、录音、传感器或生物识别能力。系统运行时权限、选择器和前台页面要求仍然生效；后台不能启动系统 UI、定位或录音。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    androidSystemCapabilities.forEach { capability ->
+                        Text(capability, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (androidSystemCapabilities.any { it.startsWith("android.accessibility.") }) {
+                        Text(
+                            if (AndroidAccessibilityController.isConnected()) {
+                                "系统无障碍服务：已连接"
+                            } else {
+                                "系统无障碍服务：未连接"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (AndroidAccessibilityController.isConnected()) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("打开系统无障碍设置")
+                        }
+                    }
+                }
             }
         }
         item {

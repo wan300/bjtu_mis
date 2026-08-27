@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">BJTU MIS</string>
+    <string name="accessibility_service_label">BJTU MIS 插件无障碍服务</string>
+    <string name="accessibility_service_description">为用户明确授权的插件提供受控的无障碍事件、节点读取和动作执行能力。</string>
+    <string name="plugin_automation_notification_title">BJTU MIS 插件自动化正在运行</string>
+    <string name="plugin_automation_notification_text">最多 4 个已授权插件可在后台接收无障碍事件</string>
+    <string name="plugin_automation_stop_all">全部停止</string>
     <string name="login_title">BJTU MIS</string>
     <string name="login_subtitle">校园信息本地采集与离线查看</string>
     <string name="student_or_staff_id">学号 / 工号</string>

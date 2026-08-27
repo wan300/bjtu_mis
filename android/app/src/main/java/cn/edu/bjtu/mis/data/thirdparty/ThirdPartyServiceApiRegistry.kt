@@ -55,6 +55,8 @@ class ThirdPartyServiceApiRegistry(
     private val resourceStore: ThirdPartyResourceStore? = null,
     private val networkProvider: PluginNetworkProvider? = null,
     private val commandReceiptStore: PluginCommandReceiptStore? = null,
+    private val androidSystemProvider: AndroidSystemCapabilityProvider = AndroidSystemCapabilityProvider(),
+    private val androidNativeProvider: PluginCapabilityProvider = UnavailableAndroidNativeCapabilityProvider(),
     providerOverrides: List<PluginCapabilityProvider> = emptyList(),
 ) {
     private val capabilityProviders = PluginCapabilityProviderRegistry(
@@ -99,6 +101,8 @@ class ThirdPartyServiceApiRegistry(
                 ),
                 ::executeCommandCapability,
             ),
+            androidSystemProvider,
+            androidNativeProvider,
         ),
         overrides = providerOverrides,
     )
@@ -123,6 +127,8 @@ class ThirdPartyServiceApiRegistry(
         requestId: String = "",
         runtimeEnvironment: PluginWebViewRuntimeEnvironment =
             PluginWebViewPolicy.runtimeEnvironment(),
+        runtimeId: String = "direct",
+        backgroundRuntime: Boolean = false,
         timeoutMsOverride: Long? = null,
     ): JsonObject {
         if (!service.canRun) {
@@ -172,6 +178,8 @@ class ThirdPartyServiceApiRegistry(
                 eventSink = eventSink,
                 requestId = requestId,
                 runtimeEnvironment = runtimeEnvironment,
+                runtimeId = runtimeId,
+                backgroundRuntime = backgroundRuntime,
             )
             val declaredTimeoutMs = params["timeoutMs"]
                 ?.jsonPrimitive
@@ -189,8 +197,12 @@ class ThirdPartyServiceApiRegistry(
                 timeoutMsOverride?.takeIf { it > 0L },
             ).minOrNull() ?: 0L
             val invokeProvider: suspend () -> JsonElement = {
-                if (descriptor.idempotencyRequired) {
-                    executeCommandOnce(call)
+                if (descriptor.idempotencyRequired && "idempotencyKey" in route.requiredFields) {
+                    if (capability in PERSISTENT_ANDROID_COMMAND_CAPABILITIES) {
+                        executeIdempotentWithoutConfirmation(call)
+                    } else {
+                        executeCommandOnce(call)
+                    }
                 } else {
                     capabilityProviders.invoke(call)
                 }
@@ -759,6 +771,28 @@ class ThirdPartyServiceApiRegistry(
         }
     }
 
+    private suspend fun executeIdempotentWithoutConfirmation(call: PluginCapabilityCall): JsonElement {
+        val idempotencyKey = call.params.requiredString("idempotencyKey")
+        val receiptStore = commandReceiptStore
+            ?: throw PluginRuntimeException(
+                "capability_unavailable",
+                "Command receipt store is unavailable",
+            )
+        return receiptStore.executeOnce(
+            namespace(call.service),
+            idempotencyKey,
+            pluginCommandRequestDigest(call.capability, call.method, call.params),
+        ) {
+            val result = capabilityProviders.invoke(call)
+            buildJsonObject {
+                put("receiptId", UUID.randomUUID().toString())
+                put("idempotencyKey", idempotencyKey)
+                put("completedAt", nowIso())
+                put("result", result)
+            }
+        }
+    }
+
     private suspend fun executeCommand(
         capability: String,
         method: String,
@@ -1032,6 +1066,14 @@ class ThirdPartyServiceApiRegistry(
         throw PluginRuntimeException("invalid_request", "Unknown method: $capability#$method")
 
 }
+
+private val PERSISTENT_ANDROID_COMMAND_CAPABILITIES = setOf(
+    "android.accessibility.actions@1",
+    "android.files.save@1",
+    "android.notifications.post@1",
+    "android.calendar.write@1",
+    "android.audio.record@1",
+)
 
 private fun successResponse(result: JsonElement): JsonObject = buildJsonObject {
     put("ok", true)

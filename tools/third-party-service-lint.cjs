@@ -70,6 +70,11 @@ function main() {
   const repositoryRoot = path.resolve(__dirname, '..');
   const schemaResult = { errors: [], warnings: [] };
   const schema = loadManifestSchema(repositoryRoot, schemaResult);
+  if (!schema) {
+    for (const error of schemaResult.errors) process.stderr.write(`error: ${error}\n`);
+    process.exitCode = 1;
+    return;
+  }
   let failed = false;
   for (const root of roots) {
     const result = {
@@ -116,22 +121,7 @@ function loadManifestSchema(repositoryRoot, result) {
     };
   } catch (error) {
     result.errors.push(`Cannot load generated contract schemas: ${error.message}`);
-    return {
-      permissions: [],
-      capabilities: [],
-      categories: [],
-      configurationTypes: [],
-      contractProfile: 'unknown',
-      protocolVersion: 0,
-      runtimeFloor: 0,
-      packageLimits: {
-        archiveBytes: 0,
-        extractedBytes: 0,
-        files: 0,
-        iconBytes: 0
-      },
-      contracts: []
-    };
+    return null;
   }
 }
 

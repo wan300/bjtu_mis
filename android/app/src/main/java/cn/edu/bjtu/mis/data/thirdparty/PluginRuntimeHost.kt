@@ -18,6 +18,7 @@ class PluginRuntimeHost(
     private val openExternal: (String) -> Unit,
     private val onCloseService: () -> Unit,
     private val onMainPageReady: (WebView) -> Unit = {},
+    private val backgroundRuntime: Boolean = false,
     val diagnostics: PluginDiagnostics = PluginDiagnostics(service.serviceId),
 ) {
     private var attachedWebView: WebView? = null
@@ -74,8 +75,25 @@ class PluginRuntimeHost(
                 "plugin-bridge/${ThirdPartyServiceSandbox.hostFor(service.serviceId, service.publisherSubjectId)}",
             ),
             runtimeEnvironment = runtimeEnvironment,
+            backgroundRuntime = backgroundRuntime,
         )
         transport = bridge
+        AndroidAccessibilityController.attachRuntime(
+            publisherSubjectId = service.publisherSubjectId,
+            serviceId = service.serviceId,
+            runtimeId = bridge.runtimeId,
+            backgroundRuntime = backgroundRuntime,
+            eventSink = bridge::sendEvent,
+            grantedCapabilities = service.grantedCapabilities,
+        )
+        AndroidNativeEventController.attachRuntime(
+            publisherSubjectId = service.publisherSubjectId,
+            serviceId = service.serviceId,
+            runtimeId = bridge.runtimeId,
+            backgroundRuntime = backgroundRuntime,
+            eventSink = bridge::sendEvent,
+            grantedCapabilities = service.grantedCapabilities,
+        )
         lifecycle = PluginLifecycleDispatcher(service, bridge, kvStore, scope).also { it.start() }
         webView.webViewClient = PluginRuntimeWebViewClient(
             service,

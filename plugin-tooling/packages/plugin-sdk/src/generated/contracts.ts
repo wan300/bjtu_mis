@@ -23,6 +23,7 @@ export const PLUGIN_ERROR_CODES = [
   "resource_too_large",
   "migration_failed",
   "user_cancelled",
+  "foreground_required",
   "idempotency_conflict"
 ] as const;
 export type PluginErrorCode = (typeof PLUGIN_ERROR_CODES)[number];
@@ -45,6 +46,27 @@ export const CAPABILITY_IDS = [
   "storage.kv@2",
   "storage.blob@1",
   "cache.resource@1",
+  "android.accessibility.events@1",
+  "android.accessibility.nodes@1",
+  "android.accessibility.actions@1",
+  "android.packages.read@1",
+  "android.settings.open@1",
+  "android.device.info@1",
+  "android.network.status@1",
+  "android.battery.status@1",
+  "android.haptics.perform@1",
+  "android.files.pick@1",
+  "android.files.save@1",
+  "android.media.pick@1",
+  "android.share.open@1",
+  "android.notifications.post@1",
+  "android.location.read@1",
+  "android.calendar.read@1",
+  "android.calendar.write@1",
+  "android.camera.capture@1",
+  "android.audio.record@1",
+  "android.sensors.read@1",
+  "android.biometric.verify@1",
   "academic.userCourses.command@1",
   "academic.homework.submit@1",
   "mail.send@1"
@@ -90,6 +112,50 @@ export interface CapabilityMethodMap {
   "cache.resource@1#delete": { request: { "key": string }; response: { "deleted": boolean } };
   "cache.resource@1#pin": { request: { "key": string; "pinned": boolean }; response: { "pinned": boolean } };
   "cache.resource@1#usage": { request: Record<string, never>; response: { "bytesUsed": number; "byteLimit": number; "globalByteLimit": number } };
+  "android.accessibility.events@1#getStatus": { request: Record<string, never>; response: { "enabled": boolean; "connected": boolean; "subscriptionCount": number } };
+  "android.accessibility.events@1#subscribe": { request: { "eventTypes": Array<"*" | "viewClicked" | "viewLongClicked" | "viewSelected" | "viewFocused" | "viewTextChanged" | "windowStateChanged" | "notificationStateChanged" | "viewHoverEnter" | "viewHoverExit" | "touchExplorationGestureStart" | "touchExplorationGestureEnd" | "windowContentChanged" | "viewScrolled" | "viewTextSelectionChanged" | "announcement" | "viewAccessibilityFocused" | "viewAccessibilityFocusCleared" | "viewTextTraversed" | "gestureDetectionStart" | "gestureDetectionEnd" | "touchInteractionStart" | "touchInteractionEnd" | "windowsChanged" | "viewContextClicked" | "assistReadingContext">; "packageNames"?: Array<string>; "persistent": boolean; "includeSource": boolean }; response: { "subscriptionId": string; "eventTypes": Array<string>; "packageNames": Array<string>; "persistent": boolean; "includeSource": boolean } };
+  "android.accessibility.events@1#unsubscribe": { request: { "subscriptionId": string }; response: { "deleted": boolean } };
+  "android.accessibility.events@1#listSubscriptions": { request: Record<string, never>; response: Array<{ "subscriptionId": string; "eventTypes": Array<string>; "packageNames": Array<string>; "persistent": boolean; "includeSource": boolean }> };
+  "android.accessibility.nodes@1#getRoot": { request: { "windowId"?: number; "maxDepth"?: number; "maxNodes"?: number }; response: { "nodeId": string; "windowId": number; "className": string; "packageName": string; "viewIdResourceName"?: string; "text"?: string; "contentDescription"?: string; "bounds": { "left": number; "top": number; "right": number; "bottom": number }; "actions": Array<string>; "clickable"?: boolean; "enabled"?: boolean; "focused"?: boolean; "focusable"?: boolean; "scrollable"?: boolean; "selected"?: boolean; "checked"?: boolean; "password": boolean; "sensitive": boolean; "childCount"?: number; "children"?: Array<Record<string, unknown>> } };
+  "android.accessibility.nodes@1#find": { request: { "windowId"?: number; "selector": { "className"?: string; "packageName"?: string; "viewIdResourceName"?: string; "text"?: string; "contentDescription"?: string; "clickable"?: boolean; "enabled"?: boolean; "focused"?: boolean; "focusable"?: boolean; "scrollable"?: boolean; "selected"?: boolean; "checked"?: boolean; "password"?: boolean; "sensitive"?: boolean }; "maxResults"?: number }; response: { "nodes": Array<{ "nodeId": string; "windowId": number; "className": string; "packageName": string; "viewIdResourceName"?: string; "text"?: string; "contentDescription"?: string; "bounds": { "left": number; "top": number; "right": number; "bottom": number }; "actions": Array<string>; "clickable"?: boolean; "enabled"?: boolean; "focused"?: boolean; "focusable"?: boolean; "scrollable"?: boolean; "selected"?: boolean; "checked"?: boolean; "password": boolean; "sensitive": boolean; "childCount"?: number; "children"?: Array<Record<string, unknown>> }>; "truncated": boolean } };
+  "android.accessibility.nodes@1#get": { request: { "nodeId": string }; response: { "nodeId": string; "windowId": number; "className": string; "packageName": string; "viewIdResourceName"?: string; "text"?: string; "contentDescription"?: string; "bounds": { "left": number; "top": number; "right": number; "bottom": number }; "actions": Array<string>; "clickable"?: boolean; "enabled"?: boolean; "focused"?: boolean; "focusable"?: boolean; "scrollable"?: boolean; "selected"?: boolean; "checked"?: boolean; "password": boolean; "sensitive": boolean; "childCount"?: number; "children"?: Array<Record<string, unknown>> } };
+  "android.accessibility.actions@1#performNode": { request: { "idempotencyKey": string; "nodeId": string; "action": "click" | "longClick" | "focus" | "clearFocus" | "select" | "clearSelection" | "scrollForward" | "scrollBackward" | "scrollUp" | "scrollDown" | "scrollLeft" | "scrollRight" | "expand" | "collapse" | "dismiss" | "showOnScreen" | "setText" | "setSelection" | "copy" | "paste"; "arguments"?: Record<string, unknown> }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.accessibility.actions@1#performGlobal": { request: { "idempotencyKey": string; "action": "back" | "home" | "recents" | "notifications" | "quickSettings" | "powerDialog" | "splitScreen" }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.accessibility.actions@1#dispatchGesture": { request: { "idempotencyKey": string; "strokes": Array<{ "points": Array<{ "x": number; "y": number }>; "startTimeMs"?: number; "durationMs": number }> }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.packages.read@1#list": { request: { "includeSystem"?: boolean; "includeDisabled"?: boolean }; response: { "packages": Array<{ "packageName": string; "label": string; "versionName": string; "versionCode": number; "uid": number; "enabled": boolean; "system": boolean; "firstInstallTime": number; "lastUpdateTime": number; "requestedPermissions": Array<string>; "grantedPermissions": Array<string>; "signingCertificates": Array<string>; "components": { "activities": Array<string>; "services": Array<string>; "receivers": Array<string>; "providers": Array<string> } }>; "truncated": boolean } };
+  "android.packages.read@1#get": { request: { "packageName": string }; response: { "packageName": string; "label": string; "versionName": string; "versionCode": number; "uid": number; "enabled": boolean; "system": boolean; "firstInstallTime": number; "lastUpdateTime": number; "requestedPermissions": Array<string>; "grantedPermissions": Array<string>; "signingCertificates": Array<string>; "components": { "activities": Array<string>; "services": Array<string>; "receivers": Array<string>; "providers": Array<string> } } };
+  "android.packages.read@1#resolveIntent": { request: { "action": string; "dataUri"?: string }; response: { "activities": Array<{ "packageName": string; "className": string; "exported": boolean }> } };
+  "android.settings.open@1#open": { request: { "action": string; "packageName"?: string }; response: { "opened": boolean; "action": string } };
+  "android.device.info@1#getInfo": { request: Record<string, never>; response: { "platform": unknown; "sdkInt": number; "manufacturer": string; "model": string; "locale": string; "timezone": string; "appVersion": string } };
+  "android.network.status@1#getStatus": { request: Record<string, never>; response: { "online": boolean; "validated": boolean; "metered": boolean; "transport": "wifi" | "cellular" | "ethernet" | "vpn" | "other" | "none" } };
+  "android.network.status@1#subscribe": { request: { "persistent"?: boolean }; response: { "subscriptionId": string; "persistent": boolean } };
+  "android.network.status@1#unsubscribe": { request: { "subscriptionId": string }; response: { "deleted": boolean } };
+  "android.battery.status@1#getStatus": { request: Record<string, never>; response: { "level": number; "charging": boolean; "status": "charging" | "discharging" | "full" | "notCharging" | "unknown" } };
+  "android.battery.status@1#subscribe": { request: { "persistent"?: boolean }; response: { "subscriptionId": string; "persistent": boolean } };
+  "android.battery.status@1#unsubscribe": { request: { "subscriptionId": string }; response: { "deleted": boolean } };
+  "android.haptics.perform@1#perform": { request: { "durationMs": number }; response: { "performed": boolean; "durationMs": number } };
+  "android.files.pick@1#pick": { request: { "mimeTypes"?: Array<string>; "multiple"?: boolean }; response: { "items": Array<{ "handle": string; "name": string; "mimeType": string; "size": number }> } };
+  "android.files.save@1#save": { request: { "idempotencyKey": string; "handle": string; "fileName": string; "mimeType": string }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.media.pick@1#pick": { request: { "mediaType"?: "image" | "video" | "mixed"; "multiple"?: boolean }; response: { "items": Array<{ "handle": string; "name": string; "mimeType": string; "size": number }> } };
+  "android.share.open@1#open": { request: { "title"?: string; "text"?: string; "url"?: string; "handle"?: string }; response: { "opened": boolean } };
+  "android.notifications.post@1#getStatus": { request: Record<string, never>; response: { "granted": boolean; "enabled": boolean } };
+  "android.notifications.post@1#show": { request: { "idempotencyKey": string; "id": string; "title": string; "body": string }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.notifications.post@1#schedule": { request: { "idempotencyKey": string; "id": string; "title": string; "body": string; "triggerAtMs": number }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.notifications.post@1#cancel": { request: { "idempotencyKey": string; "id": string }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.location.read@1#getStatus": { request: Record<string, never>; response: { "granted": boolean; "enabled": boolean } };
+  "android.location.read@1#getCurrent": { request: { "highAccuracy"?: boolean; "timeoutMs"?: number }; response: { "latitude": number; "longitude": number; "accuracy"?: number; "time": number } };
+  "android.calendar.read@1#list": { request: { "startMs": number; "endMs": number; "limit"?: number }; response: { "events": Array<{ "id": string; "title": string; "description"?: string; "location"?: string; "startMs": number; "endMs": number; "allDay": boolean }> } };
+  "android.calendar.write@1#create": { request: { "idempotencyKey": string; "title": string; "description"?: string; "location"?: string; "startMs": number; "endMs": number; "allDay"?: boolean }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.calendar.write@1#update": { request: { "idempotencyKey": string; "id": string; "title"?: string; "description"?: string; "location"?: string; "startMs"?: number; "endMs"?: number; "allDay"?: boolean }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.calendar.write@1#delete": { request: { "idempotencyKey": string; "id": string }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.camera.capture@1#capturePhoto": { request: Record<string, never>; response: { "handle": string; "mimeType": unknown; "size": number } };
+  "android.audio.record@1#start": { request: { "idempotencyKey": string; "recordingId": string }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.audio.record@1#stop": { request: { "idempotencyKey": string; "recordingId": string }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.sensors.read@1#list": { request: Record<string, never>; response: { "sensors": Array<"accelerometer" | "gyroscope" | "magneticField" | "light" | "pressure"> } };
+  "android.sensors.read@1#subscribe": { request: { "sensor": "accelerometer" | "gyroscope" | "magneticField" | "light" | "pressure"; "persistent"?: boolean; "rateHz"?: number }; response: { "subscriptionId": string; "persistent": boolean; "rateHz": number } };
+  "android.sensors.read@1#unsubscribe": { request: { "subscriptionId": string }; response: { "deleted": boolean } };
+  "android.biometric.verify@1#getStatus": { request: Record<string, never>; response: { "available": boolean } };
+  "android.biometric.verify@1#verify": { request: { "title": string; "subtitle"?: string }; response: { "verified": boolean } };
   "academic.userCourses.command@1#save": { request: { "idempotencyKey": string; "course": Record<string, unknown>; [key: string]: unknown }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
   "academic.userCourses.command@1#delete": { request: { "idempotencyKey": string; "id": number }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
   "academic.homework.submit@1#submit": { request: { "idempotencyKey": string; "homeworkId": number; "courseId": number; "content"?: string; "attachmentHandles"?: Array<string>; [key: string]: unknown }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
@@ -105,6 +171,10 @@ export interface CapabilityEventMap {
   "runtime.lifecycle@1#back": { data: Record<string, never>; requiresAcknowledgement: true };
   "network.request@1#progress": { data: { "loaded": number; "total"?: number; "phase": "upload" | "response" }; requiresAcknowledgement: false };
   "storage.kv@2#changed": { data: { "revision": number; "keys": Array<string>; "cleared": boolean }; requiresAcknowledgement: false };
+  "android.accessibility.events@1#received": { data: { "subscriptionId": string; "eventType": string; "packageName": string; "className": string; "eventTime": number; "text"?: Array<string>; "contentDescription"?: string; "source": { "nodeId": string; "windowId": number; "className": string; "packageName": string; "viewIdResourceName"?: string; "text"?: string; "contentDescription"?: string; "bounds": { "left": number; "top": number; "right": number; "bottom": number }; "actions": Array<string>; "clickable"?: boolean; "enabled"?: boolean; "focused"?: boolean; "focusable"?: boolean; "scrollable"?: boolean; "selected"?: boolean; "checked"?: boolean; "password": boolean; "sensitive": boolean; "childCount"?: number; "children"?: Array<Record<string, unknown>> } | null }; requiresAcknowledgement: false };
+  "android.network.status@1#changed": { data: { "online": boolean; "validated": boolean; "metered": boolean; "transport": "wifi" | "cellular" | "ethernet" | "vpn" | "other" | "none" }; requiresAcknowledgement: false };
+  "android.battery.status@1#changed": { data: { "level": number; "charging": boolean; "status": "charging" | "discharging" | "full" | "notCharging" | "unknown" }; requiresAcknowledgement: false };
+  "android.sensors.read@1#changed": { data: { "subscriptionId": string; "sensor": "accelerometer" | "gyroscope" | "magneticField" | "light" | "pressure"; "values": Array<number>; "timestampMs": number }; requiresAcknowledgement: false };
 }
 
 export type CapabilityRoute = keyof CapabilityMethodMap;
@@ -446,6 +516,246 @@ export const CAPABILITY_MOCK_RESPONSES = {
     "byteLimit": 0,
     "globalByteLimit": 0
   },
+  "android.accessibility.events@1#getStatus": {
+    "enabled": false,
+    "connected": false,
+    "subscriptionCount": 0
+  },
+  "android.accessibility.events@1#subscribe": {
+    "subscriptionId": "example",
+    "eventTypes": [
+      "example"
+    ],
+    "persistent": false,
+    "packageNames": [],
+    "includeSource": false
+  },
+  "android.accessibility.events@1#unsubscribe": {
+    "deleted": false
+  },
+  "android.accessibility.events@1#listSubscriptions": [],
+  "android.accessibility.nodes@1#getRoot": {
+    "nodeId": "example",
+    "windowId": 0,
+    "className": "example",
+    "packageName": "example",
+    "bounds": {
+      "left": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 0
+    },
+    "actions": [],
+    "password": false,
+    "sensitive": false
+  },
+  "android.accessibility.nodes@1#find": {
+    "nodes": [],
+    "truncated": false
+  },
+  "android.accessibility.nodes@1#get": {
+    "nodeId": "example",
+    "windowId": 0,
+    "className": "example",
+    "packageName": "example",
+    "bounds": {
+      "left": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 0
+    },
+    "actions": [],
+    "password": false,
+    "sensitive": false
+  },
+  "android.accessibility.actions@1#performNode": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "android.accessibility.actions@1#performGlobal": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "android.accessibility.actions@1#dispatchGesture": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "android.packages.read@1#list": {
+    "packages": [],
+    "truncated": false
+  },
+  "android.packages.read@1#get": {
+    "packageName": "example",
+    "label": "example",
+    "versionName": "example",
+    "versionCode": 0,
+    "uid": 0,
+    "enabled": false,
+    "system": false,
+    "firstInstallTime": 0,
+    "lastUpdateTime": 0,
+    "requestedPermissions": [],
+    "grantedPermissions": [],
+    "signingCertificates": [],
+    "components": {
+      "activities": [],
+      "services": [],
+      "receivers": [],
+      "providers": []
+    }
+  },
+  "android.packages.read@1#resolveIntent": {
+    "activities": []
+  },
+  "android.settings.open@1#open": {
+    "opened": false,
+    "action": "example"
+  },
+  "android.device.info@1#getInfo": {
+    "platform": "android",
+    "sdkInt": 0,
+    "manufacturer": "example",
+    "model": "example",
+    "locale": "example",
+    "timezone": "example",
+    "appVersion": "example"
+  },
+  "android.network.status@1#getStatus": {
+    "online": false,
+    "validated": false,
+    "metered": false,
+    "transport": "wifi"
+  },
+  "android.network.status@1#subscribe": {
+    "subscriptionId": "example",
+    "persistent": false
+  },
+  "android.network.status@1#unsubscribe": {
+    "deleted": false
+  },
+  "android.battery.status@1#getStatus": {
+    "level": 0,
+    "charging": false,
+    "status": "charging"
+  },
+  "android.battery.status@1#subscribe": {
+    "subscriptionId": "example",
+    "persistent": false
+  },
+  "android.battery.status@1#unsubscribe": {
+    "deleted": false
+  },
+  "android.haptics.perform@1#perform": {
+    "performed": false,
+    "durationMs": 0
+  },
+  "android.files.pick@1#pick": {
+    "items": []
+  },
+  "android.files.save@1#save": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "android.media.pick@1#pick": {
+    "items": []
+  },
+  "android.share.open@1#open": {
+    "opened": false
+  },
+  "android.notifications.post@1#getStatus": {
+    "granted": false,
+    "enabled": false
+  },
+  "android.notifications.post@1#show": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "android.notifications.post@1#schedule": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "android.notifications.post@1#cancel": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "android.location.read@1#getStatus": {
+    "granted": false,
+    "enabled": false
+  },
+  "android.location.read@1#getCurrent": {
+    "latitude": 0,
+    "longitude": 0,
+    "time": 0
+  },
+  "android.calendar.read@1#list": {
+    "events": []
+  },
+  "android.calendar.write@1#create": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "android.calendar.write@1#update": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "android.calendar.write@1#delete": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "android.camera.capture@1#capturePhoto": {
+    "handle": "example",
+    "mimeType": "image/jpeg",
+    "size": 0
+  },
+  "android.audio.record@1#start": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "android.audio.record@1#stop": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": null
+  },
+  "android.sensors.read@1#list": {
+    "sensors": []
+  },
+  "android.sensors.read@1#subscribe": {
+    "subscriptionId": "example",
+    "persistent": false,
+    "rateHz": 1
+  },
+  "android.sensors.read@1#unsubscribe": {
+    "deleted": false
+  },
+  "android.biometric.verify@1#getStatus": {
+    "available": false
+  },
+  "android.biometric.verify@1#verify": {
+    "verified": false
+  },
   "academic.userCourses.command@1#save": {
     "receiptId": "example",
     "idempotencyKey": "example",
@@ -496,6 +806,7 @@ export const CAPABILITY_REGISTRY = {
     "resource_too_large",
     "migration_failed",
     "user_cancelled",
+    "foreground_required",
     "idempotency_conflict"
   ],
   "marketplaceCategories": [
@@ -1409,6 +1720,536 @@ export const CAPABILITY_REGISTRY = {
       "properties": {
         "pinned": {
           "type": "boolean"
+        }
+      }
+    },
+    "accessibilityStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "connected",
+        "subscriptionCount"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "connected": {
+          "type": "boolean"
+        },
+        "subscriptionCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "accessibilitySubscription": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subscriptionId",
+        "eventTypes",
+        "persistent",
+        "packageNames",
+        "includeSource"
+      ],
+      "properties": {
+        "subscriptionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "eventTypes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "packageNames": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_]+(\\.[a-zA-Z0-9_]+)+$"
+          }
+        },
+        "persistent": {
+          "type": "boolean"
+        },
+        "includeSource": {
+          "type": "boolean"
+        }
+      }
+    },
+    "accessibilityNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeId",
+        "windowId",
+        "className",
+        "packageName",
+        "bounds",
+        "actions",
+        "password",
+        "sensitive"
+      ],
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "windowId": {
+          "type": "integer"
+        },
+        "className": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "packageName": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "viewIdResourceName": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "contentDescription": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "bounds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "properties": {
+            "left": {
+              "type": "integer"
+            },
+            "top": {
+              "type": "integer"
+            },
+            "right": {
+              "type": "integer"
+            },
+            "bottom": {
+              "type": "integer"
+            }
+          }
+        },
+        "actions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string"
+          }
+        },
+        "clickable": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "focused": {
+          "type": "boolean"
+        },
+        "focusable": {
+          "type": "boolean"
+        },
+        "scrollable": {
+          "type": "boolean"
+        },
+        "selected": {
+          "type": "boolean"
+        },
+        "checked": {
+          "type": "boolean"
+        },
+        "password": {
+          "type": "boolean"
+        },
+        "sensitive": {
+          "type": "boolean"
+        },
+        "childCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "children": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "accessibilityNodeList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodes",
+        "truncated"
+      ],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "$ref": "#/schemas/accessibilityNode"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "accessibilityNodeOrNull": {
+      "$ref": "#/schemas/accessibilityNode",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "accessibilityEventType": {
+      "type": "string",
+      "enum": [
+        "*",
+        "viewClicked",
+        "viewLongClicked",
+        "viewSelected",
+        "viewFocused",
+        "viewTextChanged",
+        "windowStateChanged",
+        "notificationStateChanged",
+        "viewHoverEnter",
+        "viewHoverExit",
+        "touchExplorationGestureStart",
+        "touchExplorationGestureEnd",
+        "windowContentChanged",
+        "viewScrolled",
+        "viewTextSelectionChanged",
+        "announcement",
+        "viewAccessibilityFocused",
+        "viewAccessibilityFocusCleared",
+        "viewTextTraversed",
+        "gestureDetectionStart",
+        "gestureDetectionEnd",
+        "touchInteractionStart",
+        "touchInteractionEnd",
+        "windowsChanged",
+        "viewContextClicked",
+        "assistReadingContext"
+      ]
+    },
+    "accessibilityNodeSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "className": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "packageName": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "viewIdResourceName": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "contentDescription": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "clickable": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "focused": {
+          "type": "boolean"
+        },
+        "focusable": {
+          "type": "boolean"
+        },
+        "scrollable": {
+          "type": "boolean"
+        },
+        "selected": {
+          "type": "boolean"
+        },
+        "checked": {
+          "type": "boolean"
+        },
+        "password": {
+          "type": "boolean"
+        },
+        "sensitive": {
+          "type": "boolean"
+        }
+      }
+    },
+    "accessibilityGesturePoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "accessibilityGestureStroke": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "points",
+        "durationMs"
+      ],
+      "properties": {
+        "points": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/schemas/accessibilityGesturePoint"
+          }
+        },
+        "startTimeMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        }
+      }
+    },
+    "automationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receiptId",
+        "idempotencyKey",
+        "completedAt",
+        "result"
+      ],
+      "properties": {
+        "receiptId": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "completedAt": {
+          "type": "string"
+        },
+        "result": {}
+      }
+    },
+    "packageInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "packageName",
+        "label",
+        "versionName",
+        "versionCode",
+        "uid",
+        "enabled",
+        "system",
+        "firstInstallTime",
+        "lastUpdateTime",
+        "requestedPermissions",
+        "grantedPermissions",
+        "signingCertificates",
+        "components"
+      ],
+      "properties": {
+        "packageName": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "versionName": {
+          "type": "string"
+        },
+        "versionCode": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "system": {
+          "type": "boolean"
+        },
+        "firstInstallTime": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastUpdateTime": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "requestedPermissions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "grantedPermissions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "signingCertificates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "components": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "activities",
+            "services",
+            "receivers",
+            "providers"
+          ],
+          "properties": {
+            "activities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "services": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "receivers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "providers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "packageList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "packages",
+        "truncated"
+      ],
+      "properties": {
+        "packages": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "$ref": "#/schemas/packageInfo"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "resolvedActivityList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "activities"
+      ],
+      "properties": {
+        "activities": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "packageName",
+              "className",
+              "exported"
+            ],
+            "properties": {
+              "packageName": {
+                "type": "string"
+              },
+              "className": {
+                "type": "string"
+              },
+              "exported": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "settingsOpenResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "opened",
+        "action"
+      ],
+      "properties": {
+        "opened": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string"
         }
       }
     }
@@ -3007,6 +3848,2354 @@ export const CAPABILITY_REGISTRY = {
           "errors": []
         }
       ]
+    },
+    {
+      "id": "android.accessibility.events@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.accessibility.events",
+        "title": "读取无障碍事件",
+        "description": "读取用户启用的 Android 无障碍事件；持久订阅会在插件后台运行时继续生效。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "subscriptionsPerPlugin": 16,
+        "eventsPerSecond": 60
+      },
+      "timeoutMs": 5000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "getStatus",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "$ref": "#/schemas/accessibilityStatus"
+          },
+          "errors": [
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "subscribe",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "eventTypes",
+              "persistent",
+              "includeSource"
+            ],
+            "properties": {
+              "eventTypes": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 32,
+                "items": {
+                  "$ref": "#/schemas/accessibilityEventType"
+                }
+              },
+              "packageNames": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9_]+(\\.[a-zA-Z0-9_]+)+$"
+                }
+              },
+              "persistent": {
+                "type": "boolean"
+              },
+              "includeSource": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/accessibilitySubscription"
+          },
+          "errors": [
+            "capability_unavailable",
+            "quota_exceeded"
+          ]
+        },
+        {
+          "name": "unsubscribe",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "subscriptionId"
+            ],
+            "properties": {
+              "subscriptionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/deletionResult"
+          },
+          "errors": [
+            "invalid_request"
+          ]
+        },
+        {
+          "name": "listSubscriptions",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "type": "array",
+            "items": {
+              "$ref": "#/schemas/accessibilitySubscription"
+            }
+          },
+          "errors": []
+        }
+      ],
+      "events": [
+        {
+          "name": "received",
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "subscriptionId",
+              "eventType",
+              "packageName",
+              "className",
+              "eventTime",
+              "source"
+            ],
+            "properties": {
+              "subscriptionId": {
+                "type": "string"
+              },
+              "eventType": {
+                "type": "string"
+              },
+              "packageName": {
+                "type": "string"
+              },
+              "className": {
+                "type": "string"
+              },
+              "eventTime": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "text": {
+                "type": "array",
+                "maxItems": 128,
+                "items": {
+                  "type": "string",
+                  "maxLength": 4096
+                }
+              },
+              "contentDescription": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "source": {
+                "$ref": "#/schemas/accessibilityNodeOrNull"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "android.accessibility.nodes@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.accessibility.nodes",
+        "title": "读取无障碍节点",
+        "description": "读取活动窗口的结构化节点快照；密码和敏感输入值始终脱敏。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "maxNodes": 4096,
+        "maxDepth": 64,
+        "nodeTtlMs": 30000
+      },
+      "timeoutMs": 5000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "getRoot",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "windowId": {
+                "type": "integer"
+              },
+              "maxDepth": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64
+              },
+              "maxNodes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4096
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/accessibilityNode"
+          },
+          "errors": [
+            "capability_unavailable",
+            "resource_too_large"
+          ]
+        },
+        {
+          "name": "find",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "selector"
+            ],
+            "properties": {
+              "windowId": {
+                "type": "integer"
+              },
+              "selector": {
+                "$ref": "#/schemas/accessibilityNodeSelector"
+              },
+              "maxResults": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 256
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/accessibilityNodeList"
+          },
+          "errors": [
+            "capability_unavailable",
+            "resource_too_large"
+          ]
+        },
+        {
+          "name": "get",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "nodeId"
+            ],
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/accessibilityNode"
+          },
+          "errors": [
+            "capability_unavailable",
+            "invalid_request",
+            "quota_exceeded"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "android.accessibility.actions@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.accessibility.actions",
+        "title": "执行无障碍动作",
+        "description": "允许插件操作其他应用的无障碍节点、全局导航和触摸手势；首次授权后持续有效。"
+      },
+      "confirmation": "none",
+      "idempotency": "required",
+      "quota": {
+        "actionsPerMinute": 120,
+        "receiptRetentionDays": 7,
+        "receiptsPerPlugin": 1024
+      },
+      "timeoutMs": 10000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "performNode",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "nodeId",
+              "action"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "click",
+                  "longClick",
+                  "focus",
+                  "clearFocus",
+                  "select",
+                  "clearSelection",
+                  "scrollForward",
+                  "scrollBackward",
+                  "scrollUp",
+                  "scrollDown",
+                  "scrollLeft",
+                  "scrollRight",
+                  "expand",
+                  "collapse",
+                  "dismiss",
+                  "showOnScreen",
+                  "setText",
+                  "setSelection",
+                  "copy",
+                  "paste"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/automationReceipt"
+          },
+          "errors": [
+            "capability_unavailable",
+            "invalid_request",
+            "quota_exceeded",
+            "idempotency_conflict"
+          ]
+        },
+        {
+          "name": "performGlobal",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "action"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "back",
+                  "home",
+                  "recents",
+                  "notifications",
+                  "quickSettings",
+                  "powerDialog",
+                  "splitScreen"
+                ]
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/automationReceipt"
+          },
+          "errors": [
+            "capability_unavailable",
+            "invalid_request",
+            "quota_exceeded",
+            "idempotency_conflict"
+          ]
+        },
+        {
+          "name": "dispatchGesture",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "strokes"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "strokes": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {
+                  "$ref": "#/schemas/accessibilityGestureStroke"
+                }
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/automationReceipt"
+          },
+          "errors": [
+            "capability_unavailable",
+            "invalid_request",
+            "quota_exceeded",
+            "idempotency_conflict"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "android.packages.read@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.packages.read",
+        "title": "读取已安装应用",
+        "description": "读取设备上的应用包、权限、组件和签名摘要；不读取应用私有数据。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "maxPackages": 4096,
+        "maxComponents": 4096
+      },
+      "timeoutMs": 10000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "list",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "includeSystem": {
+                "type": "boolean"
+              },
+              "includeDisabled": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/packageList"
+          },
+          "errors": [
+            "capability_unavailable",
+            "resource_too_large"
+          ]
+        },
+        {
+          "name": "get",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "packageName"
+            ],
+            "properties": {
+              "packageName": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_]+(\\.[a-zA-Z0-9_]+)+$"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/packageInfo"
+          },
+          "errors": [
+            "capability_unavailable",
+            "invalid_request"
+          ]
+        },
+        {
+          "name": "resolveIntent",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "dataUri": {
+                "type": "string",
+                "maxLength": 512
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/resolvedActivityList"
+          },
+          "errors": [
+            "capability_unavailable",
+            "invalid_request"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "android.settings.open@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.settings.open",
+        "title": "打开系统设置",
+        "description": "打开 android.settings.* 系统设置页面；宿主拒绝任意 Intent、组件和额外参数。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "opensPerMinute": 30
+      },
+      "timeoutMs": 5000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "open",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "pattern": "^android\\.settings\\.[A-Z0-9_]+$"
+              },
+              "packageName": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_]+(\\.[a-zA-Z0-9_]+)+$"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/settingsOpenResult"
+          },
+          "errors": [
+            "capability_unavailable",
+            "invalid_request",
+            "quota_exceeded"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "android.device.info@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.device.info",
+        "description": "读取最小化的设备和宿主应用信息；不包含稳定硬件标识符。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "requestsPerMinute": 60
+      },
+      "timeoutMs": 5000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "getInfo",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "platform",
+              "sdkInt",
+              "manufacturer",
+              "model",
+              "locale",
+              "timezone",
+              "appVersion"
+            ],
+            "properties": {
+              "platform": {
+                "const": "android"
+              },
+              "sdkInt": {
+                "type": "integer"
+              },
+              "manufacturer": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "model": {
+                "type": "string",
+                "maxLength": 160
+              },
+              "locale": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "timezone": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "appVersion": {
+                "type": "string",
+                "maxLength": 120
+              }
+            }
+          },
+          "errors": [
+            "capability_unavailable"
+          ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "android.network.status@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.network.status",
+        "description": "读取和订阅最小化网络状态；不返回 SSID、BSSID、MAC 或 IP。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "subscriptionsPerPlugin": 16,
+        "eventsPerSecond": 60
+      },
+      "timeoutMs": 5000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "getStatus",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "online",
+              "validated",
+              "metered",
+              "transport"
+            ],
+            "properties": {
+              "online": {
+                "type": "boolean"
+              },
+              "validated": {
+                "type": "boolean"
+              },
+              "metered": {
+                "type": "boolean"
+              },
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "wifi",
+                  "cellular",
+                  "ethernet",
+                  "vpn",
+                  "other",
+                  "none"
+                ]
+              }
+            }
+          },
+          "errors": [
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "subscribe",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "persistent": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "subscriptionId",
+              "persistent"
+            ],
+            "properties": {
+              "subscriptionId": {
+                "type": "string"
+              },
+              "persistent": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": [
+            "quota_exceeded",
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "unsubscribe",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "subscriptionId"
+            ],
+            "properties": {
+              "subscriptionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "deleted"
+            ],
+            "properties": {
+              "deleted": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": []
+        }
+      ],
+      "events": [
+        {
+          "name": "changed",
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "online",
+              "validated",
+              "metered",
+              "transport"
+            ],
+            "properties": {
+              "online": {
+                "type": "boolean"
+              },
+              "validated": {
+                "type": "boolean"
+              },
+              "metered": {
+                "type": "boolean"
+              },
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "wifi",
+                  "cellular",
+                  "ethernet",
+                  "vpn",
+                  "other",
+                  "none"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "android.battery.status@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.battery.status",
+        "description": "读取和订阅电池状态。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "subscriptionsPerPlugin": 16,
+        "eventsPerSecond": 60
+      },
+      "timeoutMs": 5000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "getStatus",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "level",
+              "charging",
+              "status"
+            ],
+            "properties": {
+              "level": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "charging": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "charging",
+                  "discharging",
+                  "full",
+                  "notCharging",
+                  "unknown"
+                ]
+              }
+            }
+          },
+          "errors": [
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "subscribe",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "persistent": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "subscriptionId",
+              "persistent"
+            ],
+            "properties": {
+              "subscriptionId": {
+                "type": "string"
+              },
+              "persistent": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": [
+            "quota_exceeded",
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "unsubscribe",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "subscriptionId"
+            ],
+            "properties": {
+              "subscriptionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "deleted"
+            ],
+            "properties": {
+              "deleted": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": []
+        }
+      ],
+      "events": [
+        {
+          "name": "changed",
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "level",
+              "charging",
+              "status"
+            ],
+            "properties": {
+              "level": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "charging": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "charging",
+                  "discharging",
+                  "full",
+                  "notCharging",
+                  "unknown"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "android.haptics.perform@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.haptics.perform",
+        "description": "执行受限时长的设备振动反馈。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "requestsPerMinute": 60
+      },
+      "timeoutMs": 5000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "perform",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "durationMs"
+            ],
+            "properties": {
+              "durationMs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "performed",
+              "durationMs"
+            ],
+            "properties": {
+              "performed": {
+                "type": "boolean"
+              },
+              "durationMs": {
+                "type": "integer"
+              }
+            }
+          },
+          "errors": [
+            "capability_unavailable",
+            "quota_exceeded"
+          ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "android.files.pick@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.files.pick",
+        "description": "通过系统文件选择器导入受限大小的文件到插件加密 blob 存储。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "itemsPerRequest": 16,
+        "bytesPerItem": 67108864
+      },
+      "timeoutMs": 120000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "pick",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "mimeTypes": {
+                "type": "array",
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 120
+                }
+              },
+              "multiple": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "handle",
+                    "name",
+                    "mimeType",
+                    "size"
+                  ],
+                  "properties": {
+                    "handle": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 255
+                    },
+                    "mimeType": {
+                      "type": "string",
+                      "maxLength": 160
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "errors": [
+            "foreground_required",
+            "user_cancelled",
+            "quota_exceeded",
+            "resource_too_large",
+            "capability_unavailable"
+          ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "android.files.save@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.files.save",
+        "description": "通过系统保存面板将当前插件 blob 导出为用户选择的文件。"
+      },
+      "confirmation": "none",
+      "idempotency": "required",
+      "quota": {
+        "bytesPerItem": 67108864
+      },
+      "timeoutMs": 120000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "save",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "handle",
+              "fileName",
+              "mimeType"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "handle": {
+                "type": "string",
+                "pattern": "^blob-[a-f0-9]{64}$"
+              },
+              "fileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "mimeType": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 160
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "foreground_required",
+            "user_cancelled",
+            "invalid_request",
+            "resource_too_large",
+            "idempotency_conflict",
+            "capability_unavailable"
+          ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "android.media.pick@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.media.pick",
+        "description": "通过系统照片选择器导入图片或视频到插件加密 blob 存储。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "itemsPerRequest": 16,
+        "bytesPerItem": 67108864
+      },
+      "timeoutMs": 120000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "pick",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "mediaType": {
+                "type": "string",
+                "enum": [
+                  "image",
+                  "video",
+                  "mixed"
+                ],
+                "default": "image"
+              },
+              "multiple": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "handle",
+                    "name",
+                    "mimeType",
+                    "size"
+                  ],
+                  "properties": {
+                    "handle": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 255
+                    },
+                    "mimeType": {
+                      "type": "string",
+                      "maxLength": 160
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "errors": [
+            "foreground_required",
+            "user_cancelled",
+            "quota_exceeded",
+            "resource_too_large",
+            "capability_unavailable"
+          ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "android.share.open@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.share.open",
+        "description": "通过 Android chooser 分享文本、HTTPS URL 或当前插件 blob。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "requestsPerMinute": 30
+      },
+      "timeoutMs": 30000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "open",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 8192
+              },
+              "url": {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              "handle": {
+                "type": "string",
+                "pattern": "^blob-[a-f0-9]{64}$"
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "opened"
+            ],
+            "properties": {
+              "opened": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": [
+            "foreground_required",
+            "invalid_request",
+            "quota_exceeded",
+            "capability_unavailable"
+          ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "android.notifications.post@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.notifications.post",
+        "description": "显示、计划和取消受配额约束的插件本地通知。"
+      },
+      "confirmation": "none",
+      "idempotency": "required",
+      "quota": {
+        "requestsPerHour": 60
+      },
+      "timeoutMs": 10000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "getStatus",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "granted",
+              "enabled"
+            ],
+            "properties": {
+              "granted": {
+                "type": "boolean"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": [
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "show",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "id",
+              "title",
+              "body"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "body": {
+                "type": "string",
+                "maxLength": 1024
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "foreground_required",
+            "permission_denied",
+            "quota_exceeded",
+            "idempotency_conflict",
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "schedule",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "id",
+              "title",
+              "body",
+              "triggerAtMs"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "body": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "triggerAtMs": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "foreground_required",
+            "permission_denied",
+            "quota_exceeded",
+            "idempotency_conflict",
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "cancel",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "id"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "idempotency_conflict",
+            "capability_unavailable"
+          ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "android.location.read@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.location.read",
+        "description": "读取一次前台位置；不会请求后台定位。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "requestsPerMinute": 12
+      },
+      "timeoutMs": 60000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "getStatus",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "granted",
+              "enabled"
+            ],
+            "properties": {
+              "granted": {
+                "type": "boolean"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": [
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "getCurrent",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "highAccuracy": {
+                "type": "boolean",
+                "default": false
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1000,
+                "maximum": 60000,
+                "default": 15000
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "latitude",
+              "longitude",
+              "time"
+            ],
+            "properties": {
+              "latitude": {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 90
+              },
+              "longitude": {
+                "type": "number",
+                "minimum": -180,
+                "maximum": 180
+              },
+              "accuracy": {
+                "type": "number",
+                "minimum": 0
+              },
+              "time": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "errors": [
+            "foreground_required",
+            "permission_denied",
+            "request_timeout",
+            "capability_unavailable",
+            "quota_exceeded"
+          ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "android.calendar.read@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.calendar.read",
+        "description": "读取受日期和条数限制的系统日历事件。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "requestsPerMinute": 30,
+        "maxEvents": 200
+      },
+      "timeoutMs": 10000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "list",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "startMs",
+              "endMs"
+            ],
+            "properties": {
+              "startMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "endMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "default": 50
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "events"
+            ],
+            "properties": {
+              "events": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "title",
+                    "startMs",
+                    "endMs",
+                    "allDay"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string",
+                      "maxLength": 1024
+                    },
+                    "description": {
+                      "type": "string",
+                      "maxLength": 4096
+                    },
+                    "location": {
+                      "type": "string",
+                      "maxLength": 1024
+                    },
+                    "startMs": {
+                      "type": "integer"
+                    },
+                    "endMs": {
+                      "type": "integer"
+                    },
+                    "allDay": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "errors": [
+            "foreground_required",
+            "permission_denied",
+            "invalid_request",
+            "quota_exceeded",
+            "capability_unavailable"
+          ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "android.calendar.write@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.calendar.write",
+        "description": "创建、更新或删除日历事件；使用幂等回执。"
+      },
+      "confirmation": "none",
+      "idempotency": "required",
+      "quota": {
+        "requestsPerMinute": 30
+      },
+      "timeoutMs": 10000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "create",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "title",
+              "startMs",
+              "endMs"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "location": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "startMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "endMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "allDay": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "foreground_required",
+            "permission_denied",
+            "invalid_request",
+            "idempotency_conflict",
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "update",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "id"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "location": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "startMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "endMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "allDay": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "foreground_required",
+            "permission_denied",
+            "invalid_request",
+            "idempotency_conflict",
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "delete",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "id"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "foreground_required",
+            "permission_denied",
+            "invalid_request",
+            "idempotency_conflict",
+            "capability_unavailable"
+          ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "android.camera.capture@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.camera.capture",
+        "description": "通过系统相机 UI 拍摄照片并导入加密 blob 存储。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "bytesPerItem": 67108864
+      },
+      "timeoutMs": 120000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "capturePhoto",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "handle",
+              "mimeType",
+              "size"
+            ],
+            "properties": {
+              "handle": {
+                "type": "string"
+              },
+              "mimeType": {
+                "const": "image/jpeg"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "errors": [
+            "foreground_required",
+            "user_cancelled",
+            "resource_too_large",
+            "capability_unavailable"
+          ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "android.audio.record@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.audio.record",
+        "description": "在可见前台插件 runtime 中录制受时长限制的音频。"
+      },
+      "confirmation": "none",
+      "idempotency": "required",
+      "quota": {
+        "maxDurationMs": 600000,
+        "bytesPerItem": 67108864
+      },
+      "timeoutMs": 30000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "start",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "recordingId"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "recordingId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "foreground_required",
+            "permission_denied",
+            "invalid_request",
+            "idempotency_conflict",
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "stop",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "recordingId"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "recordingId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            }
+          },
+          "response": {
+            "$ref": "#/schemas/commandReceipt"
+          },
+          "errors": [
+            "foreground_required",
+            "invalid_request",
+            "resource_too_large",
+            "idempotency_conflict",
+            "capability_unavailable"
+          ]
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "android.sensors.read@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.sensors.read",
+        "description": "读取受限频率的常规设备传感器，不包含 body sensor 数据。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "subscriptionsPerPlugin": 16,
+        "eventsPerSecond": 20
+      },
+      "timeoutMs": 5000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "list",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sensors"
+            ],
+            "properties": {
+              "sensors": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "accelerometer",
+                    "gyroscope",
+                    "magneticField",
+                    "light",
+                    "pressure"
+                  ]
+                }
+              }
+            }
+          },
+          "errors": [
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "subscribe",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sensor"
+            ],
+            "properties": {
+              "sensor": {
+                "type": "string",
+                "enum": [
+                  "accelerometer",
+                  "gyroscope",
+                  "magneticField",
+                  "light",
+                  "pressure"
+                ]
+              },
+              "persistent": {
+                "type": "boolean",
+                "default": false
+              },
+              "rateHz": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 5
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "subscriptionId",
+              "persistent",
+              "rateHz"
+            ],
+            "properties": {
+              "subscriptionId": {
+                "type": "string"
+              },
+              "persistent": {
+                "type": "boolean"
+              },
+              "rateHz": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20
+              }
+            }
+          },
+          "errors": [
+            "quota_exceeded",
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "unsubscribe",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "subscriptionId"
+            ],
+            "properties": {
+              "subscriptionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "deleted"
+            ],
+            "properties": {
+              "deleted": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": []
+        }
+      ],
+      "events": [
+        {
+          "name": "changed",
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "subscriptionId",
+              "sensor",
+              "values",
+              "timestampMs"
+            ],
+            "properties": {
+              "subscriptionId": {
+                "type": "string"
+              },
+              "sensor": {
+                "type": "string",
+                "enum": [
+                  "accelerometer",
+                  "gyroscope",
+                  "magneticField",
+                  "light",
+                  "pressure"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "maxItems": 3,
+                "items": {
+                  "type": "number"
+                }
+              },
+              "timestampMs": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "android.biometric.verify@1",
+      "stability": "beta",
+      "runtimeFloor": 2,
+      "permission": {
+        "id": "android.biometric.verify",
+        "description": "打开系统生物识别确认，只返回结果且不读取生物特征数据。"
+      },
+      "confirmation": "none",
+      "idempotency": "none",
+      "quota": {
+        "requestsPerMinute": 12
+      },
+      "timeoutMs": 60000,
+      "support": {
+        "androidMinApi": 28,
+        "webViewFeatures": [
+          "DOCUMENT_START_SCRIPT",
+          "WEB_MESSAGE_LISTENER"
+        ]
+      },
+      "methods": [
+        {
+          "name": "getStatus",
+          "request": {
+            "$ref": "#/schemas/empty"
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "available"
+            ],
+            "properties": {
+              "available": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": [
+            "capability_unavailable"
+          ]
+        },
+        {
+          "name": "verify",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "title"
+            ],
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "subtitle": {
+                "type": "string",
+                "maxLength": 240
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "verified"
+            ],
+            "properties": {
+              "verified": {
+                "type": "boolean"
+              }
+            }
+          },
+          "errors": [
+            "foreground_required",
+            "user_cancelled",
+            "capability_unavailable",
+            "quota_exceeded"
+          ]
+        }
+      ],
+      "events": []
     },
     {
       "id": "academic.userCourses.command@1",

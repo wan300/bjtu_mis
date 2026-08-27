@@ -2,7 +2,7 @@
 
 **Branch**: `[###-feature-name]`  
 **Spec**: [link-to-spec]  
-**Constitution Version**: 1.2.0
+**Constitution Version**: 2.0.0
 
 **Created**: [DATE]
 
@@ -33,6 +33,7 @@ Complete this check before implementation starts. Any FAIL must be resolved or d
 - Dependencies and artifacts: PASS/FAIL - no unnecessary dependency or generated/local/secret artifact will be committed.
 - Rollback and ExecPlan: PASS/FAIL - high-risk changes have rollback steps and a maintained ExecPlan.
 - Plugin zero-trust baseline: PASS/FAIL/N/A - plugin work uses Manifest v3 / contract_v1, registry-generated versioned capabilities, stable publisher identity, host-fixed self/main-frame bridge, split origins, transactional storage and the read-only campus registry; legacy documents are not treated as authority.
+- Android persistent capability exception: PASS/FAIL/N/A - only the constitution-listed Android capabilities use persistent authorization; system UI/permission foreground gates, redaction, resource isolation, idempotency, quotas, foreground priority, notification, revocation and API 26/35 validation are planned.
 
 ## Design
 

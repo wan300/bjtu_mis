@@ -18,6 +18,57 @@ test('contract registry has unique capability routes and command invariants', as
   assert.ok(capabilityIds.includes('storage.kv@2'));
   assert.ok(capabilityIds.includes('storage.blob@1'));
   assert.ok(capabilityIds.includes('cache.resource@1'));
+  const androidCapabilityIds = [
+    'android.accessibility.events@1',
+    'android.accessibility.nodes@1',
+    'android.accessibility.actions@1',
+    'android.packages.read@1',
+    'android.settings.open@1',
+    'android.device.info@1',
+    'android.network.status@1',
+    'android.battery.status@1',
+    'android.haptics.perform@1',
+    'android.files.pick@1',
+    'android.files.save@1',
+    'android.media.pick@1',
+    'android.share.open@1',
+    'android.notifications.post@1',
+    'android.location.read@1',
+    'android.calendar.read@1',
+    'android.calendar.write@1',
+    'android.camera.capture@1',
+    'android.audio.record@1',
+    'android.sensors.read@1',
+    'android.biometric.verify@1'
+  ];
+  for (const id of androidCapabilityIds) {
+    const capability = registry.capabilities.find((item) => item.id === id);
+    assert.equal(capability.stability, 'beta', id);
+    assert.equal(capability.runtimeFloor, 2, id);
+  }
+  const androidActions = registry.capabilities.find(
+    (capability) => capability.id === 'android.accessibility.actions@1'
+  );
+  assert.equal(androidActions.confirmation, 'none');
+  assert.equal(androidActions.idempotency, 'required');
+  assert.deepEqual(
+    registry.capabilities.find(
+      (capability) => capability.id === 'android.accessibility.events@1'
+    ).events.map((event) => event.name),
+    ['received']
+  );
+  assert.equal(
+    registry.capabilities.find((capability) => capability.id === 'android.calendar.write@1')
+      .idempotency,
+    'required'
+  );
+  assert.equal(
+    registry.capabilities.find((capability) => capability.id === 'android.files.pick@1')
+      .confirmation,
+    'none'
+  );
+  assert.equal(registry.schemas.accessibilityNode.properties.sensitive.type, 'boolean');
+  assert.deepEqual(registry.schemas.accessibilityGestureStroke.required, ['points', 'durationMs']);
   assert.deepEqual(registry.packageLimits, {
     archiveBytes: 25 * 1024 * 1024,
     extractedBytes: 50 * 1024 * 1024,

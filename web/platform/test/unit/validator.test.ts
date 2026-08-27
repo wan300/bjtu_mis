@@ -16,7 +16,7 @@ interface LintSchema {
 }
 interface LintModule {
   lintPlugin(root: string, result: LintResult, schema: LintSchema): LintResult;
-  loadManifestSchema(repositoryRoot: string, result: LintResult): LintSchema;
+  loadManifestSchema(repositoryRoot: string, result: LintResult): LintSchema | null;
 }
 
 test('dist digest is stable and sensitive to content and path changes', async (t) => {
@@ -98,6 +98,63 @@ test('builds a canonical contract_v1 artifact with separate marketplace metadata
   ]);
 });
 
+test('schema loading failure stops before plugin linting emits cascading diagnostics', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bjtu-plugin-missing-contract-schema-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const repositoryRoot = path.join(root, 'repository');
+  await fs.mkdir(path.join(repositoryRoot, 'tools'), { recursive: true });
+  await fs.copyFile(
+    path.resolve('..', '..', 'tools', 'third-party-service-lint.cjs'),
+    path.join(repositoryRoot, 'tools', 'third-party-service-lint.cjs')
+  );
+
+  const sourceZip = path.join(root, 'source.zip');
+  const zip = new yazl.ZipFile();
+  zip.addBuffer(Buffer.from(JSON.stringify({
+    schema_version: 3,
+    id: 'bjtu.demo',
+    name: 'Demo',
+    version: '1.0.0',
+    entrypoint: 'index.html',
+    icon: 'icon.svg',
+    capabilities: { required: ['runtime.lifecycle@1'] }
+  })), 'repository/bjtu-plugin.json');
+  zip.addBuffer(Buffer.from(JSON.stringify({
+    description: 'Demo plugin',
+    author: 'Alice',
+    category: 'other',
+    tags: []
+  })), 'repository/bjtu-marketplace.json');
+  zip.addBuffer(Buffer.from('<html></html>'), 'repository/dist/index.html');
+  zip.addBuffer(Buffer.from('<svg></svg>'), 'repository/dist/icon.svg');
+  const output = createWriteStream(sourceZip);
+  zip.outputStream.pipe(output);
+  zip.end();
+  await new Promise<void>((resolve, reject) => {
+    output.on('close', resolve);
+    output.on('error', reject);
+  });
+
+  await assert.rejects(
+    validateAndBuildPackage({
+      sourceZip,
+      workRoot: path.join(root, 'work'),
+      repositoryRoot,
+      artifactPath: path.join(root, 'artifact.zip'),
+      iconPath: path.join(root, 'icon.svg')
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /Cannot load generated contract schemas/);
+      assert.doesNotMatch(error.message, /Unknown capability/);
+      assert.doesNotMatch(error.message, /Unknown marketplace category/);
+      assert.doesNotMatch(error.message, /0 file limit|0 byte extracted limit/);
+      assert.doesNotMatch(error.message, /Plugin icon must be between/);
+      return true;
+    }
+  );
+});
+
 test('rejects archives whose directory entries exceed the global entry limit', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bjtu-plugin-entry-limit-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -152,6 +209,7 @@ test('lint rejects non-string values instead of publishing the original malforme
   const require = createRequire(import.meta.url);
   const lint = require(path.resolve('..', '..', 'tools', 'third-party-service-lint.cjs')) as LintModule;
   const schema = lint.loadManifestSchema(path.resolve('..'), lintResult);
+  assert.ok(schema);
 
   lint.lintPlugin(root, lintResult, schema);
 
@@ -187,6 +245,7 @@ test('lint rejects unsupported and oversized plugin icons', async (t) => {
   const lint = require(path.resolve('..', '..', 'tools', 'third-party-service-lint.cjs')) as LintModule;
   const schemaResult: LintResult = { errors: [], warnings: [] };
   const schema = lint.loadManifestSchema(path.resolve('..'), schemaResult);
+  assert.ok(schema);
   const unsupported: LintResult = { errors: [], warnings: [] };
 
   lint.lintPlugin(root, unsupported, schema);
@@ -230,6 +289,7 @@ test('lint requires a restricted sandbox for declared remote iframes', async (t)
   const lint = require(path.resolve('..', '..', 'tools', 'third-party-service-lint.cjs')) as LintModule;
   const schemaResult: LintResult = { errors: [], warnings: [] };
   const schema = lint.loadManifestSchema(path.resolve('..'), schemaResult);
+  assert.ok(schema);
   const result: LintResult = { errors: [], warnings: [] };
 
   lint.lintPlugin(root, result, schema);
@@ -261,6 +321,7 @@ test('lint binds navigation origins to navigation.external capability', async (t
   const lint = require(path.resolve('..', '..', 'tools', 'third-party-service-lint.cjs')) as LintModule;
   const schemaResult: LintResult = { errors: [], warnings: [] };
   const schema = lint.loadManifestSchema(path.resolve('..'), schemaResult);
+  assert.ok(schema);
   const result: LintResult = { errors: [], warnings: [] };
 
   lint.lintPlugin(root, result, schema);
