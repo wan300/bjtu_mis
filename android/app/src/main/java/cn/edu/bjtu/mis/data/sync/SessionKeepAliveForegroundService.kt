@@ -35,6 +35,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class SessionKeepAliveForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var keepAliveJob: Job? = null
+    private var expiryJob: Job? = null
+    private val controller get() = AndroidSessionKeepAlive.controller(this)
     private var startedAtMillis = 0L
 
     private val sessionRepository
@@ -48,32 +50,41 @@ class SessionKeepAliveForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            leaseRegistry.clear()
+            runCatching { controller.stopAll("user_stopped") }
             stopKeepAlive()
             stopSelf()
             return START_NOT_STICKY
         }
 
-        return syncKeepAliveState(startId)
+        return try { syncKeepAliveState(startId) } catch (_: Exception) {
+            runCatching { controller.stopAll("service_unavailable") }
+            AndroidSessionKeepAlive.changed()
+            stopKeepAlive()
+            stopSelf()
+            START_NOT_STICKY
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onTimeout(startId: Int, fgsType: Int) {
-        leaseRegistry.clear()
+        runCatching { controller.stopAll("max_runtime") }
         stopKeepAlive()
         stopSelf(startId)
     }
 
     override fun onDestroy() {
         keepAliveJob?.cancel()
+        expiryJob?.cancel()
+        AndroidSessionKeepAlive.running = false
         serviceScope.cancel()
         serviceCreated.set(false)
+        AndroidSessionKeepAlive.changed()
         super.onDestroy()
     }
 
     private fun syncKeepAliveState(startId: Int? = null): Int {
-        if (!leaseRegistry.isActive()) {
+        if (!controller.isActive()) {
             stopKeepAlive()
             if (startId == null) {
                 stopSelf()
@@ -85,6 +96,26 @@ class SessionKeepAliveForegroundService : Service() {
 
         if (startedAtMillis == 0L) startedAtMillis = SystemClock.elapsedRealtime()
         startForegroundCompat(buildNotification("${activeReasonText()}，正在维持 MIS 后台连接"))
+        AndroidSessionKeepAlive.running = true
+        if (expiryJob?.isActive != true) expiryJob = serviceScope.launch {
+            while (isActive) {
+                runCatching {
+                    controller.leases()
+                    if (!AndroidSessionKeepAlive.notificationsAvailable(this@SessionKeepAliveForegroundService)) {
+                        controller.stopPlugins("service_unavailable")
+                    }
+                }
+                if (SystemClock.elapsedRealtime() - startedAtMillis >= MAX_FOREGROUND_RUNTIME_MS) {
+                    runCatching { controller.stopAll("max_runtime") }
+                    AndroidSessionKeepAlive.changed()
+                    stopSelf()
+                    break
+                }
+                AndroidSessionKeepAlive.changed()
+                if (!controller.isActive()) { stopSelf(); break }
+                delay(1_000)
+            }
+        }
         ensureKeepAliveLoop()
         return START_STICKY
     }
@@ -93,22 +124,26 @@ class SessionKeepAliveForegroundService : Service() {
         if (keepAliveJob?.isActive == true) return
         keepAliveJob = serviceScope.launch {
             while (isActive) {
-                if (!leaseRegistry.isActive()) {
+                if (!controller.isActive()) {
                     stopSelf()
                     break
                 }
 
                 if (SystemClock.elapsedRealtime() - startedAtMillis >= MAX_FOREGROUND_RUNTIME_MS) {
-                    leaseRegistry.clear()
+                    controller.stopAll("max_runtime")
                     updateNotification("保活已达到前台服务时长上限")
                     stopSelf()
                     break
                 }
 
                 var shouldStop = false
+                var sessionState = "degraded"
+                var authenticationFailed = false
                 val message = runCatching { sessionRepository.recoverSession() }
                     .fold(
                         onSuccess = { result ->
+                            sessionState = if (result.status == AutoLoginStatus.Ready) "ready" else "unavailable"
+                            authenticationFailed = result.status != AutoLoginStatus.Ready && result.attempts > 0
                             when {
                                 result.status == AutoLoginStatus.Ready && result.attempts > 0 ->
                                     "MIS 已自动重新登录，最近保活 ${formatNow()}"
@@ -125,9 +160,16 @@ class SessionKeepAliveForegroundService : Service() {
                             "MIS 连接校验失败：${error.message ?: "未知错误"}"
                         },
                     )
-                updateNotification(message)
+                AndroidSessionKeepAlive.sessionState = sessionState
+                if (authenticationFailed) {
+                    controller.stopPlugins("session_unavailable")
+                    AndroidSessionKeepAlive.changed()
+                }
+                updateNotification(if (controller.activeLeases().isNotEmpty()) {
+                    "插件正在维持 MIS 会话（${controller.activeLeases().size} 个限时任务）"
+                } else message)
                 if (shouldStop) {
-                    leaseRegistry.clear()
+                    controller.stopAll("session_unavailable")
                     stopSelf()
                     break
                 }
@@ -139,6 +181,10 @@ class SessionKeepAliveForegroundService : Service() {
     private fun stopKeepAlive() {
         keepAliveJob?.cancel()
         keepAliveJob = null
+        expiryJob?.cancel()
+        expiryJob = null
+        AndroidSessionKeepAlive.running = false
+        AndroidSessionKeepAlive.changed()
         stopForegroundCompat()
     }
 
@@ -180,13 +226,14 @@ class SessionKeepAliveForegroundService : Service() {
             .build()
 
     private fun activeReasonText(): String {
-        val reasons = leaseRegistry.snapshot().map { it.reason }.distinct()
+        val reasons = controller.internalReasons()
         val hasAgent = REASON_AGENT in reasons
         val hasCourseSelection = REASON_COURSE_SELECTION in reasons
         return when {
             hasAgent && hasCourseSelection -> "Agent 和抢课进行中"
             hasAgent -> "Agent 执行中"
             hasCourseSelection -> "抢课进行中"
+            controller.activeLeases().isNotEmpty() -> "插件限时任务进行中"
             reasons.isNotEmpty() -> "任务进行中"
             else -> "按需任务进行中"
         }
@@ -242,36 +289,40 @@ class SessionKeepAliveForegroundService : Service() {
         private val TIME_FORMATTER: DateTimeFormatter =
             DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
 
-        private val leaseRegistry = KeepAliveLeaseRegistry()
         private val serviceCreated = AtomicBoolean(false)
 
         fun acquire(context: Context, reason: String = REASON_AGENT, token: String) {
             val normalizedToken = token.trim().takeIf { it.isNotBlank() } ?: return
             val normalizedReason = reason.trim().takeIf { it.isNotBlank() } ?: REASON_AGENT
-            leaseRegistry.acquire(normalizedToken, normalizedReason)
-            ContextCompat.startForegroundService(
-                context.applicationContext,
-                Intent(context.applicationContext, SessionKeepAliveForegroundService::class.java).setAction(ACTION_SYNC),
-            )
+            val controller = AndroidSessionKeepAlive.controller(context)
+            controller.acquireInternal(normalizedToken, normalizedReason)
+            try { requestSync(context) } catch (error: Exception) {
+                controller.releaseInternal(normalizedToken)
+                throw error
+            }
         }
 
         fun release(context: Context, token: String) {
             val normalizedToken = token.trim().takeIf { it.isNotBlank() } ?: return
-            if (!leaseRegistry.release(normalizedToken)) return
+            val controller = AndroidSessionKeepAlive.controller(context)
+            if (!controller.releaseInternal(normalizedToken)) return
 
-            val appContext = context.applicationContext
-            if (leaseRegistry.isActive()) {
-                ContextCompat.startForegroundService(
-                    appContext,
-                    Intent(appContext, SessionKeepAliveForegroundService::class.java).setAction(ACTION_SYNC),
-                )
-            } else if (serviceCreated.get()) {
-                appContext.startService(Intent(appContext, SessionKeepAliveForegroundService::class.java).setAction(ACTION_SYNC))
-            }
+            syncExisting(context)
+        }
+
+        fun requestSync(context: Context) {
+            ContextCompat.startForegroundService(context.applicationContext,
+                Intent(context.applicationContext, SessionKeepAliveForegroundService::class.java).setAction(ACTION_SYNC))
+        }
+
+        fun syncExisting(context: Context) {
+            if (serviceCreated.get()) context.applicationContext.startService(
+                Intent(context.applicationContext, SessionKeepAliveForegroundService::class.java).setAction(ACTION_SYNC))
         }
 
         fun stop(context: Context) {
-            leaseRegistry.clear()
+            runCatching { AndroidSessionKeepAlive.controller(context).stopAll("user_stopped") }
+            AndroidSessionKeepAlive.changed()
             if (serviceCreated.get()) {
                 context.applicationContext.startService(
                     Intent(context.applicationContext, SessionKeepAliveForegroundService::class.java).setAction(ACTION_STOP),

@@ -250,6 +250,9 @@ object AndroidAccessibilityController {
     }
 
     fun stopServiceRuntime(publisherSubjectId: String, serviceId: String) {
+        // Remove the durable keep-alive reason before stopping its runtime.
+        // Otherwise the next reconciliation would start it again.
+        PluginSessionKeepAlive.revoke(publisherSubjectId, serviceId)
         val identity = PluginAutomationIdentity(publisherSubjectId, serviceId)
         subscriptions.entries.removeIf { it.value.identity == identity }
         removeNodes(identity)

@@ -63,6 +63,25 @@ npm run check
 npm run test:frontend -- --run
 ```
 
+### 打包时生成文件缺失
+
+如果 `compileReleaseKotlin` 报 `Internal compiler error`，并在异常链中出现
+`NoSuchFileException: .../build/generated/ksp/release/java/.../AppDatabase_Impl.java`，
+先确认 Android Studio 和命令行没有同时构建同一个工作区。KSP/Room 生成文件与
+Open WebUI 输出会被构建任务重写，并行启动多个构建可能使另一构建读到缺失或不完整的文件。
+
+等待或取消已有构建后，单独重试原打包任务；若仍报相同的生成文件缺失错误，可在
+`android/` 下依次执行以下命令，再通过原签名配置或 Android Studio 签名向导打包：
+
+```powershell
+.\gradlew.bat --stop
+.\gradlew.bat clean
+.\gradlew.bat assembleDebug
+```
+
+`clean` 会清理构建输出，随后构建会重新生成 Room 实现与 WebView 资产。不要手工维护
+`AppDatabase_Impl.java`，也不要通过替换正式签名密钥处理编译错误。
+
 ## 第三方插件安全基线
 
 第三方插件只使用 Manifest v3 / contract_v1。权威规则位于仓库根目录
@@ -138,3 +157,5 @@ API 与兼容说明。
 ## 本地文件
 
 `local.properties`、`release-signing.properties`、keystore、Gradle 缓存、APK/AAB、release 输出、`open-webui/node_modules/`、`open-webui/build/`、`.svelte-kit/` 和 `app/src/main/assets/public/` 都是本机、秘密或构建生成内容，不应提交。`app/schemas/` 是例外：其中用于迁移验证且经审查的 Room schema 版本历史应随对应 migration 提交。
+
+第三方插件可声明 `android.session.keepAlive@1`（runtime 3），首次/增量授权后在前台申请/续租 MIS 会话保活，后台查询/释放。单租约最多 60 分钟，支持通知停止和撤销清理；详细协议见 [`docs/third-party-services.md`](../docs/third-party-services.md#插件-mis-会话保活runtime-3)。

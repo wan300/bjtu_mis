@@ -101,7 +101,8 @@
               "android.biometric.verify@1",
               "academic.userCourses.command@1",
               "academic.homework.submit@1",
-              "mail.send@1"
+              "mail.send@1",
+              "android.session.keepAlive@1"
             ]
           }
         },
@@ -152,7 +153,8 @@
               "android.biometric.verify@1",
               "academic.userCourses.command@1",
               "academic.homework.submit@1",
-              "mail.send@1"
+              "mail.send@1",
+              "android.session.keepAlive@1"
             ]
           }
         }

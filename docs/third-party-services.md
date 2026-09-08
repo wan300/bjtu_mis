@@ -134,6 +134,7 @@ dist/
 - `android.share.open@1`、`android.notifications.post@1`、`android.location.read@1`
 - `android.calendar.read@1`、`android.calendar.write@1`、`android.camera.capture@1`
 - `android.audio.record@1`、`android.sensors.read@1`、`android.biometric.verify@1`
+- `android.session.keepAlive@1`（runtime 3）
 
 精确方法、请求/响应 schema、权限、确认、幂等、配额、超时、错误和平台支持范围见
 [生成的 API 参考](generated/plugin-capability-api.md)。
@@ -185,7 +186,7 @@ SDK 公开 `runtime`、`configuration`、`network`、`storage.kv`、`storage.blo
 
 ### Android 系统自动化与原生能力
 
-以下 21 项 beta Capability 只在 Android API 26+ 可用，仍经 publisher+plugin 的稳定
+以下 22 项 beta Capability 只在 Android API 26+ 可用，仍经 publisher+plugin 的稳定
 本地 main-frame origin 和 protocol v2 调用。用户必须在首次安装或更新增量审阅中授权；
 授权按 publisher+plugin 持久保存，状态订阅可在页面关闭或进程重启后由最多四个后台
 WebView runtime 恢复。无障碍相关调用还要求用户在系统设置中另行启用 BJTU MIS 插件
@@ -406,3 +407,53 @@ README Markdown 在宿主侧清洗后以独立浮窗 WebView 展示。该 WebVie
 存储、文件访问和混合内容，不注入插件桥，也不加载插件资源。仅允许 HTTPS GitHub/GitHub
 User Content/GitHub Assets 图片，其他资源会被移除；README 链接只在用户点击时交给系统浏览器。
 README 缺失或读取失败不会阻止用户继续确认或取消安装。
+
+
+## 插件 MIS 会话保活（runtime 3）
+
+`android.session.keepAlive@1` 为 beta 持久授权能力。Manifest 使用
+`"capabilities": { "required": ["runtime.lifecycle@1", "android.session.keepAlive@1"] }`；
+也可声明 optional，但默认不授权，只有用户显式授权后才能使用。旧 runtime 不支持此能力。
+
+首次/增量审阅后，无需每次弹窗。acquire/renew 要求前台插件 runtime 且应用 Activity 可见，
+并要求通知开启；后台可查询/释放。不会自动申请通知权限、打开系统设置、申请电池白名单或绕过 FGS 限制。
+保活只维护宿主 MIS 会话，不向插件返回凭据，也不保证 JavaScript 持续执行或进程永不终止。
+
+```ts
+const receipt = await bjtu.android.session.keepAlive.acquire({
+  idempotencyKey: crypto.randomUUID(),
+  requestedDurationMs: 15 * 60 * 1000
+});
+const leaseId = receipt.result.lease!.leaseId;
+const status = await bjtu.android.session.keepAlive.getStatus();
+// 续租从当前时间计算，但不能超过创建时的 maxExpiresAtMs。
+await bjtu.android.session.keepAlive.renew({
+  idempotencyKey: crypto.randomUUID(), leaseId, requestedDurationMs: 20 * 60 * 1000
+});
+await bjtu.android.session.keepAlive.release({
+  idempotencyKey: crypto.randomUUID(), leaseId
+});
+const dispose = bjtu.android.session.keepAlive.onEnded(({ leaseId, reason }) => {
+  // reason: released / expired / revoked / clock_changed / user_stopped /
+  // max_runtime / session_unavailable / service_unavailable
+});
+```
+
+acquire 只创建租约，renew 显式续租；返回 Command 回执，不能将回执视为服务已经启动。
+getStatus 的 active/serviceState 表示当前状态：stopped、pending、running 或 degraded。
+重复 key+摘要只返回原回执，租约已停止时不会再次启动；不同摘要返回 idempotency_conflict。
+结束事件只发送到同发布者同插件的优先前台 runtime，无监听器时不保证补发，重开页面应查询状态。
+
+限制：每插件最多 2 租约，单次 1–60 分钟，创建起硬上限 60 分钟，每分钟最多 6 次申请/续租。
+滚动一小时预留最多 60 租约分钟；并行租约分别计费，提前释放不退预留额度，续租仅计增加的部分。
+租约只释放本插件资源；服务仍被 Agent、抢课或其他插件持有时继续运行。
+通知“停止保活”清空所有来源；插件后台通知“全部停止”仅清理插件任务。
+
+未过期租约、预算和幂等摘要由宿主加密保存。进程重建后重新校验发布者、授权和版本，
+等应用前台满足系统要求后恢复，不延长原到期时间。设备重启/时钟异常清理租约。
+禁用、撤销、复审、更新/回滚、删除和退出登录清理租约；租约不能借更新快照复活。
+文件损坏或未完成的写入安全关闭该能力，需要恢复本机状态，不影响内置 Agent/抢课。
+持续通知被关闭或系统拒绝启动时返回 notifications_unavailable/foreground_service_denied；
+过期或不属于自己的租约续租返回 lease_not_found。接口不接受任意 URL、token、purpose 文本或 Cookie。
+
+执行计划与验证状态见 [保活 ExecPlan](plugin-session-keepalive-execplan.md)。

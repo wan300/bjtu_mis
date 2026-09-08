@@ -24,7 +24,10 @@ export const PLUGIN_ERROR_CODES = [
   "migration_failed",
   "user_cancelled",
   "foreground_required",
-  "idempotency_conflict"
+  "idempotency_conflict",
+  "lease_not_found",
+  "foreground_service_denied",
+  "notifications_unavailable"
 ] as const;
 export type PluginErrorCode = (typeof PLUGIN_ERROR_CODES)[number];
 export const CAPABILITY_IDS = [
@@ -69,7 +72,8 @@ export const CAPABILITY_IDS = [
   "android.biometric.verify@1",
   "academic.userCourses.command@1",
   "academic.homework.submit@1",
-  "mail.send@1"
+  "mail.send@1",
+  "android.session.keepAlive@1"
 ] as const;
 export type CapabilityId = (typeof CAPABILITY_IDS)[number];
 
@@ -160,6 +164,10 @@ export interface CapabilityMethodMap {
   "academic.userCourses.command@1#delete": { request: { "idempotencyKey": string; "id": number }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
   "academic.homework.submit@1#submit": { request: { "idempotencyKey": string; "homeworkId": number; "courseId": number; "content"?: string; "attachmentHandles"?: Array<string>; [key: string]: unknown }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
   "mail.send@1#send": { request: { "idempotencyKey": string; "to": Array<string>; "cc"?: Array<string>; "bcc"?: Array<string>; "subject": string; "text"?: string; "html"?: string; "attachmentHandles"?: Array<string>; [key: string]: unknown }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": unknown } };
+  "android.session.keepAlive@1#acquire": { request: { "idempotencyKey": string; "requestedDurationMs": number }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": { "lease"?: { "leaseId": string; "expiresAtMs": number; "maxExpiresAtMs": number }; "released": boolean } } };
+  "android.session.keepAlive@1#renew": { request: { "idempotencyKey": string; "leaseId": string; "requestedDurationMs": number }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": { "lease"?: { "leaseId": string; "expiresAtMs": number; "maxExpiresAtMs": number }; "released": boolean } } };
+  "android.session.keepAlive@1#release": { request: { "idempotencyKey": string; "leaseId": string }; response: { "receiptId": string; "idempotencyKey": string; "completedAt": string; "result": { "lease"?: { "leaseId": string; "expiresAtMs": number; "maxExpiresAtMs": number }; "released": boolean } } };
+  "android.session.keepAlive@1#getStatus": { request: Record<string, never>; response: { "active": boolean; "serviceState": "stopped" | "pending" | "running" | "degraded"; "leases": Array<{ "leaseId": string; "expiresAtMs": number; "maxExpiresAtMs": number }> } };
 }
 
 export interface CapabilityEventMap {
@@ -175,6 +183,7 @@ export interface CapabilityEventMap {
   "android.network.status@1#changed": { data: { "online": boolean; "validated": boolean; "metered": boolean; "transport": "wifi" | "cellular" | "ethernet" | "vpn" | "other" | "none" }; requiresAcknowledgement: false };
   "android.battery.status@1#changed": { data: { "level": number; "charging": boolean; "status": "charging" | "discharging" | "full" | "notCharging" | "unknown" }; requiresAcknowledgement: false };
   "android.sensors.read@1#changed": { data: { "subscriptionId": string; "sensor": "accelerometer" | "gyroscope" | "magneticField" | "light" | "pressure"; "values": Array<number>; "timestampMs": number }; requiresAcknowledgement: false };
+  "android.session.keepAlive@1#ended": { data: { "leaseId": string; "reason": "released" | "expired" | "revoked" | "clock_changed" | "user_stopped" | "max_runtime" | "session_unavailable" | "service_unavailable" }; requiresAcknowledgement: false };
 }
 
 export type CapabilityRoute = keyof CapabilityMethodMap;
@@ -779,6 +788,35 @@ export const CAPABILITY_MOCK_RESPONSES = {
     "idempotencyKey": "example",
     "completedAt": "example",
     "result": null
+  },
+  "android.session.keepAlive@1#acquire": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": {
+      "released": false
+    }
+  },
+  "android.session.keepAlive@1#renew": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": {
+      "released": false
+    }
+  },
+  "android.session.keepAlive@1#release": {
+    "receiptId": "example",
+    "idempotencyKey": "example",
+    "completedAt": "example",
+    "result": {
+      "released": false
+    }
+  },
+  "android.session.keepAlive@1#getStatus": {
+    "active": false,
+    "serviceState": "stopped",
+    "leases": []
   }
 } as const;
 
@@ -807,7 +845,10 @@ export const CAPABILITY_REGISTRY = {
     "migration_failed",
     "user_cancelled",
     "foreground_required",
-    "idempotency_conflict"
+    "idempotency_conflict",
+    "lease_not_found",
+    "foreground_service_denied",
+    "notifications_unavailable"
   ],
   "marketplaceCategories": [
     "academic",
@@ -6414,6 +6455,424 @@ export const CAPABILITY_REGISTRY = {
             "idempotency_conflict",
             "http_error"
           ]
+        }
+      ]
+    },
+    {
+      "id": "android.session.keepAlive@1",
+      "stability": "beta",
+      "runtimeFloor": 3,
+      "permission": {
+        "id": "android.session.keepAlive",
+        "title": "维持 MIS 会话",
+        "description": "允许插件在限时任务期间维持 BJTU MIS 会话，并显示持续通知。"
+      },
+      "confirmation": "none",
+      "idempotency": "required",
+      "quota": {
+        "maxLeasesPerPlugin": 2,
+        "maxDurationMs": 3600000,
+        "requestsPerMinute": 6,
+        "durationPerHourMs": 3600000
+      },
+      "timeoutMs": 10000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "acquire",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "requestedDurationMs"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "requestedDurationMs": {
+                "type": "integer",
+                "minimum": 60000,
+                "maximum": 3600000
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "receiptId",
+              "idempotencyKey",
+              "completedAt",
+              "result"
+            ],
+            "properties": {
+              "receiptId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "completedAt": {
+                "type": "string"
+              },
+              "result": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "released"
+                ],
+                "properties": {
+                  "lease": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "leaseId",
+                      "expiresAtMs",
+                      "maxExpiresAtMs"
+                    ],
+                    "properties": {
+                      "leaseId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "expiresAtMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxExpiresAtMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "released": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "errors": [
+            "permission_denied",
+            "capability_unavailable",
+            "foreground_required",
+            "invalid_request",
+            "quota_exceeded",
+            "idempotency_conflict",
+            "lease_not_found",
+            "foreground_service_denied",
+            "notifications_unavailable"
+          ]
+        },
+        {
+          "name": "renew",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "leaseId",
+              "requestedDurationMs"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "leaseId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "requestedDurationMs": {
+                "type": "integer",
+                "minimum": 60000,
+                "maximum": 3600000
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "receiptId",
+              "idempotencyKey",
+              "completedAt",
+              "result"
+            ],
+            "properties": {
+              "receiptId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "completedAt": {
+                "type": "string"
+              },
+              "result": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "released"
+                ],
+                "properties": {
+                  "lease": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "leaseId",
+                      "expiresAtMs",
+                      "maxExpiresAtMs"
+                    ],
+                    "properties": {
+                      "leaseId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "expiresAtMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxExpiresAtMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "released": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "errors": [
+            "permission_denied",
+            "capability_unavailable",
+            "foreground_required",
+            "invalid_request",
+            "quota_exceeded",
+            "idempotency_conflict",
+            "lease_not_found",
+            "foreground_service_denied",
+            "notifications_unavailable"
+          ]
+        },
+        {
+          "name": "release",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "leaseId"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "leaseId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "receiptId",
+              "idempotencyKey",
+              "completedAt",
+              "result"
+            ],
+            "properties": {
+              "receiptId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "completedAt": {
+                "type": "string"
+              },
+              "result": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "released"
+                ],
+                "properties": {
+                  "lease": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "leaseId",
+                      "expiresAtMs",
+                      "maxExpiresAtMs"
+                    ],
+                    "properties": {
+                      "leaseId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "expiresAtMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxExpiresAtMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "released": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "errors": [
+            "permission_denied",
+            "capability_unavailable",
+            "foreground_required",
+            "invalid_request",
+            "quota_exceeded",
+            "idempotency_conflict",
+            "lease_not_found",
+            "foreground_service_denied",
+            "notifications_unavailable"
+          ]
+        },
+        {
+          "name": "getStatus",
+          "request": {
+            "type": "object",
+            "additionalProperties": false
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "active",
+              "serviceState",
+              "leases"
+            ],
+            "properties": {
+              "active": {
+                "type": "boolean"
+              },
+              "serviceState": {
+                "type": "string",
+                "enum": [
+                  "stopped",
+                  "pending",
+                  "running",
+                  "degraded"
+                ]
+              },
+              "leases": {
+                "type": "array",
+                "maxItems": 2,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "leaseId",
+                    "expiresAtMs",
+                    "maxExpiresAtMs"
+                  ],
+                  "properties": {
+                    "leaseId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "expiresAtMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxExpiresAtMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "errors": [
+            "permission_denied",
+            "capability_unavailable",
+            "foreground_required",
+            "invalid_request",
+            "quota_exceeded",
+            "idempotency_conflict",
+            "lease_not_found",
+            "foreground_service_denied",
+            "notifications_unavailable"
+          ]
+        }
+      ],
+      "events": [
+        {
+          "name": "ended",
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "leaseId",
+              "reason"
+            ],
+            "properties": {
+              "leaseId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "released",
+                  "expired",
+                  "revoked",
+                  "clock_changed",
+                  "user_stopped",
+                  "max_runtime",
+                  "session_unavailable",
+                  "service_unavailable"
+                ]
+              }
+            }
+          }
         }
       ]
     }

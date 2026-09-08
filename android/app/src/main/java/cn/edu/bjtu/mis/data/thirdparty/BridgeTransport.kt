@@ -167,6 +167,7 @@ class BridgeTransport(
     fun close() {
         AndroidAccessibilityController.detachRuntime(runtimeId)
         AndroidNativeEventController.detachRuntime(runtimeId)
+        PluginSessionKeepAlive.detach(runtimeId)
         jobs.values.forEach(Job::cancel)
         jobs.clear()
         binaryTimeoutJobs.values.forEach(Job::cancel)

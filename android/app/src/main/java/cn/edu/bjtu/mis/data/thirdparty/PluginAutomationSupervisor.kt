@@ -48,7 +48,7 @@ class PluginAutomationSupervisor(
                             it.serviceId == identity.serviceId &&
                             it.capability != "android.accessibility.events@1"
                     }
-                    if (!hasNativeSubscription) stopService(identity)
+                    if (!hasNativeSubscription && identity !in PluginSessionKeepAlive.owners()) stopService(identity)
                 }
         }
     }
@@ -62,10 +62,20 @@ class PluginAutomationSupervisor(
     }
 
     fun stopAll() {
+        PluginSessionKeepAlive.stopAll()
         active.keys.toList().forEach(::stopService)
     }
 
     fun activeRuntimeCount(): Int = active.size
+
+    fun releaseKeepAliveReason(publisher: String, plugin: String, force: Boolean = false) {
+        scope.launch {
+            val identity = PluginAutomationIdentity(publisher, plugin)
+            if ((force || identity !in PluginSessionKeepAlive.owners()) && automationStore.list().none {
+                it.publisherSubjectId == publisher && it.serviceId == plugin
+            }) stopService(identity)
+        }
+    }
 
     private fun stopService(identity: PluginAutomationIdentity) {
         val runtime = active.remove(identity) ?: return
@@ -87,11 +97,14 @@ class PluginAutomationSupervisor(
             return
         }
         val declared = service.manifest.requiredCapabilities + service.manifest.optionalCapabilities
+        val hasKeepAlive = identity in PluginSessionKeepAlive.owners() &&
+            "android.session.keepAlive@1" in service.grantedCapabilities &&
+            "android.session.keepAlive@1" in declared
         val records = automationStore.list().filter {
             it.publisherSubjectId == identity.publisherSubjectId && it.serviceId == identity.serviceId
         }
         if (
-            records.isNotEmpty() &&
+            !hasKeepAlive && records.isNotEmpty() &&
                 records.all { it.capability == "android.accessibility.events@1" } &&
                 !AndroidAccessibilityController.isConnected()
         ) {
@@ -105,7 +118,7 @@ class PluginAutomationSupervisor(
                         AndroidAccessibilityController.isConnected()
                     )
         }
-        if (!service.canRun || usable.isEmpty()) {
+        if (!service.canRun || (usable.isEmpty() && !hasKeepAlive)) {
             automationStore.removeService(identity.publisherSubjectId, identity.serviceId)
             return
         }

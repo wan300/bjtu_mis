@@ -729,3 +729,26 @@ async function waitFor(predicate) {
   }
   assert.fail('Timed out waiting for WebView transport activity.');
 }
+
+
+test('session keep-alive SDK supports leases, idempotency and background release', async () => {
+  const transport = createMockTransport();
+  const sdk = createBjtuPluginSdk(transport);
+  const request = { idempotencyKey: 'start', requestedDurationMs: 120000 };
+  const receipt = await sdk.android.session.keepAlive.acquire(request);
+  const leaseId = receipt.result.lease.leaseId;
+  assert.equal((await sdk.android.session.keepAlive.getStatus()).active, true);
+  assert.deepEqual(await sdk.android.session.keepAlive.acquire(request), receipt);
+  await assert.rejects(sdk.android.session.keepAlive.acquire({ ...request, requestedDurationMs: 60000 }), { code: 'idempotency_conflict' });
+  transport.setScenario({ lifecycle: 'background' });
+  await assert.rejects(sdk.android.session.keepAlive.acquire({ ...request, idempotencyKey: 'new' }), { code: 'foreground_required' });
+  await sdk.android.session.keepAlive.release({ idempotencyKey: 'stop', leaseId });
+  assert.equal((await sdk.android.session.keepAlive.getStatus()).active, false);
+  assert.deepEqual(await sdk.android.session.keepAlive.acquire(request), receipt);
+  assert.equal((await sdk.android.session.keepAlive.getStatus()).active, false);
+  let event;
+  const dispose = sdk.android.session.keepAlive.onEnded((value) => { event = value; });
+  await transport.emit('android.session.keepAlive@1', 'ended', { leaseId, reason: 'expired' });
+  assert.deepEqual(event, { leaseId, reason: 'expired' });
+  dispose();
+});

@@ -210,6 +210,7 @@ class ThirdPartyServiceRepository(
             }
             throw error
         }
+        previousService?.let { PluginSessionKeepAlive.revoke(it.publisherSubjectId, it.serviceId) }
         installer.pruneInstalledVersions(
             installed.manifest.id,
             setOfNotNull(installed.commitSha, existing?.commitSha),
@@ -319,6 +320,9 @@ class ThirdPartyServiceRepository(
             needsReview = false,
             updatedAt = nowIso(),
         )
+        if ("android.session.keepAlive@1" !in normalized) {
+            PluginSessionKeepAlive.revoke(service.publisherSubjectId, service.serviceId)
+        }
         if ("android.accessibility.events@1" !in normalized) {
             AndroidAccessibilityController.revokeAccessibility(
                 service.publisherSubjectId,
@@ -380,6 +384,7 @@ class ThirdPartyServiceRepository(
             needsReview = true,
             updatedAt = nowIso(),
         )
+        PluginSessionKeepAlive.revoke(service.publisherSubjectId, service.serviceId)
     }
 
     fun configurationValue(service: ThirdPartyService, key: String): String? {
@@ -406,6 +411,7 @@ class ThirdPartyServiceRepository(
             createdAt = nowIso(),
         )
         dao.deleteServiceAndScheduleCleanup(tombstone)
+        PluginSessionKeepAlive.revoke(existing.publisherSubjectId, existing.serviceId)
         cleanupTombstone(tombstone)
     }
 
@@ -539,6 +545,7 @@ class ThirdPartyServiceRepository(
         if (currentKvShadowed && store != null) {
             store.discardShadow(namespace)
         }
+        PluginSessionKeepAlive.revoke(current.publisherSubjectId, current.serviceId)
         val restoredService = restored.toModel()
         val restoredDeclared = restoredService.manifest.requiredCapabilities +
             restoredService.manifest.optionalCapabilities
@@ -759,6 +766,7 @@ class ThirdPartyServiceRepository(
         )
 
     private fun revokeAllAndroidAutomation(publisherSubjectId: String, serviceId: String) {
+        PluginSessionKeepAlive.revoke(publisherSubjectId, serviceId)
         AndroidAccessibilityController.revokeService(publisherSubjectId, serviceId)
         AndroidNativeRuntimeController.revokeService(publisherSubjectId, serviceId)
     }

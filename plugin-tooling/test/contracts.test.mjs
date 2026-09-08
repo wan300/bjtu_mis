@@ -145,3 +145,18 @@ test('generated marketplace schemas are byte-identical', async () => {
   );
   assert.equal(docsSchema, webSchema);
 });
+
+
+test('keep-alive contract has a distinct runtime floor and closed response schemas', async () => {
+  const registry = JSON.parse(await readFile(path.join(toolingRoot, 'contracts', 'capability-contracts.json'), 'utf8'));
+  const capability = registry.capabilities.find((c) => c.id === 'android.session.keepAlive@1');
+  assert.equal(capability.runtimeFloor, 3);
+  assert.equal(capability.confirmation, 'none');
+  assert.equal(capability.idempotency, 'required');
+  assert.deepEqual(capability.methods.map((m) => m.name), ['acquire', 'renew', 'release', 'getStatus']);
+  for (const method of capability.methods) {
+    assert.equal(method.response.additionalProperties, false);
+    if (method.name !== 'getStatus') assert.ok(method.request.required.includes('idempotencyKey'));
+  }
+  assert.equal(capability.methods[0].request.properties.requestedDurationMs.maximum, 3600000);
+});

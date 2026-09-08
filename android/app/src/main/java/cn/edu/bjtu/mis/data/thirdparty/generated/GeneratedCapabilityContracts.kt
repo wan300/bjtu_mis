@@ -59,7 +59,7 @@ object GeneratedCapabilityContracts {
     const val PROTOCOL_VERSION = 2
     const val RUNTIME_FLOOR = 2
 
-    val errorCodes: Set<String> = setOf("permission_denied", "capability_unavailable", "invalid_request", "origin_denied", "network_timeout", "request_timeout", "http_error", "quota_exceeded", "resource_too_large", "migration_failed", "user_cancelled", "foreground_required", "idempotency_conflict")
+    val errorCodes: Set<String> = setOf("permission_denied", "capability_unavailable", "invalid_request", "origin_denied", "network_timeout", "request_timeout", "http_error", "quota_exceeded", "resource_too_large", "migration_failed", "user_cancelled", "foreground_required", "idempotency_conflict", "lease_not_found", "foreground_service_denied", "notifications_unavailable")
 
     val capabilities: List<GeneratedCapabilityDescriptor> = listOf(
         GeneratedCapabilityDescriptor(
@@ -689,6 +689,21 @@ object GeneratedCapabilityContracts {
             quotaJson = "{\"receiptRetentionDays\":7,\"receiptsPerPlugin\":1024}",
             timeoutMs = 60000L,
             maxTimeoutMs = 60000L,
+            androidMinApi = 26,
+            webViewFeatures = setOf(),
+        ),
+        GeneratedCapabilityDescriptor(
+            id = "android.session.keepAlive@1",
+            stability = "beta",
+            runtimeFloor = 3,
+            permission = "android.session.keepAlive",
+            permissionTitle = "维持 MIS 会话",
+            permissionDescription = "允许插件在限时任务期间维持 BJTU MIS 会话，并显示持续通知。",
+            confirmation = "none",
+            idempotencyRequired = true,
+            quotaJson = "{\"maxLeasesPerPlugin\":2,\"maxDurationMs\":3600000,\"requestsPerMinute\":6,\"durationPerHourMs\":3600000}",
+            timeoutMs = 10000L,
+            maxTimeoutMs = 10000L,
             androidMinApi = 26,
             webViewFeatures = setOf(),
         )
@@ -1900,6 +1915,62 @@ object GeneratedCapabilityContracts {
             requestSchema = Json.parseToJsonElement("{\"type\":\"object\",\"required\":[\"idempotencyKey\",\"to\",\"subject\"],\"properties\":{\"idempotencyKey\":{\"type\":\"string\"},\"to\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"cc\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"bcc\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"subject\":{\"type\":\"string\"},\"text\":{\"type\":\"string\"},\"html\":{\"type\":\"string\"},\"attachmentHandles\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}").jsonObject,
             responseSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"receiptId\",\"idempotencyKey\",\"completedAt\",\"result\"],\"properties\":{\"receiptId\":{\"type\":\"string\"},\"idempotencyKey\":{\"type\":\"string\"},\"completedAt\":{\"type\":\"string\"},\"result\":{}}}").jsonObject,
             errors = setOf("permission_denied", "request_timeout", "user_cancelled", "idempotency_conflict", "http_error"),
+        ),
+        "android.session.keepAlive@1#acquire" to GeneratedCapabilityRoute(
+            capability = "android.session.keepAlive@1",
+            method = "acquire",
+            requiredFields = setOf("idempotencyKey", "requestedDurationMs"),
+            propertyTypes = mapOf("idempotencyKey" to "string", "requestedDurationMs" to "integer"),
+            additionalProperties = false,
+            responseType = "object",
+            responseRequiredFields = setOf("receiptId", "idempotencyKey", "completedAt", "result"),
+            responsePropertyTypes = mapOf("receiptId" to "string", "idempotencyKey" to "string", "completedAt" to "string", "result" to "object"),
+            responseAdditionalProperties = false,
+            requestSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"idempotencyKey\",\"requestedDurationMs\"],\"properties\":{\"idempotencyKey\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"requestedDurationMs\":{\"type\":\"integer\",\"minimum\":60000,\"maximum\":3600000}}}").jsonObject,
+            responseSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"receiptId\",\"idempotencyKey\",\"completedAt\",\"result\"],\"properties\":{\"receiptId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"idempotencyKey\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"completedAt\":{\"type\":\"string\"},\"result\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"released\"],\"properties\":{\"lease\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"leaseId\",\"expiresAtMs\",\"maxExpiresAtMs\"],\"properties\":{\"leaseId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"expiresAtMs\":{\"type\":\"integer\",\"minimum\":0},\"maxExpiresAtMs\":{\"type\":\"integer\",\"minimum\":0}}},\"released\":{\"type\":\"boolean\"}}}}}").jsonObject,
+            errors = setOf("permission_denied", "request_timeout", "capability_unavailable", "foreground_required", "invalid_request", "quota_exceeded", "idempotency_conflict", "lease_not_found", "foreground_service_denied", "notifications_unavailable"),
+        ),
+        "android.session.keepAlive@1#renew" to GeneratedCapabilityRoute(
+            capability = "android.session.keepAlive@1",
+            method = "renew",
+            requiredFields = setOf("idempotencyKey", "leaseId", "requestedDurationMs"),
+            propertyTypes = mapOf("idempotencyKey" to "string", "leaseId" to "string", "requestedDurationMs" to "integer"),
+            additionalProperties = false,
+            responseType = "object",
+            responseRequiredFields = setOf("receiptId", "idempotencyKey", "completedAt", "result"),
+            responsePropertyTypes = mapOf("receiptId" to "string", "idempotencyKey" to "string", "completedAt" to "string", "result" to "object"),
+            responseAdditionalProperties = false,
+            requestSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"idempotencyKey\",\"leaseId\",\"requestedDurationMs\"],\"properties\":{\"idempotencyKey\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"leaseId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"requestedDurationMs\":{\"type\":\"integer\",\"minimum\":60000,\"maximum\":3600000}}}").jsonObject,
+            responseSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"receiptId\",\"idempotencyKey\",\"completedAt\",\"result\"],\"properties\":{\"receiptId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"idempotencyKey\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"completedAt\":{\"type\":\"string\"},\"result\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"released\"],\"properties\":{\"lease\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"leaseId\",\"expiresAtMs\",\"maxExpiresAtMs\"],\"properties\":{\"leaseId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"expiresAtMs\":{\"type\":\"integer\",\"minimum\":0},\"maxExpiresAtMs\":{\"type\":\"integer\",\"minimum\":0}}},\"released\":{\"type\":\"boolean\"}}}}}").jsonObject,
+            errors = setOf("permission_denied", "request_timeout", "capability_unavailable", "foreground_required", "invalid_request", "quota_exceeded", "idempotency_conflict", "lease_not_found", "foreground_service_denied", "notifications_unavailable"),
+        ),
+        "android.session.keepAlive@1#release" to GeneratedCapabilityRoute(
+            capability = "android.session.keepAlive@1",
+            method = "release",
+            requiredFields = setOf("idempotencyKey", "leaseId"),
+            propertyTypes = mapOf("idempotencyKey" to "string", "leaseId" to "string"),
+            additionalProperties = false,
+            responseType = "object",
+            responseRequiredFields = setOf("receiptId", "idempotencyKey", "completedAt", "result"),
+            responsePropertyTypes = mapOf("receiptId" to "string", "idempotencyKey" to "string", "completedAt" to "string", "result" to "object"),
+            responseAdditionalProperties = false,
+            requestSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"idempotencyKey\",\"leaseId\"],\"properties\":{\"idempotencyKey\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"leaseId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160}}}").jsonObject,
+            responseSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"receiptId\",\"idempotencyKey\",\"completedAt\",\"result\"],\"properties\":{\"receiptId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"idempotencyKey\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"completedAt\":{\"type\":\"string\"},\"result\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"released\"],\"properties\":{\"lease\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"leaseId\",\"expiresAtMs\",\"maxExpiresAtMs\"],\"properties\":{\"leaseId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"expiresAtMs\":{\"type\":\"integer\",\"minimum\":0},\"maxExpiresAtMs\":{\"type\":\"integer\",\"minimum\":0}}},\"released\":{\"type\":\"boolean\"}}}}}").jsonObject,
+            errors = setOf("permission_denied", "request_timeout", "capability_unavailable", "foreground_required", "invalid_request", "quota_exceeded", "idempotency_conflict", "lease_not_found", "foreground_service_denied", "notifications_unavailable"),
+        ),
+        "android.session.keepAlive@1#getStatus" to GeneratedCapabilityRoute(
+            capability = "android.session.keepAlive@1",
+            method = "getStatus",
+            requiredFields = setOf(),
+            propertyTypes = mapOf(),
+            additionalProperties = false,
+            responseType = "object",
+            responseRequiredFields = setOf("active", "serviceState", "leases"),
+            responsePropertyTypes = mapOf("active" to "boolean", "serviceState" to "string", "leases" to "array"),
+            responseAdditionalProperties = false,
+            requestSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false}").jsonObject,
+            responseSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"active\",\"serviceState\",\"leases\"],\"properties\":{\"active\":{\"type\":\"boolean\"},\"serviceState\":{\"type\":\"string\",\"enum\":[\"stopped\",\"pending\",\"running\",\"degraded\"]},\"leases\":{\"type\":\"array\",\"maxItems\":2,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"leaseId\",\"expiresAtMs\",\"maxExpiresAtMs\"],\"properties\":{\"leaseId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"expiresAtMs\":{\"type\":\"integer\",\"minimum\":0},\"maxExpiresAtMs\":{\"type\":\"integer\",\"minimum\":0}}}}}}").jsonObject,
+            errors = setOf("permission_denied", "request_timeout", "capability_unavailable", "foreground_required", "invalid_request", "quota_exceeded", "idempotency_conflict", "lease_not_found", "foreground_service_denied", "notifications_unavailable"),
         )
     )
 
@@ -1974,6 +2045,12 @@ object GeneratedCapabilityContracts {
             capability = "android.sensors.read@1",
             event = "changed",
             dataSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"subscriptionId\",\"sensor\",\"values\",\"timestampMs\"],\"properties\":{\"subscriptionId\":{\"type\":\"string\"},\"sensor\":{\"type\":\"string\",\"enum\":[\"accelerometer\",\"gyroscope\",\"magneticField\",\"light\",\"pressure\"]},\"values\":{\"type\":\"array\",\"maxItems\":3,\"items\":{\"type\":\"number\"}},\"timestampMs\":{\"type\":\"integer\",\"minimum\":0}}}").jsonObject,
+            requiresAcknowledgement = false,
+        ),
+        "android.session.keepAlive@1#ended" to GeneratedCapabilityEvent(
+            capability = "android.session.keepAlive@1",
+            event = "ended",
+            dataSchema = Json.parseToJsonElement("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"leaseId\",\"reason\"],\"properties\":{\"leaseId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"reason\":{\"type\":\"string\",\"enum\":[\"released\",\"expired\",\"revoked\",\"clock_changed\",\"user_stopped\",\"max_runtime\",\"session_unavailable\",\"service_unavailable\"]}}}").jsonObject,
             requiresAcknowledgement = false,
         )
     )

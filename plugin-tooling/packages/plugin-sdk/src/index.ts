@@ -452,6 +452,15 @@ export interface BjtuPluginSdk {
       unsubscribe(subscriptionId: string, options?: InvokeOptions): Promise<CapabilityResponse<'android.sensors.read@1#unsubscribe'>>;
       onChanged(listener: (data: AndroidSensorChangedEvent, envelope: PluginEventV2) => boolean | void | Promise<boolean | void>): () => void;
     };
+    readonly session: {
+      keepAlive: {
+        acquire(request: CapabilityRequest<'android.session.keepAlive@1#acquire'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.session.keepAlive@1#acquire'>>;
+        renew(request: CapabilityRequest<'android.session.keepAlive@1#renew'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.session.keepAlive@1#renew'>>;
+        release(request: CapabilityRequest<'android.session.keepAlive@1#release'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.session.keepAlive@1#release'>>;
+        getStatus(options?: InvokeOptions): Promise<CapabilityResponse<'android.session.keepAlive@1#getStatus'>>;
+        onEnded(listener: (data: CapabilityEventData<'android.session.keepAlive@1#ended'>, envelope: PluginEventV2) => boolean | void | Promise<boolean | void>): () => void;
+      };
+    };
     readonly biometric: {
       getStatus(options?: InvokeOptions): Promise<CapabilityResponse<'android.biometric.verify@1#getStatus'>>;
       verify(request: CapabilityRequest<'android.biometric.verify@1#verify'>, options?: InvokeOptions): Promise<CapabilityResponse<'android.biometric.verify@1#verify'>>;
@@ -922,6 +931,15 @@ export function createBjtuPluginSdk(
         unsubscribe: (subscriptionId, options) =>
           invoke('android.sensors.read@1#unsubscribe', { subscriptionId }, options),
         onChanged: (listener) => subscribe('android.sensors.read@1', 'changed', listener)
+      },
+      session: {
+        keepAlive: {
+          acquire: (request, options) => invoke('android.session.keepAlive@1#acquire', request, options),
+          renew: (request, options) => invoke('android.session.keepAlive@1#renew', request, options),
+          release: (request, options) => invoke('android.session.keepAlive@1#release', request, options),
+          getStatus: (options) => invoke('android.session.keepAlive@1#getStatus', {}, options),
+          onEnded: (listener) => subscribe('android.session.keepAlive@1', 'ended', listener)
+        }
       },
       biometric: {
         getStatus: (options) => invoke('android.biometric.verify@1#getStatus', {}, options),

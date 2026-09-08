@@ -50,6 +50,7 @@ SDK calls use camelCase. Read methods return `{ data, meta }`; `meta` contains `
 | `academic.userCourses.command@1` | beta | `academic.user_courses.write` | eachCall | 15000 ms | `save`, `delete` |
 | `academic.homework.submit@1` | beta | `academic.homework.submit` | eachCall | 60000 ms | `submit` |
 | `mail.send@1` | beta | `mail.send` | eachCall | 60000 ms | `send` |
+| `android.session.keepAlive@1` | beta | `android.session.keepAlive` | none | 10000 ms | `acquire`, `renew`, `release`, `getStatus` |
 
 ## runtime.lifecycle@1
 
@@ -3721,3 +3722,371 @@ Response schema:
 ```
 
 Errors: `permission_denied`, `request_timeout`, `user_cancelled`, `idempotency_conflict`, `http_error`.
+
+## android.session.keepAlive@1
+
+维持 MIS 会话：允许插件在限时任务期间维持 BJTU MIS 会话，并显示持续通知。
+
+Stability: **beta** · confirmation: **none** · idempotency: **required**
+
+Events: `ended`.
+
+### acquire
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "requestedDurationMs"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "requestedDurationMs": {
+      "type": "integer",
+      "minimum": 60000,
+      "maximum": 3600000
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "receiptId",
+    "idempotencyKey",
+    "completedAt",
+    "result"
+  ],
+  "properties": {
+    "receiptId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "completedAt": {
+      "type": "string"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "released"
+      ],
+      "properties": {
+        "lease": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "leaseId",
+            "expiresAtMs",
+            "maxExpiresAtMs"
+          ],
+          "properties": {
+            "leaseId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxExpiresAtMs": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "released": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `foreground_required`, `invalid_request`, `quota_exceeded`, `idempotency_conflict`, `lease_not_found`, `foreground_service_denied`, `notifications_unavailable`.
+
+### renew
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "leaseId",
+    "requestedDurationMs"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "leaseId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "requestedDurationMs": {
+      "type": "integer",
+      "minimum": 60000,
+      "maximum": 3600000
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "receiptId",
+    "idempotencyKey",
+    "completedAt",
+    "result"
+  ],
+  "properties": {
+    "receiptId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "completedAt": {
+      "type": "string"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "released"
+      ],
+      "properties": {
+        "lease": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "leaseId",
+            "expiresAtMs",
+            "maxExpiresAtMs"
+          ],
+          "properties": {
+            "leaseId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxExpiresAtMs": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "released": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `foreground_required`, `invalid_request`, `quota_exceeded`, `idempotency_conflict`, `lease_not_found`, `foreground_service_denied`, `notifications_unavailable`.
+
+### release
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "idempotencyKey",
+    "leaseId"
+  ],
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "leaseId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    }
+  }
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "receiptId",
+    "idempotencyKey",
+    "completedAt",
+    "result"
+  ],
+  "properties": {
+    "receiptId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "completedAt": {
+      "type": "string"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "released"
+      ],
+      "properties": {
+        "lease": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "leaseId",
+            "expiresAtMs",
+            "maxExpiresAtMs"
+          ],
+          "properties": {
+            "leaseId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxExpiresAtMs": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "released": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `foreground_required`, `invalid_request`, `quota_exceeded`, `idempotency_conflict`, `lease_not_found`, `foreground_service_denied`, `notifications_unavailable`.
+
+### getStatus
+
+Request schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false
+}
+```
+
+Response schema:
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "active",
+    "serviceState",
+    "leases"
+  ],
+  "properties": {
+    "active": {
+      "type": "boolean"
+    },
+    "serviceState": {
+      "type": "string",
+      "enum": [
+        "stopped",
+        "pending",
+        "running",
+        "degraded"
+      ]
+    },
+    "leases": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "leaseId",
+          "expiresAtMs",
+          "maxExpiresAtMs"
+        ],
+        "properties": {
+          "leaseId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "expiresAtMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxExpiresAtMs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Errors: `permission_denied`, `request_timeout`, `capability_unavailable`, `foreground_required`, `invalid_request`, `quota_exceeded`, `idempotency_conflict`, `lease_not_found`, `foreground_service_denied`, `notifications_unavailable`.

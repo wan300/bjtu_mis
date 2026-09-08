@@ -56,7 +56,7 @@ class ThirdPartyServiceApiRegistryTest {
         val result = response["result"]!!.jsonObject
         assertEquals(2, result["protocolVersion"]!!.jsonPrimitive.content.toInt())
         assertEquals("contract_v1", result["contractProfile"]!!.jsonPrimitive.content)
-        assertEquals(2, result["runtimeFloor"]!!.jsonPrimitive.content.toInt())
+        assertEquals(3, result["runtimeFloor"]!!.jsonPrimitive.content.toInt())
         assertEquals(
             setOf(
                 "protocolVersion",

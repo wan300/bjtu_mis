@@ -1,14 +1,10 @@
 <!--
 Sync Impact Report
-Version change: 2.0.0 -> 3.0.0
-Modified principles: I. 用户安全与明确授权优先（将严格列举的持久 Android 能力扩展为分级的自动化与通用原生 Capability，并保留系统 UI、运行时权限和后台限制）; IV. 外部系统、Agent 工具与插件契约变更必须可测试（增加文件、媒体、位置、日历、录音、传感器和生物识别边界测试）; VII. 插件平台契约化安全基线不得降级（定义通用原生 Capability 的持久授权、前台 gate、资源隔离和撤销规则）
-Added principles: none
-Added sections: none
-Removed sections: none
-Templates requiring updates: .specify/templates/plan-template.md (updated); .specify/templates/tasks-template.md (updated); .specify/templates/spec-template.md (updated)
-Runtime guidance requiring updates: AGENTS.md (updated); PLANS.md (updated); docs/third-party-services.md (updated); web/developers.html (updated); README.md (no semantic change required); android/README.md (no semantic change required); web/platform/README.md (no semantic change required)
-Superseded feature artifacts: docs/plugin-platform-manifest-v3-p0a-execplan.md (superseded by docs/plugin-runtime-contract-p0-p1-execplan.md); specs/001-plugin-marketplace/* remain historical
-Deferred follow-ups: Google Play 发布前重新审查 QUERY_ALL_PACKAGES、无障碍、位置、麦克风和 specialUse 前台服务政策；API 26/35 真实 Android 系统 UI 场景由阻塞 CI 持续验证
+Version change: 3.0.0 -> 3.1.0
+Modified principles: I, IV, VII — explicit persistent android.session.keepAlive@1 exception with owner isolation, bounded leases, foreground initiation, encrypted recovery and stop/revocation cleanup.
+Templates reviewed and updated: .specify/templates/plan-template.md, tasks-template.md, spec-template.md.
+Runtime guidance: AGENTS.md, PLANS.md, docs/third-party-services.md, android/README.md, web/developers.html.
+Validation: see docs/plugin-session-keepalive-execplan.md; API 26/35 system validation remains required.
 -->
 
 # BJTU MIS Android Constitution
@@ -19,9 +15,11 @@ Deferred follow-ups: Google Play 发布前重新审查 QUERY_ALL_PACKAGES、无�
 
 BJTU MIS Android MUST 保护校园账号、密码、Cookie、token、邮件内容、验证码、作业附件和个人学习数据。任何会发送邮件、提交作业、选课、删除数据、写入本地工作区、导出文件或改变上游校园系统状态的能力，MUST 保留明确的用户确认、可理解的错误反馈和可追踪的调用边界。Agent MUST NOT 静默发送邮件或自动提交课程平台作业。
 
-仅下列列举的 Android Capability 可以在插件首次 Capability 审阅或更新增量审阅时取得持久授权，并在授权后免除宿主逐次确认：`android.accessibility.events@1`、`android.accessibility.nodes@1`、`android.accessibility.actions@1`、`android.packages.read@1`、`android.settings.open@1`、`android.device.info@1`、`android.network.status@1`、`android.battery.status@1`、`android.haptics.perform@1`、`android.files.pick@1`、`android.files.save@1`、`android.media.pick@1`、`android.share.open@1`、`android.notifications.post@1`、`android.location.read@1`、`android.calendar.read@1`、`android.calendar.write@1`、`android.camera.capture@1`、`android.audio.record@1`、`android.sensors.read@1` 与 `android.biometric.verify@1`。该例外 MUST 同时满足 Manifest 显式声明、稳定 publisher subject + plugin ID 隔离、可随时撤销、进入复审或声明变化时立即停止，以及每项契约规定的最小数据、配额、幂等和持续通知约束。
+仅下列列举的 Android Capability 可以在插件首次 Capability 审阅或更新增量审阅时取得持久授权，并在授权后免除宿主逐次确认：`android.accessibility.events@1`、`android.accessibility.nodes@1`、`android.accessibility.actions@1`、`android.packages.read@1`、`android.settings.open@1`、`android.device.info@1`、`android.network.status@1`、`android.battery.status@1`、`android.haptics.perform@1`、`android.files.pick@1`、`android.files.save@1`、`android.media.pick@1`、`android.share.open@1`、`android.notifications.post@1`、`android.location.read@1`、`android.calendar.read@1`、`android.calendar.write@1`、`android.camera.capture@1`、`android.audio.record@1`、`android.sensors.read@1`、`android.biometric.verify@1` 与 `android.session.keepAlive@1`。该例外 MUST 同时满足 Manifest 显式声明、稳定 publisher subject + plugin ID 隔离、可随时撤销、进入复审或声明变化时立即停止，以及每项契约规定的最小数据、配额、幂等和持续通知约束。
 
 持久授权不替代 Android runtime permission、系统选择器、生物识别弹窗、前台服务或可见前台 Activity。要求用户直接参与的文件、媒体、分享、相机和生物识别操作 MUST 由前台 runtime 发起；后台调用 MUST 返回 `foreground_required`，不得启动隐蔽 UI。定位 MUST NOT 请求后台定位；录音 MUST NOT 在后台静默开始。文件和媒体结果 MUST 进入 publisher+plugin 隔离的加密资源存储，不得向插件暴露任意路径或可持续 URI。该列举不得扩展为任意 Intent、任意 URI、任意文件系统、通知监听、联系人、短信、电话、MediaProjection、Overlay、VPN、UsageStats、Shell/ADB 或其他通用 Android API。
+
+`android.session.keepAlive@1` MUST 使用宿主生成、publisher subject + plugin ID 隔离的限时租约；首次/增量授权后 acquire/renew 免逐次确认但必须由可见前台 runtime 发起。后台仅查询/释放；恢复不得延长原到期时间或绕过 Android FGS 限制。每插件最多 2 租约、单租约最长 60 分钟、每分钟最多 6 次申请/续租、滚动一小时最多预留 60 租约分钟；配额和幂等摘要 MUST 加密持久化。通知持续可见并提供全部停止，租约不保证进程永不终止，也不授予通用后台任务或凭据访问。
 
 Rationale: 本应用直接处理校园身份和学习事务，错误自动化会造成账号、隐私、学业和信任风险。
 
@@ -45,6 +43,8 @@ parser 变更 MUST 使用 fixture 覆盖成功、缺字段和上游结构变化�
 
 Rationale: 上游页面和工具输入不受本项目控制，测试必须固定风险边界并防止回归。
 
+保活 Capability MUST 覆盖租约归属、到期/续租、并发/配额、幂等重放、进程恢复、时钟变化、前台启动拒绝、通知停止、插件撤销/更新/删除和内置 Agent/抢课租约共存。
+
 ### V. 最小依赖与干净提交
 
 项目 MUST 优先使用现有库、标准库和本仓库 helper。新增依赖必须说明属于 Android 原生侧还是 Open WebUI 前端侧，并通过 `android/gradle/libs.versions.toml` 或 npm/lockfile 的正常流程维护。提交中 MUST NOT 包含 secrets、本机配置、APK/AAB、临时构建产物、`node_modules`、`.svelte-kit`、Open WebUI build 输出或无关缓存。为验证数据库迁移而由 Room 导出并经审查的 `android/app/schemas/` 版本历史 MUST 随对应 migration 提交；其他临时 schema 输出不得提交。
@@ -65,7 +65,7 @@ Manifest v3 / contract_v1 是第三方插件唯一有效的运行与兼容基线
 
 插件公开 API MUST 通过 SDK 的命名空间和 protocol v2 调用 Capability；底层 transport 不得作为公共 API 暴露。Capability ID、版本、方法、请求/响应 Schema、权限、逐次确认、配额、超时、错误、平台支持范围和稳定性 MUST 以单一 JSON Contract Registry 为权威来源。optional Capability 默认关闭；除原则 I 严格列举的 Android 持久授权例外外，所有改变校园或宿主状态的 Command Capability MUST 逐次确认并使用请求摘要绑定的 idempotency key。列举的 Android Command Capability 虽免宿主逐次确认，仍 MUST 使用请求摘要绑定的 idempotency key、加密摘要回执、运行时配额、最小数据集和 Android 必需的系统 UI；不得记录输入文本、节点文本、手势细节、文件内容、位置坐标或音频。
 
-Android 自动化和通用原生桥 MUST 继续只存在于稳定本地 origin 的 main frame。无障碍事件每插件最多 16 个订阅、每订阅最多 60 events/s；节点快照最多 4,096 节点、深度 64，opaque node handle 最多存活 30 秒；网络、电池和传感器持久订阅每插件最多 16 个，传感器最多 20 Hz；全局最多 4 个后台插件 runtime，前台页面优先接收且不得重复派发。`android.packages.read@1` 不得返回 APK 路径、私有数据或图标字节；`android.settings.open@1` 只允许 `android.settings.*` action 和无 data 或 `package:` data，禁止 extras、显式组件、任意 URI 和任意 Intent。设备和网络信息不得包含稳定硬件 ID、SSID、BSSID、MAC 或 IP；文件和媒体不得泄漏 raw URI；位置不支持后台追踪。插件删除、禁用、授权撤销、publisher 不匹配、声明丢失或 `needsReview` MUST 立即停止 runtime、清除订阅、失效 node handle，并取消录音或待处理系统 UI。
+Android 自动化和通用原生桥 MUST 继续只存在于稳定本地 origin 的 main frame。无障碍事件每插件最多 16 个订阅、每订阅最多 60 events/s；节点快照最多 4,096 节点、深度 64，opaque node handle 最多存活 30 秒；网络、电池和传感器持久订阅每插件最多 16 个，传感器最多 20 Hz；全局最多 4 个后台插件 runtime，前台页面优先接收且不得重复派发。`android.packages.read@1` 不得返回 APK 路径、私有数据或图标字节；`android.settings.open@1` 只允许 `android.settings.*` action 和无 data 或 `package:` data，禁止 extras、显式组件、任意 URI 和任意 Intent。设备和网络信息不得包含稳定硬件 ID、SSID、BSSID、MAC 或 IP；文件和媒体不得泄漏 raw URI；位置不支持后台追踪。插件删除、禁用、授权撤销、publisher 不匹配、声明丢失或 `needsReview` MUST 立即停止 runtime、清除订阅、失效 node handle，并取消录音或待处理系统 UI。插件保活租约 MUST 同时清理；版本更新/回滚亦不得恢复旧租约。停止、登出、认证失效、系统超时和设备重启 MUST 使租约失效，清理失败不得重新激活。
 
 插件公网访问 MUST 使用无 Cookie、无宿主认证器的隔离客户端，并在初始请求、每次 DNS 解析和每次重定向重新阻止校园、私网、回环和链路本地目标。插件持久化、更新和删除 MUST 使用 publisher+plugin 隔离、加密且受配额约束的数据空间，并保持迁移、快照、回滚、增量授权和失败清理可恢复。任何文档、旧 feature spec、兼容代码或迁移期 API 都不得被用来削弱这些约束；需要改变本基线时 MUST 先修订 constitution、维护新的安全 ExecPlan 并通过对应阻塞验证。
 
@@ -102,4 +102,4 @@ Rationale: 插件代码不受宿主控制，稳定身份、最小桥接、分域
 3. 破坏性治理调整、原则删除或原则重新定义升级 MAJOR；新增原则或实质扩展升级 MINOR；措辞澄清和非语义修正升级 PATCH。
 4. 任何 feature spec、implementation plan 或任务拆分 MUST 通过模板中的 Constitution Check；未通过项必须先调整设计或写入明确的 `TODO: confirm` 阻塞说明。
 
-**Version**: 3.0.0 | **Ratified**: 2026-06-11 | **Last Amended**: 2026-08-16
+**Version**: 3.1.0 | **Ratified**: 2026-06-11 | **Last Amended**: 2026-09-09

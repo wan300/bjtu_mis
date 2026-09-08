@@ -57,6 +57,9 @@ class ThirdPartyServiceApiRegistry(
     private val commandReceiptStore: PluginCommandReceiptStore? = null,
     private val androidSystemProvider: AndroidSystemCapabilityProvider = AndroidSystemCapabilityProvider(),
     private val androidNativeProvider: PluginCapabilityProvider = UnavailableAndroidNativeCapabilityProvider(),
+    private val pluginSessionKeepAliveProvider: PluginCapabilityProvider = LambdaPluginCapabilityProvider(
+        setOf("android.session.keepAlive@1"),
+    ) { throw PluginRuntimeException("capability_unavailable", "Session keep-alive unavailable") },
     providerOverrides: List<PluginCapabilityProvider> = emptyList(),
 ) {
     private val capabilityProviders = PluginCapabilityProviderRegistry(
@@ -103,6 +106,7 @@ class ThirdPartyServiceApiRegistry(
             ),
             androidSystemProvider,
             androidNativeProvider,
+            pluginSessionKeepAliveProvider,
         ),
         overrides = providerOverrides,
     )
@@ -197,7 +201,9 @@ class ThirdPartyServiceApiRegistry(
                 timeoutMsOverride?.takeIf { it > 0L },
             ).minOrNull() ?: 0L
             val invokeProvider: suspend () -> JsonElement = {
-                if (descriptor.idempotencyRequired && "idempotencyKey" in route.requiredFields) {
+                if (capability == "android.session.keepAlive@1") {
+                    capabilityProviders.invoke(call) // Lease, budget and receipt use one durable transaction.
+                } else if (descriptor.idempotencyRequired && "idempotencyKey" in route.requiredFields) {
                     if (capability in PERSISTENT_ANDROID_COMMAND_CAPABILITIES) {
                         executeIdempotentWithoutConfirmation(call)
                     } else {
@@ -1068,6 +1074,7 @@ class ThirdPartyServiceApiRegistry(
 }
 
 private val PERSISTENT_ANDROID_COMMAND_CAPABILITIES = setOf(
+    "android.session.keepAlive@1",
     "android.accessibility.actions@1",
     "android.files.save@1",
     "android.notifications.post@1",

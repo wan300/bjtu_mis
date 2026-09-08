@@ -14,7 +14,7 @@
     "generate:check": "node scripts/generate.mjs --check",
     "build": "npm run generate:check && npm run build -w @bjtu-mis/plugin-sdk && npm run build -w @bjtu-mis/plugin-cli && npm run build -w create-bjtu-plugin",
     "typecheck": "npm run generate:check && tsc -p tsconfig.json --noEmit && npm run template:check",
-    "template:check": "tsc -p packages/plugin-cli/template/tsconfig.json --noEmit && node scripts/check-template.mjs",
+    "template:check": "npm run build -w @bjtu-mis/plugin-sdk && tsc -p packages/plugin-cli/template/tsconfig.json --noEmit && node scripts/check-template.mjs",
     "test": "npm run build && node --test --experimental-test-isolation=none test/*.test.mjs",
     "pack:check": "npm run build && node scripts/pack-check.mjs"
   },

@@ -23,7 +23,10 @@
     "migration_failed",
     "user_cancelled",
     "foreground_required",
-    "idempotency_conflict"
+    "idempotency_conflict",
+    "lease_not_found",
+    "foreground_service_denied",
+    "notifications_unavailable"
   ],
   "marketplaceCategories": [
     "academic",
@@ -3031,6 +3034,424 @@
             "idempotency_conflict",
             "http_error"
           ]
+        }
+      ]
+    },
+    {
+      "id": "android.session.keepAlive@1",
+      "stability": "beta",
+      "runtimeFloor": 3,
+      "permission": {
+        "id": "android.session.keepAlive",
+        "title": "维持 MIS 会话",
+        "description": "允许插件在限时任务期间维持 BJTU MIS 会话，并显示持续通知。"
+      },
+      "confirmation": "none",
+      "idempotency": "required",
+      "quota": {
+        "maxLeasesPerPlugin": 2,
+        "maxDurationMs": 3600000,
+        "requestsPerMinute": 6,
+        "durationPerHourMs": 3600000
+      },
+      "timeoutMs": 10000,
+      "support": {
+        "androidMinApi": 26,
+        "webViewFeatures": []
+      },
+      "methods": [
+        {
+          "name": "acquire",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "requestedDurationMs"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "requestedDurationMs": {
+                "type": "integer",
+                "minimum": 60000,
+                "maximum": 3600000
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "receiptId",
+              "idempotencyKey",
+              "completedAt",
+              "result"
+            ],
+            "properties": {
+              "receiptId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "completedAt": {
+                "type": "string"
+              },
+              "result": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "released"
+                ],
+                "properties": {
+                  "lease": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "leaseId",
+                      "expiresAtMs",
+                      "maxExpiresAtMs"
+                    ],
+                    "properties": {
+                      "leaseId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "expiresAtMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxExpiresAtMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "released": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "errors": [
+            "permission_denied",
+            "capability_unavailable",
+            "foreground_required",
+            "invalid_request",
+            "quota_exceeded",
+            "idempotency_conflict",
+            "lease_not_found",
+            "foreground_service_denied",
+            "notifications_unavailable"
+          ]
+        },
+        {
+          "name": "renew",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "leaseId",
+              "requestedDurationMs"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "leaseId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "requestedDurationMs": {
+                "type": "integer",
+                "minimum": 60000,
+                "maximum": 3600000
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "receiptId",
+              "idempotencyKey",
+              "completedAt",
+              "result"
+            ],
+            "properties": {
+              "receiptId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "completedAt": {
+                "type": "string"
+              },
+              "result": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "released"
+                ],
+                "properties": {
+                  "lease": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "leaseId",
+                      "expiresAtMs",
+                      "maxExpiresAtMs"
+                    ],
+                    "properties": {
+                      "leaseId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "expiresAtMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxExpiresAtMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "released": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "errors": [
+            "permission_denied",
+            "capability_unavailable",
+            "foreground_required",
+            "invalid_request",
+            "quota_exceeded",
+            "idempotency_conflict",
+            "lease_not_found",
+            "foreground_service_denied",
+            "notifications_unavailable"
+          ]
+        },
+        {
+          "name": "release",
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "idempotencyKey",
+              "leaseId"
+            ],
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "leaseId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "receiptId",
+              "idempotencyKey",
+              "completedAt",
+              "result"
+            ],
+            "properties": {
+              "receiptId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "completedAt": {
+                "type": "string"
+              },
+              "result": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "released"
+                ],
+                "properties": {
+                  "lease": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "leaseId",
+                      "expiresAtMs",
+                      "maxExpiresAtMs"
+                    ],
+                    "properties": {
+                      "leaseId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      "expiresAtMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxExpiresAtMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "released": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "errors": [
+            "permission_denied",
+            "capability_unavailable",
+            "foreground_required",
+            "invalid_request",
+            "quota_exceeded",
+            "idempotency_conflict",
+            "lease_not_found",
+            "foreground_service_denied",
+            "notifications_unavailable"
+          ]
+        },
+        {
+          "name": "getStatus",
+          "request": {
+            "type": "object",
+            "additionalProperties": false
+          },
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "active",
+              "serviceState",
+              "leases"
+            ],
+            "properties": {
+              "active": {
+                "type": "boolean"
+              },
+              "serviceState": {
+                "type": "string",
+                "enum": [
+                  "stopped",
+                  "pending",
+                  "running",
+                  "degraded"
+                ]
+              },
+              "leases": {
+                "type": "array",
+                "maxItems": 2,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "leaseId",
+                    "expiresAtMs",
+                    "maxExpiresAtMs"
+                  ],
+                  "properties": {
+                    "leaseId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "expiresAtMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxExpiresAtMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "errors": [
+            "permission_denied",
+            "capability_unavailable",
+            "foreground_required",
+            "invalid_request",
+            "quota_exceeded",
+            "idempotency_conflict",
+            "lease_not_found",
+            "foreground_service_denied",
+            "notifications_unavailable"
+          ]
+        }
+      ],
+      "events": [
+        {
+          "name": "ended",
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "leaseId",
+              "reason"
+            ],
+            "properties": {
+              "leaseId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "released",
+                  "expired",
+                  "revoked",
+                  "clock_changed",
+                  "user_stopped",
+                  "max_runtime",
+                  "session_unavailable",
+                  "service_unavailable"
+                ]
+              }
+            }
+          }
         }
       ]
     }

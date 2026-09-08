@@ -60,6 +60,7 @@ import cn.edu.bjtu.mis.data.thirdparty.FileThirdPartyKvStore
 import cn.edu.bjtu.mis.data.thirdparty.FileThirdPartyResourceStore
 import cn.edu.bjtu.mis.data.thirdparty.FilePluginCommandReceiptStore
 import cn.edu.bjtu.mis.data.thirdparty.FilePluginAutomationStore
+import cn.edu.bjtu.mis.data.thirdparty.PluginSessionKeepAliveProvider
 import cn.edu.bjtu.mis.data.thirdparty.PluginAutomationSupervisor
 import cn.edu.bjtu.mis.data.thirdparty.PluginNetworkProvider
 import cn.edu.bjtu.mis.data.thirdparty.PluginBinaryStagingManager
@@ -272,6 +273,9 @@ class AppContainer(context: Context) {
             )
         }
     }
+    val pluginSessionKeepAliveProvider by lazy {
+        PluginSessionKeepAliveProvider(appContext, thirdPartyServiceRepository)
+    }
     val thirdPartyServiceApiRegistry: ThirdPartyServiceApiRegistry by lazy {
         PerfTrace.measure("AppContainer.thirdPartyServiceApiRegistry") {
             ThirdPartyServiceApiRegistry(
@@ -292,6 +296,7 @@ class AppContainer(context: Context) {
                     resourceStore = thirdPartyResourceStore,
                     automationStore = pluginAutomationStore,
                 ),
+                pluginSessionKeepAliveProvider = pluginSessionKeepAliveProvider,
             )
         }
     }
@@ -303,7 +308,10 @@ class AppContainer(context: Context) {
             resourceStore = thirdPartyResourceStore,
             kvStore = thirdPartyKvStore,
             automationStore = pluginAutomationStore,
-        ).also(AndroidNativeEventController::configureSupervisor)
+        ).also {
+            AndroidNativeEventController.configureSupervisor(it)
+            pluginSessionKeepAliveProvider.supervisor = it
+        }
     }
 
     init {

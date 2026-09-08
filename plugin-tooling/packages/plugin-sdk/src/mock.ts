@@ -75,6 +75,10 @@ export function createMockTransport(initial: MockHostScenario = {}): MockPluginT
     preferredBinaryTransport: 'arraybuffer',
     ...initial
   };
+  const leases = new Map<string, { leaseId: string; expiresAtMs: number; maxExpiresAtMs: number }>();
+  const receipts = new Map<string, { digest: string; result: unknown }>();
+  let reservedMs = 0;
+  let sequence = 0;
   let negotiatedBinaryTransport: BinaryTransport | undefined;
   const listeners = new Set<
     (event: PluginEventV2) => boolean | void | Promise<boolean | void>
@@ -200,6 +204,39 @@ export function createMockTransport(initial: MockHostScenario = {}): MockPluginT
       if (scenario.migrationFailure && route === 'runtime.lifecycle@1#ready') {
         return failure(request.requestId, 'migration_failed', 'Mock migration failed.');
       }
+      if (request.capability === 'android.session.keepAlive@1') {
+        const now = Date.now();
+        for (const [id, lease] of leases) if (lease.expiresAtMs <= now) leases.delete(id);
+        const params = request.params as Record<string, unknown>;
+        const success = (result: unknown): PluginResponseV2 => ({ protocolVersion: PROTOCOL_VERSION, requestId: request.requestId, ok: true, result });
+        if (request.method === 'getStatus') return success({ active: leases.size > 0, serviceState: leases.size ? 'running' : 'stopped', leases: [...leases.values()] });
+        const key = String(params.idempotencyKey);
+        const digest = JSON.stringify({ method: request.method, params });
+        const previous = receipts.get(key);
+        if (previous) return previous.digest === digest ? success(previous.result) : failure(request.requestId, 'idempotency_conflict', 'Conflicting request');
+        const id = String(params.leaseId);
+        let result: unknown;
+        if (request.method === 'release') {
+          result = { released: leases.delete(id) };
+        } else {
+          if (scenario.lifecycle === 'background') return failure(request.requestId, 'foreground_required', 'Visible plugin required');
+          const duration = Number(params.requestedDurationMs);
+          if (!Number.isInteger(duration) || duration < 60000 || duration > 3600000) return failure(request.requestId, 'invalid_request', 'Invalid duration');
+          const previousLease = leases.get(id);
+          if (request.method === 'renew' && !previousLease) return failure(request.requestId, 'lease_not_found', 'Unknown lease');
+          const maximum = previousLease?.maxExpiresAtMs ?? now + 3600000;
+          if (now + duration > maximum) return failure(request.requestId, 'invalid_request', 'Renewal exceeds maximum');
+          const cost = previousLease ? Math.max(0, now + duration - previousLease.expiresAtMs) : duration;
+          if (scenario.quota === 'exceeded' || reservedMs + cost > 3600000 || (!previousLease && leases.size >= 2)) return failure(request.requestId, 'quota_exceeded', 'Keep-alive budget exceeded');
+          reservedMs += cost;
+          const lease = { leaseId: previousLease?.leaseId ?? `mock-lease-${++sequence}`, expiresAtMs: Math.max(previousLease?.expiresAtMs ?? 0, now + duration), maxExpiresAtMs: maximum };
+          leases.set(lease.leaseId, lease);
+          result = { lease, released: false };
+        }
+        const receipt = { receiptId: `mock-receipt-${++sequence}`, idempotencyKey: key, completedAt: new Date(now).toISOString(), result };
+        receipts.set(key, { digest, result: receipt });
+        return success(receipt);
+      }
       const configured = Object.prototype.hasOwnProperty.call(scenario.responses ?? {}, route)
         ? scenario.responses?.[route]
         : undefined;
@@ -305,7 +342,7 @@ function defaultResponse(request: PluginRequestV2, scenario: MockHostScenario): 
     return {
       protocolVersion: PROTOCOL_VERSION,
       contractProfile: CAPABILITY_REGISTRY.contractProfile,
-      runtimeFloor: CAPABILITY_REGISTRY.runtimeFloor,
+      runtimeFloor: Math.max(...CAPABILITY_REGISTRY.capabilities.map((c) => c.runtimeFloor)),
       availableCapabilities,
       binaryTransports,
       ...(preferredBinaryTransport === undefined ? {} : { preferredBinaryTransport })

@@ -70,6 +70,7 @@
           <a href="#manifest">Manifest</a>
           <a href="#sdk">SDK 与生命周期</a>
           <a href="#android-automation">Android 自动化</a>
+          <a href="#session-keepalive">MIS 会话保活</a>
           <a href="#runtime-api">校园读取 API</a>
           <a href="#origins">Origin 与桥</a>
           <a href="#network">网络</a>
@@ -562,6 +563,11 @@ Content-Type: application/json
               <code>resource_too_large</code>、<code>migration_failed</code>、
               <code>user_cancelled</code> 和 <code>idempotency_conflict</code>。
             </p>
+          </section>
+          <section class="docs-section reveal" id="session-keepalive">
+            <p class="eyebrow">Session keep-alive</p>
+            <h2>插件 MIS 会话保活</h2>
+            <p><code>android.session.keepAlive@1</code>（beta，runtime 3）支持前台申请/续租、后台查询/释放限时租约，首次或增量授权后生效。每插件最多 2 个租约，创建起最长 60 分钟；持续通知可停止，撤销/更新/删除会清理。不会暴露凭据，也不保证进程永久存活。</p>
           </section>
         </div>
       </div>
