@@ -127,7 +127,6 @@ fun EmploymentConsultationScreen(
             runCatching {
                 repository.infoPage(
                     nextQuery,
-                    forceRefresh = reset && strategy == ModuleLoadStrategy.NetworkFirst,
                     strategy = strategy,
                 )
             }
@@ -156,24 +155,22 @@ fun EmploymentConsultationScreen(
     }
 
     fun loadHome(
-        forceRefresh: Boolean = false,
-        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.CacheFirst,
     ) {
         scope.launch {
             homeState = LoadState.Loading
-            runCatching { repository.home(forceRefresh = forceRefresh, strategy = strategy) }
+            runCatching { repository.home(strategy = strategy) }
                 .onSuccess { homeState = LoadState.Data(it) }
                 .onFailure { homeState = LoadState.Error(it.message ?: "加载就业咨询失败") }
         }
     }
 
     fun loadFilters(
-        forceRefresh: Boolean = false,
-        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.CacheFirst,
     ) {
         scope.launch {
             filterState = LoadState.Loading
-            runCatching { repository.filterOptions(forceRefresh = forceRefresh, strategy = strategy) }
+            runCatching { repository.filterOptions(strategy = strategy) }
                 .onSuccess { filterState = LoadState.Data(it) }
                 .onFailure { filterState = LoadState.Error(it.message ?: "加载筛选项失败") }
         }
@@ -220,11 +217,9 @@ fun EmploymentConsultationScreen(
     LaunchedEffect(Unit) {
         pageInitialLoadConsumed = true
         loadHome(
-            forceRefresh = initialLoadStrategy == ModuleLoadStrategy.NetworkFirst,
             strategy = initialLoadStrategy,
         )
         loadFilters(
-            forceRefresh = initialLoadStrategy == ModuleLoadStrategy.NetworkFirst,
             strategy = initialLoadStrategy,
         )
         loadPage(EmploymentSectionType.CareerTalk, reset = true, strategy = initialLoadStrategy)
@@ -296,8 +291,8 @@ fun EmploymentConsultationScreen(
             PageActionRow {
                 OutlinedButton(
                     onClick = {
-                        loadHome(forceRefresh = true)
-                        loadFilters(forceRefresh = true)
+                        loadHome(strategy = ModuleLoadStrategy.NetworkFirst)
+                        loadFilters(strategy = ModuleLoadStrategy.NetworkFirst)
                         loadPage(selectedType, reset = true)
                     },
                 ) {

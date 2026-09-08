@@ -10,6 +10,12 @@ Node.js 22 + TypeScript + Fastify 服务，包含同一代码库中的 API 与�
 与独立的 `bjtu-marketplace.json`。`/api/v2` 冻结为 P0-A 目录、详情和制品只读接口；
 `/api/v1` 仅保留更早 legacy 兼容。
 
+## 代码组织
+
+`src/server.ts` 负责装配服务；`src/routes/` 按认证、目录、投稿、管理划分路由。
+投稿和重新验证共享 `createSubmission`。旧版写路由由 `context.ts` 统一保留 `410` 响应，
+不再维护不可达的业务处理副本；只读接口和各版本响应格式保持兼容。
+
 ## 本地验证
 
 ```powershell

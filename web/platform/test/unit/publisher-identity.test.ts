@@ -58,3 +58,19 @@ test('legacy publication can move to the first v3 data schema without an in-plac
     { version: '2.0.0', dataSchemaVersion: 1, migrationEntrypoint: '' }
   ));
 });
+
+test('publication uses precise SemVer prerelease ordering', () => {
+  for (const [previous, next] of [
+    ['1.0.0-B', '1.0.0-a'],
+    ['1.0.0-alpha.9007199254740992', '1.0.0-alpha.9007199254740993']
+  ] as const) {
+    assert.doesNotThrow(() => validateVersionTransition(
+      { version: previous, schemaVersion: 3, dataSchemaVersion: 1 },
+      { version: next, dataSchemaVersion: 1, migrationEntrypoint: '' }
+    ));
+    assert.throws(() => validateVersionTransition(
+      { version: next, schemaVersion: 3, dataSchemaVersion: 1 },
+      { version: previous, dataSchemaVersion: 1, migrationEntrypoint: '' }
+    ));
+  }
+});

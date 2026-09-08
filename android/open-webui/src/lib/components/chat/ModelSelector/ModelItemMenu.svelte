@@ -11,6 +11,7 @@
 	import { config, settings, user } from '$lib/stores';
 	import { isNativeAndroid } from '$lib/mobile/platform';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
+	import { MODEL_SELECTOR_MENU_LAYER } from './layers';
 
 	const i18n = getContext('i18n');
 	const nativeAndroid = isNativeAndroid();
@@ -35,6 +36,7 @@
 	bind:show
 	align="end"
 	sideOffset={-2}
+	zIndex={MODEL_SELECTOR_MENU_LAYER}
 	onOpenChange={(state) => {
 		if (state === false) {
 			onClose();

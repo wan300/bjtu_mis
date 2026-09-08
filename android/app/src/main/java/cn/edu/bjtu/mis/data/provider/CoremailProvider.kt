@@ -20,6 +20,7 @@ import cn.edu.bjtu.mis.model.MailMessageDetail
 import cn.edu.bjtu.mis.model.MailMessageSummary
 import cn.edu.bjtu.mis.model.MailMessagesData
 import cn.edu.bjtu.mis.model.ModuleEnvelope
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -33,6 +34,11 @@ import kotlinx.serialization.json.put
 import java.io.File
 import java.io.IOException
 import java.net.URLEncoder
+import java.net.URLConnection
+import java.util.Base64
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import org.jsoup.Jsoup
 
 class CoremailError(message: String) : IOException(message)
 
@@ -152,6 +158,153 @@ class CoremailProvider(
             data = detail,
         )
     }
+
+    internal suspend fun hydrateInlineImages(
+        envelope: ModuleEnvelope<MailMessageDetail>,
+    ): ModuleEnvelope<MailMessageDetail> {
+        val detail = envelope.data
+        if (detail.htmlContent.isBlank()) return envelope
+        val hydratedHtml = hydrateMailImages(
+            html = detail.htmlContent,
+            messageId = detail.messageId,
+            attachments = detail.attachments,
+        )
+        return envelope.copy(data = detail.copy(htmlContent = hydratedHtml))
+    }
+
+    private suspend fun hydrateMailImages(
+        html: String,
+        messageId: String,
+        attachments: List<MailAttachment>,
+    ): String {
+        val document = try {
+            Jsoup.parse(html)
+        } catch (_: Exception) {
+            return html
+        }
+        var changed = false
+        for (image in document.select("img[src]")) {
+            val source = image.attr("src").trim()
+            val request = resolveMailImage(source, messageId, attachments) ?: continue
+            val response = try {
+                ensureReady()
+                client.getBytes(
+                    url = request.url.toString(),
+                    headers = mapOf("Referer" to referer()),
+                    followRedirects = false,
+                )
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                continue
+            }
+            val contentType = inlineImageContentType(
+                responseContentType = response.headers["Content-Type"],
+                attachmentContentType = request.contentType,
+                filename = request.filename,
+            ) ?: continue
+            if (response.body.isEmpty()) continue
+            image.attr(
+                "src",
+                "data:$contentType;base64,${Base64.getEncoder().encodeToString(response.body)}",
+            )
+            changed = true
+        }
+        if (!changed) return html
+        document.outputSettings().prettyPrint(false)
+        return document.outerHtml()
+    }
+
+    private fun resolveMailImage(
+        source: String,
+        messageId: String,
+        attachments: List<MailAttachment>,
+    ): MailImageRequest? {
+        if (source.isBlank() || source.startsWith("data:", ignoreCase = true)) return null
+        val base = coremailBaseUrl.toHttpUrl()
+        if (source.startsWith("cid:", ignoreCase = true)) {
+            val contentId = normalizeContentId(source.substring(4)) ?: return null
+            val attachment = attachments.firstOrNull {
+                normalizeContentId(it.contentId) == contentId
+            } ?: return null
+            return mailImageRequest(
+                base = base,
+                messageId = messageId,
+                part = attachment.part,
+                contentType = attachment.contentType,
+                filename = attachment.filename,
+            )
+        }
+        val resolved = runCatching { base.resolve(source) }.getOrNull() ?: return null
+        if (!resolved.hasSameOrigin(base) || resolved.username.isNotEmpty() || resolved.password.isNotEmpty()) return null
+        val segments = resolved.pathSegments
+        if (segments.size !in 2..3 || segments[0] != "coremail" || segments[1] != "mbox-data") return null
+        if (resolved.queryParameterNames.any {
+                it !in INLINE_IMAGE_QUERY_PARAMETERS || resolved.queryParameterValues(it).size != 1
+            }
+        ) return null
+        if ("mid" in resolved.queryParameterNames && resolved.queryParameter("mid") != messageId) return null
+        if ("mode" in resolved.queryParameterNames && resolved.queryParameter("mode") != "download") return null
+        return mailImageRequest(
+            base = base,
+            messageId = messageId,
+            part = resolved.queryParameter("part") ?: return null,
+            filename = segments.getOrNull(2)?.takeIf { it.isNotEmpty() },
+        )
+    }
+
+    private fun mailImageRequest(
+        base: HttpUrl,
+        messageId: String,
+        part: String,
+        filename: String?,
+        contentType: String? = null,
+    ): MailImageRequest? {
+        if (messageId.isBlank() || part.isBlank() || part.any(Char::isISOControl)) return null
+        if (filename != null && (filename in setOf(".", "..") || filename.any {
+                it == '/' || it == '\\' || it == ';' || it == '%' || it.isISOControl()
+            })
+        ) return null
+        // Reconstruct a fixed, read-only endpoint; never forward sender-supplied API parameters.
+        val url = base.newBuilder()
+            .encodedPath("/coremail/mbox-data")
+            .query(null)
+            .fragment(null)
+            .apply { filename?.let(::addPathSegment) }
+            .addQueryParameter("part", part)
+            .addQueryParameter("mid", messageId)
+            .addQueryParameter("mode", "download")
+            .build()
+        return MailImageRequest(url, contentType, filename)
+    }
+
+    private fun HttpUrl.hasSameOrigin(other: HttpUrl): Boolean =
+        scheme == other.scheme && host == other.host && port == other.port
+
+    private fun inlineImageContentType(
+        responseContentType: String?,
+        attachmentContentType: String?,
+        filename: String?,
+    ): String? {
+        val responseType = normalizeMediaType(responseContentType)
+        if (responseType != null && responseType != "application/octet-stream" && !responseType.startsWith("image/")) {
+            return null
+        }
+        return responseType?.takeIf { it.startsWith("image/") }
+            ?: normalizeMediaType(attachmentContentType)?.takeIf { it.startsWith("image/") }
+            ?: URLConnection.guessContentTypeFromName(filename.orEmpty())?.lowercase()?.takeIf { it.startsWith("image/") }
+    }
+
+    private fun normalizeMediaType(value: String?): String? =
+        value?.substringBefore(';')?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+
+    private fun normalizeContentId(value: String?): String? =
+        value?.trim()?.trim('<', '>')?.lowercase()?.takeIf { it.isNotBlank() }
+
+    private data class MailImageRequest(
+        val url: HttpUrl,
+        val contentType: String?,
+        val filename: String?,
+    )
 
     suspend fun downloadAttachment(
         messageId: String,
@@ -589,6 +742,8 @@ class CoremailProvider(
             contentType = raw.text("contentType"),
             size = raw.firstInt("contentLength", "size", "estimateSize") ?: 0,
             part = raw.text("part") ?: attachmentId,
+            contentId = raw.firstText("contentId", "contentID", "cid", "content-id")
+                ?.trim()?.trim('<', '>'),
         )
     }
 
@@ -697,6 +852,7 @@ class CoremailProvider(
         const val COREMAIL_CHUNK_SIZE = 2 * 1024 * 1024
         const val COREMAIL_TRASH_FOLDER_ID = 4
         const val COREMAIL_JSON_CONTENT_TYPE = "text/x-json; tz=\"Asia/Shanghai\""
+        private val INLINE_IMAGE_QUERY_PARAMETERS = setOf("part", "mid", "mode")
     }
 }
 

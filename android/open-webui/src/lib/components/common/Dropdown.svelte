@@ -23,6 +23,8 @@
 	/** Side offset in px */
 	export let sideOffset = 4;
 
+	export let zIndex = 9999;
+
 	let triggerEl;
 	let contentEl;
 
@@ -58,7 +60,7 @@
 		const rect = triggerEl.getBoundingClientRect();
 
 		contentEl.style.position = 'fixed';
-		contentEl.style.zIndex = '9999';
+		contentEl.style.zIndex = String(zIndex);
 
 		const contentHeight = contentEl.offsetHeight || 0;
 		const spaceBelow = window.innerHeight - rect.bottom - sideOffset;

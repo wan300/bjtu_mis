@@ -85,6 +85,7 @@ import cn.edu.bjtu.mis.model.ZhixingLoginOutcome
 import cn.edu.bjtu.mis.model.ZhixingLoginStatus
 import cn.edu.bjtu.mis.model.ZhixingSearchData
 import cn.edu.bjtu.mis.model.ZhixingThreadDetail
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
@@ -449,6 +450,21 @@ class ModuleRepository(
     private val sessionManager: SessionManager,
     private val singleFlight: SingleFlight = SingleFlight(),
 ) {
+    suspend fun calendarDashboard(strategy: ModuleLoadStrategy): CalendarDashboard {
+        suspend fun <T> optionalItems(load: suspend () -> List<T>): List<T> = try {
+            load()
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            emptyList()
+        }
+        return CalendarDashboard(
+            calendarEnvelope = calendar(strategy = strategy),
+            homework = optionalItems { homework("all", strategy).data.items },
+            exams = optionalItems { exams(strategy = strategy).data.items },
+            todos = userTodos(),
+        )
+    }
+
     suspend fun profile(
         strategy: ModuleLoadStrategy = ModuleLoadStrategy.NetworkFirst,
     ): ModuleEnvelope<StudentProfileData> =
@@ -1078,44 +1094,39 @@ class CourseReplayRepository(
 
 class EmploymentConsultationRepository(
     private val syncRepository: SyncRepository,
-    private val client: BjtuHttpClient,
+    private val provider: EmploymentConsultationProvider,
 ) {
+    constructor(syncRepository: SyncRepository, client: BjtuHttpClient) :
+        this(syncRepository, EmploymentConsultationProvider(client))
+
     suspend fun home(
-        forceRefresh: Boolean = false,
-        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
-    ): ModuleEnvelope<EmploymentConsultationData> {
-        if (strategy == ModuleLoadStrategy.CacheOnly) {
-            return syncRepository.snapshot<EmploymentConsultationData>(ModuleKeys.EmploymentConsultation)
-                ?: throw LocalSnapshotMissingException(ModuleKeys.EmploymentConsultation)
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.CacheFirst,
+    ): ModuleEnvelope<EmploymentConsultationData> =
+        loadSnapshot(ModuleKeys.EmploymentConsultation, strategy) { provider.fetchConsultationHome() }
+
+    private suspend inline fun <reified T> loadSnapshot(
+        key: String,
+        strategy: ModuleLoadStrategy,
+        fetch: () -> ModuleEnvelope<T>,
+    ): ModuleEnvelope<T> {
+        if (strategy != ModuleLoadStrategy.NetworkFirst) {
+            syncRepository.snapshot<T>(key)?.let { return it }
+            if (strategy == ModuleLoadStrategy.CacheOnly) throw LocalSnapshotMissingException(key)
         }
-        if (!forceRefresh && strategy == ModuleLoadStrategy.CacheFirst) {
-            syncRepository.snapshot<EmploymentConsultationData>(ModuleKeys.EmploymentConsultation)?.let { return it }
-        }
-        return runCatching {
-            val envelope = EmploymentConsultationProvider(client).fetchConsultationHome().copy(syncedAt = nowIso())
-            syncRepository.saveSnapshot(ModuleKeys.EmploymentConsultation, envelope)
-            envelope
-        }.getOrElse { error ->
-            syncRepository.snapshot<EmploymentConsultationData>(ModuleKeys.EmploymentConsultation)
-                ?: throw error
+        return try {
+            fetch().copy(syncedAt = nowIso()).also { syncRepository.saveSnapshot(key, it) }
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            syncRepository.snapshot<T>(key) ?: throw error
         }
     }
 
-    suspend fun article(articleId: String): ModuleEnvelope<EmploymentArticleDetail> {
-        val key = articleSnapshotKey(articleId)
-        return runCatching {
-            val envelope = EmploymentConsultationProvider(client).fetchArticle(articleId).copy(syncedAt = nowIso())
-            syncRepository.saveSnapshot(key, envelope)
-            envelope
-        }.getOrElse { error ->
-            syncRepository.snapshot<EmploymentArticleDetail>(key) ?: throw error
-        }
-    }
+    suspend fun article(articleId: String): ModuleEnvelope<EmploymentArticleDetail> =
+        loadSnapshot(articleSnapshotKey(articleId), ModuleLoadStrategy.NetworkFirst) { provider.fetchArticle(articleId) }
 
     suspend fun infoPage(
         query: EmploymentInfoQuery,
-        forceRefresh: Boolean = false,
-        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.CacheFirst,
     ): ModuleEnvelope<EmploymentInfoPage> {
         val normalizedQuery = query.copy(
             pageNo = query.pageNo.coerceAtLeast(1),
@@ -1128,49 +1139,24 @@ class EmploymentConsultationRepository(
             industry = query.industry.trim(),
             industryLabel = query.industryLabel.trim(),
         )
-        val key = infoPageSnapshotKey(normalizedQuery)
-        if (strategy == ModuleLoadStrategy.CacheOnly) {
-            return syncRepository.snapshot<EmploymentInfoPage>(key) ?: throw LocalSnapshotMissingException(key)
-        }
-        if (!forceRefresh && strategy == ModuleLoadStrategy.CacheFirst) {
-            syncRepository.snapshot<EmploymentInfoPage>(key)?.let { return it }
-        }
-        return runCatching {
-            val envelope = EmploymentConsultationProvider(client).fetchInfoPage(normalizedQuery).copy(syncedAt = nowIso())
-            syncRepository.saveSnapshot(key, envelope)
-            envelope
-        }.getOrElse { error ->
-            syncRepository.snapshot<EmploymentInfoPage>(key) ?: throw error
+        return loadSnapshot(infoPageSnapshotKey(normalizedQuery), strategy) {
+            provider.fetchInfoPage(normalizedQuery)
         }
     }
 
     suspend fun filterOptions(
-        forceRefresh: Boolean = false,
-        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
-    ): ModuleEnvelope<EmploymentFilterOptions> {
-        val key = "${ModuleKeys.EmploymentConsultation}:filters"
-        if (strategy == ModuleLoadStrategy.CacheOnly) {
-            return syncRepository.snapshot<EmploymentFilterOptions>(key) ?: throw LocalSnapshotMissingException(key)
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.CacheFirst,
+    ): ModuleEnvelope<EmploymentFilterOptions> =
+        loadSnapshot("${ModuleKeys.EmploymentConsultation}:filters", strategy) {
+            provider.fetchFilterOptions()
         }
-        if (!forceRefresh && strategy == ModuleLoadStrategy.CacheFirst) {
-            syncRepository.snapshot<EmploymentFilterOptions>(key)?.let { return it }
-        }
-        return runCatching {
-            val envelope = EmploymentConsultationProvider(client).fetchFilterOptions().copy(syncedAt = nowIso())
-            syncRepository.saveSnapshot(key, envelope)
-            envelope
-        }.getOrElse { error ->
-            syncRepository.snapshot<EmploymentFilterOptions>(key) ?: throw error
-        }
-    }
 
     suspend fun cityOptions(parentId: String): ModuleEnvelope<List<EmploymentFilterOption>> =
-        EmploymentConsultationProvider(client).fetchCityOptions(parentId).copy(syncedAt = nowIso())
+        provider.fetchCityOptions(parentId).copy(syncedAt = nowIso())
 
     suspend fun calendarEvents(
         pageSize: Int = 50,
-        forceRefresh: Boolean = false,
-        strategy: ModuleLoadStrategy = if (forceRefresh) ModuleLoadStrategy.NetworkFirst else ModuleLoadStrategy.CacheFirst,
+        strategy: ModuleLoadStrategy = ModuleLoadStrategy.CacheFirst,
     ): List<EmploymentCalendarEvent> {
         val normalizedPageSize = pageSize.coerceAtLeast(1)
         val items = listOf(
@@ -1183,7 +1169,6 @@ class EmploymentConsultationRepository(
                     pageNo = 1,
                     pageSize = normalizedPageSize,
                 ),
-                forceRefresh = forceRefresh,
                 strategy = strategy,
             ).data.items
         }
@@ -1193,16 +1178,10 @@ class EmploymentConsultationRepository(
     suspend fun infoDetail(
         type: EmploymentSectionType,
         itemId: String,
-    ): ModuleEnvelope<EmploymentInfoDetail> {
-        val key = infoDetailSnapshotKey(type, itemId)
-        return runCatching {
-            val envelope = EmploymentConsultationProvider(client).fetchInfoDetail(type, itemId).copy(syncedAt = nowIso())
-            syncRepository.saveSnapshot(key, envelope)
-            envelope
-        }.getOrElse { error ->
-            syncRepository.snapshot<EmploymentInfoDetail>(key) ?: throw error
+    ): ModuleEnvelope<EmploymentInfoDetail> =
+        loadSnapshot(infoDetailSnapshotKey(type, itemId), ModuleLoadStrategy.NetworkFirst) {
+            provider.fetchInfoDetail(type, itemId)
         }
-    }
 
     private fun articleSnapshotKey(articleId: String): String =
         "${ModuleKeys.EmploymentConsultation}:article:${articleId.trim()}"
@@ -1436,9 +1415,17 @@ class MailRepository(
             }
         }
 
-    suspend fun detail(messageId: String, mboxa: String = ""): ModuleEnvelope<MailMessageDetail> =
+    suspend fun detail(
+        messageId: String,
+        mboxa: String = "",
+        hydrateInlineImages: Boolean = false,
+    ): ModuleEnvelope<MailMessageDetail> =
         sessionManager.withAuthenticatedClient {
-            CoremailProvider(it).fetchMessageDetail(messageId = messageId, mboxa = mboxa)
+            CoremailProvider(it).let { provider ->
+                provider.fetchMessageDetail(messageId = messageId, mboxa = mboxa).let { envelope ->
+                    if (hydrateInlineImages) provider.hydrateInlineImages(envelope) else envelope
+                }
+            }
         }.copy(syncedAt = nowIso())
 
     suspend fun delete(messageIds: List<String>, mboxa: String = ""): MailDeleteResponse =

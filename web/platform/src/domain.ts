@@ -27,18 +27,25 @@ export function parseGitHubRepositoryUrl(value: string): GitHubRepositoryRef {
 
 export function compareSemVer(left: string, right: string): number {
   const parse = (value: string) => {
-    const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(value);
-    if (!match) throw new Error(`Invalid semantic version: ${value}`);
+    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value);
+    const prerelease = match?.[4]?.split('.') ?? [];
+    if (!match || prerelease.some((part) => /^0\d+$/.test(part))) {
+      throw new Error(`Invalid semantic version: ${value}`);
+    }
     return {
-      core: [Number(match[1]), Number(match[2]), Number(match[3])] as const,
-      prerelease: match[4]?.split('.') ?? []
+      core: [match[1]!, match[2]!, match[3]!],
+      prerelease
     };
   };
+  const compareText = (a: string, b: string) => a === b ? 0 : a < b ? -1 : 1;
+  // Numeric identifiers have no leading zeroes, so length preserves arbitrary precision.
+  const compareNumeric = (a: string, b: string) =>
+    Math.sign(a.length - b.length) || compareText(a, b);
   const a = parse(left);
   const b = parse(right);
   for (let index = 0; index < 3; index += 1) {
-    const difference = (a.core[index] ?? 0) - (b.core[index] ?? 0);
-    if (difference) return Math.sign(difference);
+    const difference = compareNumeric(a.core[index]!, b.core[index]!);
+    if (difference) return difference;
   }
   if (!a.prerelease.length && !b.prerelease.length) return 0;
   if (!a.prerelease.length) return 1;
@@ -49,12 +56,12 @@ export function compareSemVer(left: string, right: string): number {
     if (x === undefined) return -1;
     if (y === undefined) return 1;
     if (x === y) continue;
-    const xNumber = /^\d+$/.test(x) ? Number(x) : null;
-    const yNumber = /^\d+$/.test(y) ? Number(y) : null;
-    if (xNumber !== null && yNumber !== null) return Math.sign(xNumber - yNumber);
-    if (xNumber !== null) return -1;
-    if (yNumber !== null) return 1;
-    return x.localeCompare(y);
+    const xNumeric = /^\d+$/.test(x);
+    const yNumeric = /^\d+$/.test(y);
+    if (xNumeric && yNumeric) return compareNumeric(x, y);
+    if (xNumeric) return -1;
+    if (yNumeric) return 1;
+    return compareText(x, y);
   }
   return 0;
 }

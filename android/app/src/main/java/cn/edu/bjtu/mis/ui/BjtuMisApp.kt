@@ -251,6 +251,7 @@ fun BjtuMisApp(
                             snackbarHostState.showSnackbar(
                                 message = message,
                                 actionLabel = "撤销",
+                                withDismissAction = true,
                             )
                         } == SnackbarResult.ActionPerformed
                     },

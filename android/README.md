@@ -6,6 +6,14 @@
 
 项目原则以仓库根目录 `.specify/memory/constitution.md` 为权威来源；本 README 只记录 Android 工程事实、命令和关键路径。
 
+## 代码组织
+
+主要模块页面按功能放在 `ui/screens/` 的 `ProfileScreens.kt`、`TimetableScreen.kt`、
+`ScoresScreen.kt`、`CalendarScreen.kt`、`HomeworkScreen.kt` 和 `EmptyRoomsScreen.kt` 等文件中。
+共享加载组件位于 `ModuleScreenComponents.kt`，日历展示计算位于 `CalendarPresentation.kt`；
+日历数据聚合由 `ModuleRepository.calendarDashboard` 负责。就业仓库以 `ModuleLoadStrategy`
+作为唯一缓存策略参数。Open WebUI Agent 的必填字段从当前工具 schema 派生。
+
 ## 打开工程
 
 1. 用 Android Studio 打开 `android/`。
@@ -19,7 +27,8 @@
 .\gradlew.bat assembleDebug
 ```
 
-正式版本当前为 `v1.4.1`（`versionCode = 8`）。构建 Release 前，将
+正式版本当前为 `v1.4.2`（`versionCode = 9`），更新内容见
+[v1.4.2 更新说明](../docs/release-notes-v1.4.2.md)。构建 Release 前，将
 `release-signing.properties.example` 复制为本机的 `release-signing.properties`，
 并填写 `v1.3.1` 使用的原 keystore、alias 和口令：
 

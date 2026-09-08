@@ -15,11 +15,14 @@ import cn.edu.bjtu.mis.data.db.UserTodoEntity
 import cn.edu.bjtu.mis.data.network.AppCookieJar
 import cn.edu.bjtu.mis.data.network.BjtuHttpClient
 import cn.edu.bjtu.mis.data.provider.SessionEndpoints
+import cn.edu.bjtu.mis.data.provider.EmploymentConsultationProvider
 import cn.edu.bjtu.mis.data.provider.SessionManager
 import cn.edu.bjtu.mis.data.security.CredentialStore
 import cn.edu.bjtu.mis.data.security.LoginCredentials
 import cn.edu.bjtu.mis.data.security.SessionCookieStore
 import cn.edu.bjtu.mis.model.CalendarData
+import cn.edu.bjtu.mis.model.EmploymentFilterOptions
+import cn.edu.bjtu.mis.model.EmploymentConsultationData
 import cn.edu.bjtu.mis.model.CoverageLevel
 import cn.edu.bjtu.mis.model.CourseResourcesData
 import cn.edu.bjtu.mis.model.HomeworkData
@@ -34,12 +37,70 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.MockResponse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RepositoryLoadStrategyTest {
+    @Test
+    fun employmentStrategiesShareCacheAndNetworkFallback() = runBlocking {
+        MockWebServer().use { server ->
+            val sync = SyncRepository(FakeBjtuMisDao(), sessionManager(server))
+            val repository = EmploymentConsultationRepository(
+                sync, EmploymentConsultationProvider(BjtuHttpClient(AppCookieJar()), server.url("/").toString().trimEnd('/')),
+            )
+            val home = ModuleEnvelope(
+                module = ModuleKeys.EmploymentConsultation, sourceSystem = "test",
+                coverage = CoverageLevel.Verified,
+                data = EmploymentConsultationData(appointmentUrl = "https://example.com/appointment", sourceUrl = "https://example.com"),
+            )
+            sync.saveSnapshot(ModuleKeys.EmploymentConsultation, home)
+            assertEquals(home.data, repository.home(ModuleLoadStrategy.CacheOnly).data)
+            assertEquals(home.data, repository.home(ModuleLoadStrategy.CacheFirst).data)
+            val missing = runCatching { repository.filterOptions(ModuleLoadStrategy.CacheOnly) }.exceptionOrNull()
+            assertTrue(missing is LocalSnapshotMissingException)
+            assertEquals(0, server.requestCount)
+
+            server.enqueue(MockResponse().setResponseCode(503))
+            assertEquals(home.data, repository.home(ModuleLoadStrategy.NetworkFirst).data)
+            assertEquals(1, server.requestCount)
+
+            val filtersKey = "${ModuleKeys.EmploymentConsultation}:filters"
+            server.enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody("""{"state":1,"data":"TOKEN"}"""))
+            server.enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody("""{"state":1,"data":{}}"""))
+            val filters = repository.filterOptions(ModuleLoadStrategy.CacheFirst)
+            assertEquals(3, server.requestCount)
+            assertEquals(filters, sync.snapshot<EmploymentFilterOptions>(filtersKey))
+            assertEquals(filters, repository.filterOptions(ModuleLoadStrategy.CacheOnly))
+            assertEquals(filters, repository.filterOptions(ModuleLoadStrategy.CacheFirst))
+            assertEquals(3, server.requestCount)
+        }
+    }
+
+    @Test
+    fun calendarDashboardCombinesSnapshotsAndKeepsMissingOptionalModulesEmpty() = runBlocking {
+        MockWebServer().use { server ->
+            val sync = SyncRepository(FakeBjtuMisDao(), sessionManager(server))
+            sync.saveSnapshot(ModuleKeys.Calendar, ModuleEnvelope(
+                module = ModuleKeys.Calendar, sourceSystem = "test", coverage = CoverageLevel.Verified,
+                sourceParams = buildJsonObject { put("month", java.time.YearMonth.now().toString()) },
+                data = CalendarData(month = java.time.YearMonth.now().toString(), currentWeek = "8"),
+            ))
+            val repository = ModuleRepository(sync, sessionManager(server))
+            val empty = repository.calendarDashboard(ModuleLoadStrategy.CacheOnly)
+            assertEquals("8", empty.calendarEnvelope.data.currentWeek)
+            assertTrue(empty.homework.isEmpty())
+            assertTrue(empty.exams.isEmpty())
+            val item = homework(1, "Lab", "2026-06-30 23:59")
+            sync.saveSnapshot(ModuleKeys.Homework, homeworkEnvelope(item))
+            val populated = repository.calendarDashboard(ModuleLoadStrategy.CacheOnly)
+            assertEquals(listOf(item), populated.homework)
+            assertEquals(0, server.requestCount)
+        }
+    }
+
     @Test
     fun saveSnapshotStoresAndReplacesUpdateSummary() = runBlocking {
         MockWebServer().use { server ->

@@ -87,6 +87,59 @@ function config() {
   };
 }
 
+test('frozen v1/v2 write routes keep their 410 responses without database work', async (t) => {
+  const database = {
+    query: async () => { throw new Error('Frozen routes must not reach the database'); },
+    end: async () => undefined
+  } as unknown as Database;
+  const server = await buildServer({ db: database, config: config() });
+  t.after(() => server.close());
+  const paths = [
+    '/submissions', '/plugins/example/revalidate', '/plugins/example/unpublish',
+    '/plugins/example/reports', '/admin/plugins/example/unpublish',
+    '/admin/plugins/example/restore', '/admin/reports/example/resolve',
+    '/admin/plugins/example/publisher-transfer/approve',
+    '/admin/plugins/example/publisher-transfer/reject'
+  ];
+  for (const version of [1, 2]) {
+    for (const route of paths) {
+      const response = await server.inject({ method: 'POST', url: `/api/v${version}${route}`, payload: {} });
+      assert.equal(response.statusCode, 410, `v${version}${route}`);
+      assert.equal(response.json().error.code, version === 1 ? 'legacy_api_read_only' : 'legacy_catalog_read_only');
+    }
+  }
+});
+
+test('v3 report resolution preserves status, response and missing-report behavior', async (t) => {
+  const updates: unknown[][] = [];
+  const database = {
+    query: async (sql: string, params: unknown[]) => {
+      if (sql.includes('FROM sessions')) return { rows: [{ user_id: 'user-1', csrf_token: 'csrf' }], rowCount: 1 };
+      if (sql.includes('FROM users')) return { rows: [{ id: 'user-1', github_id: 'admin-1' }], rowCount: 1 };
+      assert.ok(sql.startsWith('UPDATE reports SET status='));
+      updates.push(params);
+      return { rows: [], rowCount: params[0] === 'missing' ? 0 : 1 };
+    },
+    end: async () => undefined
+  } as unknown as Database;
+  const settings = config();
+  settings.adminGithubIds.add('admin-1');
+  const server = await buildServer({ db: database, config: settings });
+  t.after(() => server.close());
+  for (const [id, status, expectedCode] of [
+    ['report-1', 'dismissed', 200], ['report-2', 'resolved', 200], ['missing', 'resolved', 404]
+  ] as const) {
+    const response = await server.inject({
+      method: 'POST', url: `/api/v3/admin/reports/${id}/resolve`,
+      headers: { cookie: 'test_session=session-1', 'x-csrf-token': 'csrf' }, payload: { status }
+    });
+    assert.equal(response.statusCode, expectedCode);
+    if (expectedCode === 200) assert.deepEqual(response.json(), { apiVersion: 3, ok: true });
+    else assert.equal(response.json().error.code, 'report_not_found');
+  }
+  assert.deepEqual(updates, [['report-1', 'dismissed'], ['report-2', 'resolved'], ['missing', 'resolved']]);
+});
+
 test('v3 catalog exposes contract profile, derived floor and separate marketplace', async (t) => {
   const queries: string[] = [];
   const database = {

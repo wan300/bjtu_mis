@@ -39,6 +39,7 @@
 	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
 
 	import ModelItem from './ModelItem.svelte';
+	import { MODEL_SELECTOR_LAYER } from './layers';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -442,6 +443,7 @@
 	let deleteModelTarget: any = null;
 
 	const deleteModelHandler = async (model: any) => {
+		show = false;
 		deleteModelTarget = model;
 		showDeleteConfirm = true;
 	};
@@ -548,7 +550,8 @@
 		<div
 			use:portal
 			bind:this={contentElement}
-			style="position: fixed; z-index: 9999; top: {dropdownPosition.top}px; left: {dropdownPosition.left}px;{$mobile
+			data-agent-model-selector="true"
+			style="position: fixed; z-index: {MODEL_SELECTOR_LAYER}; top: {dropdownPosition.top}px; left: {dropdownPosition.left}px;{$mobile
 				? ` width: ${dropdownPosition.width}px;`
 				: ''}"
 		>

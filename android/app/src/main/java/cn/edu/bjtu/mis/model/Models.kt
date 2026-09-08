@@ -580,6 +580,7 @@ data class MailAttachment(
     val contentType: String? = null,
     val size: Int = 0,
     val part: String,
+    val contentId: String? = null,
 )
 
 @Serializable

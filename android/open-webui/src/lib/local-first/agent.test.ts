@@ -237,6 +237,70 @@ beforeEach(() => {
 });
 
 describe('requestLocalAgentChatCompletion', () => {
+	it.each(['agent_dynamic_lookup', 'agent_file_read'])(
+		'uses the advertised required fields for %s',
+		async (toolName) => {
+			vi.mocked(supportsNativeAgentTools).mockReturnValue(true);
+			vi.mocked(listNativeAgentTools).mockResolvedValue([
+				{
+					type: 'function',
+					requiresWorkspace: true,
+					function: {
+						name: toolName,
+						description: 'Lookup by the current schema.',
+						parameters: {
+							type: 'object',
+							properties: { recordId: { type: 'string' }, enabled: { type: 'boolean' } },
+							required: ['recordId', 'enabled']
+						}
+					}
+				}
+			]);
+			vi.mocked(executeNativeAgentTool).mockResolvedValue({ output: { ok: true } });
+			const requests: Record<string, any>[] = [];
+			const requestProvider = vi.fn(async (providerBody: Record<string, any>) => {
+				requests.push(structuredClone(providerBody));
+				const message =
+					requests.length <= 2
+						? {
+								role: 'assistant',
+								content: null,
+								tool_calls: [
+									{
+										id: `call_${requests.length}`,
+										type: 'function',
+										function: {
+											name: toolName,
+											arguments: JSON.stringify(
+												requests.length === 1
+													? { enabled: false }
+													: { recordId: 'record-1', enabled: false }
+											)
+										}
+									}
+								]
+							}
+						: { role: 'assistant', content: 'Done.' };
+				return [providerJsonResponse(message), new AbortController()] as [
+					Response,
+					AbortController
+				];
+			});
+			await requestLocalAgentChatCompletion({
+				body: reviewDisabledBody({ params: { agent_workspace_id: 'workspace-1' } }),
+				providerBody: baseProviderBody(),
+				requestProvider
+			});
+			expect(JSON.parse(requests[1].messages.at(-1).content).missing).toEqual(['recordId']);
+			expect(executeNativeAgentTool).toHaveBeenCalledTimes(1);
+			expect(executeNativeAgentTool).toHaveBeenCalledWith({
+				workspaceId: 'workspace-1',
+				toolName,
+				arguments: { recordId: 'record-1', enabled: false }
+			});
+		}
+	);
+
 	it('uses the local agent loop when a native Agent workspace id is present', () => {
 		expect(shouldUseLocalAgentLoop({ params: { agent_workspace_id: 'workspace-1' } })).toBe(true);
 	});

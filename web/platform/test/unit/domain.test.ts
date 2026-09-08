@@ -28,6 +28,30 @@ test('compares semantic versions including prereleases', () => {
   assert.equal(compareSemVer('1.2.0+build.1', '1.2.0+build.2'), 0);
 });
 
+test('orders SemVer identifiers by ASCII and without numeric precision loss', () => {
+  const orderedPairs = [
+    ['1.0.0-B', '1.0.0-a'],
+    ['1.0.0-alpha.9007199254740992', '1.0.0-alpha.9007199254740993'],
+    ['9007199254740992.0.0', '9007199254740993.0.0'],
+    ['1.0.0-9', '1.0.0-10'],
+    ['1.0.0-10', '1.0.0-A'],
+    ['1.0.0-alpha', '1.0.0-alpha.1'],
+    ['1.0.0-alpha.1', '1.0.0-alpha.beta'],
+    ['1.0.0-beta.11', '1.0.0-rc.1']
+  ];
+  for (const [left, right] of orderedPairs) {
+    assert.equal(compareSemVer(left!, right!), -1, `${left} < ${right}`);
+    assert.equal(compareSemVer(right!, left!), 1, `${right} > ${left}`);
+    assert.equal(compareSemVer(left!, left!), 0);
+  }
+});
+
+test('rejects invalid SemVer identifiers', () => {
+  for (const version of ['01.0.0', '1.0.0-01', '1.0.0-alpha..1', '1.0.0+build..1', '1.0.0-']) {
+    assert.throws(() => compareSemVer(version, '1.0.0'), /Invalid semantic version/);
+  }
+});
+
 test('encrypts OAuth tokens with authenticated encryption', () => {
   const key = randomBytes(32);
   const encrypted = encryptSecret('github-token', key);

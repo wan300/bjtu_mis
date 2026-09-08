@@ -137,7 +137,7 @@ fun MailScreen(
         detailMessage = message
         detailState = LoadState.Loading
         scope.launch {
-            runCatching { repository.detail(message.messageId) }
+            runCatching { repository.detail(message.messageId, hydrateInlineImages = true) }
                 .onSuccess { detailState = LoadState.Data(it) }
                 .onFailure { detailState = LoadState.Error(it.message ?: "加载邮件详情失败") }
         }

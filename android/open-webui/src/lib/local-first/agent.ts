@@ -207,6 +207,7 @@ const contentToText = (content: unknown): string => {
 };
 
 type LocalAgentRunContext = {
+	toolParameters: Map<string, JsonRecord>;
 	webSearchEnabled: boolean;
 	webSearchSettings: LocalWebSearchSettings;
 	sources: JsonRecord[];
@@ -663,30 +664,16 @@ const AGENT_TOOL_ARGUMENT_EXAMPLES: Record<string, JsonRecord> = {
 	agent_package_results: { finalAnswer: 'Final answer markdown.' }
 };
 
-const REQUIRED_AGENT_TOOL_ARGUMENTS: Record<string, string[]> = {
-	agent_file_list: ['path'],
-	agent_file_read: ['path'],
-	agent_file_write: ['path', 'content'],
-	agent_file_delete: ['path'],
-	agent_archive_extract: ['archivePath', 'targetDir'],
-	agent_archive_create_zip: ['sourceDir', 'zipPath'],
-	agent_document_extract_pdf: ['path', 'outputPath'],
-	agent_document_extract_docx: ['path', 'outputPath'],
-	agent_document_generate_pdf: ['title', 'contentMarkdown', 'outputPath'],
-	agent_document_generate_docx: ['title', 'contentMarkdown', 'outputPath'],
-	agent_run_javascript: ['code']
-};
-
-const missingAgentToolArguments = (toolName: string, args: JsonRecord) => {
-	const required = REQUIRED_AGENT_TOOL_ARGUMENTS[toolName] ?? [];
-	return required.filter((key) => {
+const missingToolArguments = (parameters: JsonRecord | undefined, args: JsonRecord): string[] => {
+	const required: unknown[] = Array.isArray(parameters?.required) ? parameters.required : [];
+	return required.filter((key): key is string => {
+		if (typeof key !== 'string') return false;
 		const value = args[key];
 		return typeof value === 'string' ? !value.trim() : value === undefined || value === null;
 	});
 };
 
-const buildToolArgumentError = (toolName: string, error: unknown, args?: JsonRecord) => {
-	const missing = args ? missingAgentToolArguments(toolName, args) : [];
+const buildToolArgumentError = (toolName: string, error: unknown, missing: string[] = []) => {
 	const example = AGENT_TOOL_ARGUMENT_EXAMPLES[toolName];
 	const output: JsonRecord = {
 		error: getErrorMessage(error),
@@ -1150,13 +1137,13 @@ const runToolCall = async (
 
 	try {
 		const args = parseToolArguments(toolCall);
-		const missing = missingAgentToolArguments(toolCall.function.name, args);
+		const missing = missingToolArguments(context?.toolParameters.get(toolCall.function.name), args);
 		if (missing.length > 0) {
 			content = jsonString(
 				buildToolArgumentError(
 					toolCall.function.name,
 					`Missing required argument(s): ${missing.join(', ')}`,
-					args
+					missing
 				)
 			);
 		} else if (
@@ -1530,6 +1517,7 @@ export const requestLocalAgentChatCompletion = async ({
 			: null;
 	const webSearchFallbackEnabled = webSearchEnabled && !agentWorkspaceId;
 	const context: LocalAgentRunContext = {
+		toolParameters: new Map(),
 		webSearchEnabled,
 		webSearchSettings: normalizeLocalWebSearchSettings(localSettings?.localWebSearch ?? {}),
 		sources: [],
@@ -1564,7 +1552,12 @@ export const requestLocalAgentChatCompletion = async ({
 		)
 		.map(toProviderTool);
 	const availableToolNames = new Set(
-		tools.map((tool) => tool.function.name).filter((name): name is string => typeof name === 'string')
+		tools
+			.map((tool) => tool.function.name)
+			.filter((name): name is string => typeof name === 'string')
+	);
+	context.toolParameters = new Map(
+		tools.map((tool) => [tool.function.name, tool.function.parameters])
 	);
 	const agentBody = {
 		...providerBody,

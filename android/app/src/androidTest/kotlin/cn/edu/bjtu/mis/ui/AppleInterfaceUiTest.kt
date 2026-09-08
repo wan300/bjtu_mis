@@ -74,6 +74,7 @@ class AppleInterfaceUiTest {
                                             snackbarHostState.showSnackbar(
                                                 message = message,
                                                 actionLabel = "撤销",
+                                                withDismissAction = true,
                                             ) == SnackbarResult.ActionPerformed
                                         },
                                     )
@@ -98,6 +99,62 @@ class AppleInterfaceUiTest {
         composeRule.onNodeWithText("撤销").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("ui-style-classic").assertIsSelected()
+    }
+
+    @Test
+    fun themeSelectionSnackbarCanBeDismissedWithoutUndo() {
+        composeRule.setContent {
+            var appearance by remember {
+                mutableStateOf(AppAppearancePreferences(uiStyle = AppUiStyle.Classic))
+            }
+            val snackbarHostState = remember { SnackbarHostState() }
+            val scope = rememberCoroutineScope()
+            BjtuMisTheme(
+                themeOption = appearance.theme,
+                appearance = appearance,
+            ) {
+                Scaffold(
+                    snackbarHost = { SnackbarHost(snackbarHostState) },
+                ) { padding ->
+                    Box(Modifier.fillMaxSize().padding(padding)) {
+                        ProfileThemeScreen(
+                            appearance = appearance,
+                            onThemeSelected = { appearance = appearance.copy(theme = it) },
+                            onUiStyleSelected = { nextStyle ->
+                                val previous = appearance
+                                scope.launch {
+                                    applyUiStyleChangeWithUndo(
+                                        previousAppearance = previous,
+                                        nextStyle = nextStyle,
+                                        onPreview = { appearance = it },
+                                        persist = {},
+                                        showUndo = { message ->
+                                            snackbarHostState.showSnackbar(
+                                                message = message,
+                                                actionLabel = "撤销",
+                                                withDismissAction = true,
+                                            ) == SnackbarResult.ActionPerformed
+                                        },
+                                    )
+                                }
+                            },
+                            onReduceMotionSelected = {
+                                appearance = appearance.copy(reduceMotionOverride = it)
+                            },
+                            onReduceTransparencySelected = {
+                                appearance = appearance.copy(reduceTransparencyOverride = it)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("ui-style-apple").performClick()
+        composeRule.onNodeWithContentDescription("关闭").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("ui-style-apple").assertIsSelected()
+        composeRule.onNodeWithText("已切换到 Apple 风格界面").assertDoesNotExist()
     }
 
     @Test

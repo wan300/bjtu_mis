@@ -14,6 +14,7 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -69,6 +70,13 @@ class BjtuHttpClient(
             chain.proceed(request)
         }
         .build()
+
+    private val noRedirectClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+    }
 
     suspend fun getText(
         url: String,
@@ -169,19 +177,28 @@ class BjtuHttpClient(
         params: Map<String, String?> = emptyMap(),
         headers: Map<String, String> = emptyMap(),
         timeoutMillis: Long? = null,
+        maxBytes: Long? = null,
+        followRedirects: Boolean = true,
+        onBytesRead: ((Long) -> Unit)? = null,
     ): BytesResponse = withContext(Dispatchers.IO) {
+        require(maxBytes == null || maxBytes >= 0L) { "maxBytes must not be negative" }
         val request = Request.Builder()
             .url(buildUrl(url, params))
             .headers(headers.toHeaders())
             .get()
             .build()
-        val response = executeCall(request, timeoutMillis)
+        val response = executeCall(request, timeoutMillis, followRedirects)
         response.use {
             if (!it.isSuccessful) throw IOException("HTTP ${it.code} for ${it.request.url}")
+            val body = it.body ?: throw IOException("Empty response body for ${it.request.url}")
+            val contentLength = body.contentLength()
+            if (maxBytes != null && contentLength >= 0L && contentLength > maxBytes) {
+                throw IOException("Response body exceeds ${maxBytes} bytes for ${it.request.url}")
+            }
             BytesResponse(
                 url = it.request.url.toString(),
                 code = it.code,
-                body = it.body?.bytes() ?: ByteArray(0),
+                body = body.readBytes(maxBytes, onBytesRead),
                 headers = it.headers,
             )
         }
@@ -258,10 +275,11 @@ class BjtuHttpClient(
         }
     }
 
-    private fun executeCall(request: Request, timeoutMillis: Long? = null) =
+    private fun executeCall(request: Request, timeoutMillis: Long? = null, followRedirects: Boolean = true) =
         try {
             val startedAt = PerfTrace.nowMillis()
-            client.newCall(request).also { call ->
+            val transport = if (followRedirects) client else noRedirectClient
+            transport.newCall(request).also { call ->
                 timeoutMillis?.takeIf { it > 0 }?.let { call.timeout().timeout(it, TimeUnit.MILLISECONDS) }
             }.execute().also { response ->
                 PerfTrace.mark(
@@ -291,6 +309,29 @@ class BjtuHttpClient(
         Headers.Builder().also { builder ->
             forEach { (key, value) -> builder.add(key, value) }
         }.build()
+
+    private fun okhttp3.ResponseBody.readBytes(maxBytes: Long?, onBytesRead: ((Long) -> Unit)?): ByteArray {
+        if (maxBytes == null && onBytesRead == null) return bytes()
+        val output = ByteArrayOutputStream(minOf(maxBytes ?: 64 * 1024L, 64 * 1024L).toInt())
+        byteStream().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var total = 0L
+            while (true) {
+                // Read at most one extra byte to detect an oversized chunked body.
+                val readLimit = maxBytes?.let { minOf(buffer.size.toLong(), it - total) }?.toInt()
+                    ?: buffer.size
+                val read = input.read(buffer, 0, if (readLimit == 0) 1 else readLimit)
+                if (read < 0) break
+                total += read
+                onBytesRead?.invoke(read.toLong())
+                if (maxBytes != null && total > maxBytes) {
+                    throw IOException("Response body exceeds $maxBytes bytes")
+                }
+                output.write(buffer, 0, read)
+            }
+        }
+        return output.toByteArray()
+    }
 
     companion object {
         const val LIST_REQUEST_TIMEOUT_MILLIS = 15_000L
