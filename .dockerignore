@@ -21,6 +21,12 @@ web/assets/schemas/*
 
 docs/*
 !docs/third-party-service-manifest.schema.json
+!docs/bjtu-marketplace.schema.json
+
+plugin-tooling/*
+!plugin-tooling/contracts/
+plugin-tooling/contracts/*
+!plugin-tooling/contracts/capability-contracts.json
 
 tools/*
 !tools/third-party-service-lint.cjs

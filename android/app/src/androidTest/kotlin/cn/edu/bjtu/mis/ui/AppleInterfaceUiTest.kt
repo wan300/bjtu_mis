@@ -24,6 +24,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.test.platform.app.InstrumentationRegistry
 import cn.edu.bjtu.mis.model.ModuleKeys
 import cn.edu.bjtu.mis.ui.screens.CourseSelectionStartConfirmationDialog
 import cn.edu.bjtu.mis.ui.screens.DashboardAction
@@ -151,7 +152,9 @@ class AppleInterfaceUiTest {
         }
 
         composeRule.onNodeWithTag("ui-style-apple").performClick()
-        composeRule.onNodeWithContentDescription("关闭").performClick()
+        val dismissLabel = InstrumentationRegistry.getInstrumentation().targetContext
+            .getString(androidx.compose.material3.R.string.m3c_snackbar_dismiss)
+        composeRule.onNodeWithContentDescription(dismissLabel).performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("ui-style-apple").assertIsSelected()
         composeRule.onNodeWithText("已切换到 Apple 风格界面").assertDoesNotExist()
