@@ -4,11 +4,17 @@
   const fallbackReleases = [
     {
       tag_name: "v1.4.2",
-      html_url: "https://github.com/wan300/bjtu_mis_Android/releases/latest",
+      html_url: "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.4.2",
       prerelease: false,
-      published_at: "",
-      release_page_only: true,
-      assets: []
+      published_at: "2026-09-09T03:56:14Z",
+      assets: [
+        {
+          name: "BJTU-MIS-v1.4.2.apk",
+          size: 151663841,
+          browser_download_url:
+            "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.4.2/BJTU-MIS-v1.4.2.apk"
+        }
+      ]
     },
     {
       tag_name: "v1.3.1",
@@ -109,10 +115,10 @@
       ]
     }
   ];
-  const fallbackApk = "https://github.com/wan300/bjtu_mis_Android/releases/latest";
-  const fallbackRelease = "https://github.com/wan300/bjtu_mis_Android/releases/latest";
+  const fallbackApk = "https://github.com/wan300/bjtu_mis_Android/releases/download/v1.4.2/BJTU-MIS-v1.4.2.apk";
+  const fallbackRelease = "https://github.com/wan300/bjtu_mis_Android/releases/tag/v1.4.2";
   const fallbackTag = "v1.4.2";
-  const fallbackSizeText = "--";
+  const fallbackSizeText = "144.64 MB";
   const releaseRefreshInterval = 5 * 60 * 1000;
   const imageAssetQuery = "?v=2026062602";
 
